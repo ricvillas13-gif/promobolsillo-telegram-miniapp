@@ -333,10 +333,10 @@ export default function App() {
       <div className="shell">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="hero">
           <div>
-            <div className="eyebrow">PROMOBOLSILLO+ · TELEGRAM MINI APP</div>
-            <div className="heroTitle">Operación del promotor mejor que WhatsApp</div>
+            <div className="eyebrow">REZGO</div>
+            <div className="heroTitle">Operación del promotor</div>
             <div className="heroText">
-              Flujo guiado, captura estructurada, menos caos en chat y base lista para crecer.
+              Seguimiento operativo en campo.
             </div>
           </div>
 
@@ -395,7 +395,7 @@ export default function App() {
           <div className="sectionTop">
             <div>
               <div className="sectionTitle">Avance operativo del día</div>
-              <div className="sectionSub">Aquí puedes ver lo que en WhatsApp se pierde entre mensajes.</div>
+              <div className="sectionSub">Seguimiento visual de la actividad del día.</div>
             </div>
             <div className="progressPct">{Math.min(100, summary.openVisits * 35)}%</div>
           </div>
@@ -409,7 +409,7 @@ export default function App() {
             ["asistencia", "Asistencia"],
             ["evidencias", "Evidencias"],
             ["galeria", "Galería"],
-            ["mejoras", "Mejoras vs WhatsApp"],
+            ["mejoras", "Beneficios"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -603,16 +603,16 @@ export default function App() {
 
         {tab === "mejoras" && (
           <div className="card">
-            <div className="sectionTitle">Por qué esto mejora WhatsApp</div>
+            <div className="sectionTitle">Beneficios operativos</div>
             <div className="benefitsGrid">
               {[
-                ["Selección estructurada", "Ya no dependes de recordar comandos dentro de un chat largo."],
-                ["Captura guiada", "La evidencia queda ligada a visita, marca, tipo y fase."],
-                ["Menos errores", "Se evita enviar texto donde iba una foto o mezclar tiendas."],
-                ["Galería útil", "El promotor y luego el supervisor pueden revisar visualmente la carga."],
-                ["Escalabilidad", "La misma base se puede extender a supervisor, cliente y expediente."],
-                ["Control de imagen", "La Mini App puede controlar peso, compresión y orden de envío."],
-              ].map(([title, description]) => (
+  ["Selección estructurada", "La operación se registra con orden y consistencia."],
+  ["Captura guiada", "La evidencia queda ligada a visita, marca, tipo y fase."],
+  ["Menos errores", "Se reduce la mezcla de tiendas, visitas y capturas."],
+  ["Galería útil", "El promotor y el supervisor pueden revisar visualmente la carga."],
+  ["Escalabilidad", "La misma base puede crecer hacia supervisor, cliente y expediente."],
+  ["Control de imagen", "La Mini App puede controlar peso, compresión y orden de envío."],
+].map(([title, description]) => (
                 <div className="benefitCard" key={title}>
                   <div className="benefitTitle">{title}</div>
                   <div className="benefitDesc">{description}</div>
