@@ -203,9 +203,7 @@ function formatHourFromIso(iso: string) {
 export default function App() {
   const tg = getTelegramWebApp();
 
-  const [role, setRole] = useState<Role>("promotor");
-  const [promotorName, setPromotorName] = useState("Promotor");
-  const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<Role>("promotor");  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
 
@@ -247,9 +245,7 @@ export default function App() {
     }
 
     const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {}, 8000);
-    if (data?.role) setRole(data.role);
-    if (data?.profile?.nombre) setPromotorName(data.profile.nombre);
-  }
+    if (data?.role) setRole(data.role);  }
 
   async function loadRealDashboard() {
     if (role !== "promotor") return;
