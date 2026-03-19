@@ -6,9 +6,7 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   RefreshCw,
-  AlertTriangle,
-  ClipboardList,
-  UserCheck,
+  AlertTriangle,  UserCheck,
   ShieldAlert,
 } from "lucide-react";
 
