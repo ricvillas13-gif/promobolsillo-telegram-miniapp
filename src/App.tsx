@@ -6,7 +6,8 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   RefreshCw,
-  AlertTriangle,  UserCheck,
+  AlertTriangle,
+  UserCheck,
   ShieldAlert,
 } from "lucide-react";
 
@@ -207,7 +208,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
-  const [infoMsg, setInfoMsg] = useState("");
 
   const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
   const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
@@ -274,7 +274,6 @@ export default function App() {
       }
 
       setError("");
-      setInfoMsg("Operación conectada a datos reales.");
     } catch (_err) {
       setError("No se pudo cargar toda la operación real. Se muestra una vista local de referencia.");
     } finally {
@@ -286,7 +285,6 @@ export default function App() {
     try {
       setLoading(true);
       setError("");
-      setInfoMsg("");
       await loadBootstrap();
     } catch (_err) {
       setError("No se pudo validar la sesión en línea. Se muestra una vista local de referencia.");
@@ -394,11 +392,14 @@ export default function App() {
       <div className="shell">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="hero">
           <div className="heroLeft">
-            <div className="brandPlate">
-              <img src="/rezgo-horizontal.jpeg" alt="REZGO" className="brandLogo" />
+            <div className="brandRow">
+              <div className="brandPlate brandPlateSquare">
+                <img src="/rezgo-square.jpeg" alt="REZGO" className="brandIcon" />
+              </div>
+              <div className="brandWord">REZGO</div>
             </div>
             <div className="heroTitle">Operación del promotor</div>
-            <div className="heroText">Seguimiento operativo en campo</div>
+            <div className="heroText">Pasión por la movilidad</div>
           </div>
 
           <div className="badgeRow">
@@ -413,15 +414,6 @@ export default function App() {
             <div className="warningRow">
               <AlertTriangle size={18} />
               <span>{error}</span>
-            </div>
-          </div>
-        ) : null}
-
-        {infoMsg ? (
-          <div className="card infoCard">
-            <div className="infoRow">
-              <CheckCircle2 size={18} />
-              <span>{infoMsg}</span>
             </div>
           </div>
         ) : null}
@@ -509,19 +501,20 @@ export default function App() {
             <div className="twoCol">
               <div>
                 <div className="miniTitle">Selecciona tienda</div>
-                <div className="stack">
-                  {stores.map((store) => (
-                    <button
-                      key={store.tienda_id}
-                      onClick={() => setSelectedStoreId(store.tienda_id)}
-                      className={`listBtn ${selectedStoreId === store.tienda_id ? "listBtnSelected" : ""}`}
-                    >
-                      <div className="listTitle">{store.nombre_tienda}</div>
-                      <div className="listSub">
-                        {store.cadena} · {store.ciudad} · {store.cliente}
-                      </div>
-                    </button>
-                  ))}
+                <div className="panel">
+                  <label className="fieldLabel">Tienda</label>
+                  <select className="inputLike" value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)}>
+                    {stores.map((store) => (
+                      <option key={store.tienda_id} value={store.tienda_id}>
+                        {store.nombre_tienda} · {store.cadena}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="smallInfo" style={{ marginTop: 12 }}>
+                    Cliente: <strong>{stores.find((s) => s.tienda_id === selectedStoreId)?.cliente || "—"}</strong>
+                    <br />
+                    Ciudad: <strong>{stores.find((s) => s.tienda_id === selectedStoreId)?.ciudad || "—"}</strong>
+                  </div>
                 </div>
               </div>
 
@@ -606,7 +599,7 @@ export default function App() {
             <div className="benefitsGrid">
               {[
                 ["Datos reales", "La Mini App ya consume bootstrap, dashboard y galería desde backend."],
-                ["Mejor lectura", "La interfaz usa branding REZGO y una paleta más cercana a su identidad."],
+                ["Diseño REZGO", "La interfaz usa una paleta y composición más alineadas con la marca."],
                 ["Menos error operativo", "Entrada y salida ya pueden disparar acciones reales desde Telegram."],
                 ["Escalabilidad", "La base puede seguir creciendo hacia supervisor, cliente y expediente."],
               ].map(([title, description]) => (
@@ -660,6 +653,11 @@ button, input, select { font: inherit; }
   box-shadow: 0 12px 30px rgba(38,50,56,0.10);
 }
 .heroLeft { display: flex; flex-direction: column; gap: 12px; }
+.brandRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
 .brandPlate {
   background: #ffffff;
   border: 1px solid rgba(38,50,56,0.08);
@@ -669,8 +667,21 @@ button, input, select { font: inherit; }
   align-items: center;
   box-shadow: 0 6px 18px rgba(38,50,56,0.08);
 }
-.brandLogo { width: 230px; max-width: 100%; height: auto; display: block; }
-.heroTitle { font-size: 34px; line-height: 1.1; font-weight: 800; color: #263238; }
+.brandPlateSquare {
+  width: 84px;
+  height: 84px;
+  justify-content: center;
+  padding: 8px;
+}
+.brandIcon { width: 64px; height: 64px; object-fit: contain; display: block; }
+.brandWord {
+  font-size: 42px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: #43a047;
+}
+.heroTitle { font-size: 34px; line-height: 1.1; font-weight: 800; color: #263238; margin-top: 8px; }
 .heroText { color: #5f6b72; font-size: 15px; max-width: 700px; }
 .badgeRow { display: flex; flex-wrap: wrap; gap: 8px; }
 .badge {
@@ -690,25 +701,24 @@ button, input, select { font: inherit; }
 }
 .loadingCard { background: rgba(255,255,255,0.95); }
 .warning { background: rgba(255,244,229,0.96); border-color: rgba(245,158,11,0.25); }
-.infoCard { background: rgba(232,245,233,0.96); border-color: rgba(76,175,80,0.28); }
-.warningRow, .loadingRow, .infoRow {
+.warningRow, .loadingRow {
   display: flex; align-items: center; gap: 10px; color: #263238;
 }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 .statsGrid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 16px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 16px;
 }
 .statCard {
   background: rgba(255,255,255,0.95);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 24px;
-  padding: 18px;
+  padding: 16px;
   display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
 }
 .statLabel { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #607d8b; }
-.statValue { margin-top: 8px; font-size: 30px; font-weight: 800; color: #263238; }
-.statSub { margin-top: 6px; color: #607d8b; font-size: 14px; }
+.statValue { margin-top: 8px; font-size: 28px; font-weight: 800; color: #263238; }
+.statSub { margin-top: 6px; color: #607d8b; font-size: 13px; }
 .iconWrap { border-radius: 18px; padding: 12px; }
 .greenWrap { background: rgba(76,175,80,.14); color: #43a047; }
 .grayWrap { background: rgba(96,125,139,.14); color: #607d8b; }
@@ -746,7 +756,6 @@ button, input, select { font: inherit; }
   width: 100%; text-align: left; border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(255,255,255,0.96); padding: 14px; color: #263238; cursor: pointer;
 }
-.listBtnSelected { border-color: rgba(76,175,80,.45); background: rgba(232,245,233,0.95); }
 .listBtnGreen { border-color: rgba(76,175,80,.45); background: rgba(232,245,233,0.95); }
 .listTitle { font-weight: 800; }
 .listSub { margin-top: 5px; color: #607d8b; font-size: 13px; }
@@ -756,6 +765,13 @@ button, input, select { font: inherit; }
 }
 .smallInfo {
   border-radius: 14px; background: rgba(96,125,139,0.08); color: #455a64; padding: 12px; font-size: 14px;
+}
+.fieldLabel {
+  margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a;
+}
+.inputLike {
+  width: 100%; border-radius: 14px; border: 1px solid rgba(38,50,56,0.10);
+  background: rgba(255,255,255,0.96); color: #263238; padding: 12px 14px;
 }
 .primaryBtn, .secondaryBtn {
   margin-top: 12px; width: 100%; border: 0; border-radius: 16px; padding: 14px 16px;
@@ -813,11 +829,10 @@ button, input, select { font: inherit; }
 }
 .footerActions { margin-top: 16px; display: flex; justify-content: flex-end; }
 .footerBtn { width: auto; min-width: 220px; }
-@media (max-width: 1100px) {
-  .statsGrid { grid-template-columns: repeat(2, 1fr); }
-}
 @media (max-width: 980px) {
   .galleryGrid, .twoCol, .benefitsGrid, .tabsBar, .statsGrid { grid-template-columns: 1fr; }
   .hero { flex-direction: column; }
+  .brandRow { align-items: center; }
+  .brandWord { font-size: 30px; }
 }
 `;
