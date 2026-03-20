@@ -3,7 +3,8 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   Camera,
-  CheckCircle2,  FolderOpen,
+  CheckCircle2,
+  FolderOpen,
   Image as ImageIcon,
   ListChecks,
   MapPin,
@@ -11,6 +12,7 @@ import {
   ShieldAlert,
   Store,
   UserCheck,
+  Users,
 } from "lucide-react";
 
 declare global {
@@ -20,7 +22,8 @@ declare global {
 }
 
 type Role = "promotor" | "supervisor" | "cliente";
-type ModuleKey = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
+type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
+type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 
 type BootstrapResponse = {
   ok: boolean;
@@ -32,7 +35,6 @@ type BootstrapResponse = {
     cadena_principal?: string;
     external_id?: string;
   };
-  today?: string;
 };
 
 type StoreItem = {
@@ -123,8 +125,8 @@ const MOCK_VISITS: VisitItem[] = [
     visita_id: "V-1001",
     tienda_id: "TDA-001",
     tienda_nombre: "Bodega Aurrera San Mateo",
-    fecha: "2026-03-19",
-    hora_inicio: "2026-03-19T09:10:00.000Z",
+    fecha: "2026-03-20",
+    hora_inicio: "2026-03-20T09:10:00.000Z",
     hora_fin: "",
     notas: "",
   },
@@ -137,7 +139,7 @@ const MOCK_GALLERY: EvidenceItem[] = [
     tipo_evidencia: "Precio",
     marca_nombre: "Dove",
     riesgo: "BAJO",
-    fecha_hora_fmt: "2026-03-19 09:42",
+    fecha_hora_fmt: "2026-03-20 09:42",
     url_foto: "https://picsum.photos/seed/rezgo1/1200/900",
     descripcion: "Referencia local.",
   },
@@ -187,12 +189,11 @@ export default function App() {
   const tg = getTelegramWebApp();
 
   const [role, setRole] = useState<Role>("promotor");
-  const [promotorLabel, setPromotorLabel] = useState("Promotor");
+  const [actorLabel, setActorLabel] = useState("Promotor");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
-  const [selectedModule, setSelectedModule] = useState<ModuleKey>("asistencia");
   const [logoMissing, setLogoMissing] = useState(false);
 
   const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
@@ -200,6 +201,9 @@ export default function App() {
   const [gallery, setGallery] = useState<EvidenceItem[]>(MOCK_GALLERY);
   const [selectedStoreId, setSelectedStoreId] = useState(MOCK_STORES[0]?.tienda_id || "");
   const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
+
+  const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
+  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
 
   useEffect(() => {
     if (tg) {
@@ -232,7 +236,7 @@ export default function App() {
 
     const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {}, 8000);
     if (data?.role) setRole(data.role);
-    if (data?.profile?.nombre) setPromotorLabel(data.profile.nombre);
+    if (data?.profile?.nombre) setActorLabel(data.profile.nombre);
   }
 
   async function loadRealDashboard() {
@@ -241,7 +245,7 @@ export default function App() {
     try {
       setSyncing(true);
       const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {}, 8000);
-      if (dashboard?.promotor?.nombre) setPromotorLabel(dashboard.promotor.nombre);
+      if (dashboard?.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
       if (dashboard?.stores?.length) {
         setStores(dashboard.stores);
         setSelectedStoreId((prev) => prev || dashboard.stores?.[0]?.tienda_id || "");
@@ -352,6 +356,43 @@ export default function App() {
     }
   }
 
+  const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
+    { key: "asistencia", label: "Asistencia" },
+    { key: "evidencias", label: "Evidencias" },
+    { key: "mis_evidencias", label: "Mis evidencias" },
+    { key: "resumen", label: "Resumen" },
+  ];
+
+  const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
+    { key: "equipo", label: "Equipo" },
+    { key: "alertas", label: "Alertas" },
+    { key: "evidencias", label: "Evidencias" },
+    { key: "resumen", label: "Resumen" },
+  ];
+
+  const evidenceFlow: Array<{ key: string; title: string; text: string }> = [
+    { key: "visita", title: "Elegir visita activa", text: "Usar la visita abierta correcta antes de capturar." },
+    { key: "marca", title: "Elegir marca", text: "Tomar marca del catálogo operativo." },
+    { key: "tipo", title: "Elegir tipo", text: "Precio, promoción, competencia, anaquel u otro tipo." },
+    { key: "fase", title: "Elegir fase", text: "Antes o después cuando la regla lo pida." },
+    { key: "fotos", title: "Cargar fotos", text: "Subir la cantidad requerida por la regla." },
+    { key: "continuar", title: "Continuar", text: "Nueva evidencia, cambiar marca o volver a menú." },
+  ];
+
+  const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
+    { key: "ver", Icon: FolderOpen, title: "Ver evidencia", text: "Abrir foto y detalle de la captura." },
+    { key: "anular", Icon: AlertTriangle, title: "Anular", text: "Marcar evidencia como anulada con motivo." },
+    { key: "reemplazar", Icon: Camera, title: "Reemplazar", text: "Subir nueva foto y ligar reemplazo." },
+    { key: "nota", Icon: ListChecks, title: "Agregar nota", text: "Guardar observación operativa sobre la evidencia." },
+  ];
+
+  const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
+    { key: "equipo", Icon: Users, title: "Equipo del día", text: "Promotores, visitas activas y desempeño del turno." },
+    { key: "alertas", Icon: ShieldAlert, title: "Alertas", text: "Asistencias incompletas, riesgos y pendientes." },
+    { key: "evidencias", Icon: ImageIcon, title: "Evidencias", text: "Revisión operativa y visual por promotor." },
+    { key: "seguimiento", Icon: ListChecks, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
+  ];
+
   if (loading) {
     return (
       <div style={styles.page}>
@@ -373,25 +414,23 @@ export default function App() {
       <style>{globalCss}</style>
 
       <div className="shell">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero compactHero">
-          <div className="heroLeft compactHeroLeft">
-            <div className="brandRow compactBrandRow">
-              {!logoMissing ? (
-                <div className="brandPlate compactBrandPlateHorizontal">
-                  <img
-                    src="/rezgo-horizontal.jpeg"
-                    alt="REZGO"
-                    className="brandLogoHorizontal"
-                    onError={() => setLogoMissing(true)}
-                  />
-                </div>
-              ) : (
-                <div className="brandWord compactBrandWord">REZGO</div>
-              )}
-            </div>
-            <div className="heroTitle compactTitle">Operación del promotor</div>
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero">
+          <div className="heroLeft">
+            {!logoMissing ? (
+              <div className="brandPlate brandPlateHorizontal">
+                <img
+                  src="/rezgo-horizontal.jpeg"
+                  alt="REZGO"
+                  className="brandLogoHorizontal"
+                  onError={() => setLogoMissing(true)}
+                />
+              </div>
+            ) : (
+              <div className="brandWord">REZGO</div>
+            )}
+            <div className="heroTitle">{role === "supervisor" ? "Operación del supervisor" : "Operación del promotor"}</div>
             <div className="heroText">Pasión por la movilidad</div>
-            <div className="heroMeta">{promotorLabel}</div>
+            <div className="heroMeta">{actorLabel}</div>
           </div>
         </motion.div>
 
@@ -404,72 +443,70 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="statsGrid compactStatsGrid">
-          <div className="statCard compactStatCard">
+        <div className="statsGrid">
+          <div className="statCard">
             <div>
               <div className="statLabel">Tiendas asignadas</div>
               <div className="statValue">{summary.assignedStores}</div>
             </div>
-            <div className="iconWrap greenWrap compactIconWrap">
-              <Store size={16} />
-            </div>
+            <div className="iconWrap greenWrap"><Store size={16} /></div>
           </div>
-
-          <div className="statCard compactStatCard">
+          <div className="statCard">
             <div>
               <div className="statLabel">Visitas abiertas</div>
               <div className="statValue">{summary.openVisits}</div>
             </div>
-            <div className="iconWrap grayWrap compactIconWrap">
-              <UserCheck size={16} />
-            </div>
+            <div className="iconWrap grayWrap"><UserCheck size={16} /></div>
           </div>
-
-          <div className="statCard compactStatCard">
+          <div className="statCard">
             <div>
               <div className="statLabel">Evidencias hoy</div>
               <div className="statValue">{summary.evidenciasHoy}</div>
             </div>
-            <div className="iconWrap greenWrap compactIconWrap">
-              <ImageIcon size={16} />
-            </div>
+            <div className="iconWrap greenWrap"><ImageIcon size={16} /></div>
           </div>
-
-          <div className="statCard compactStatCard">
+          <div className="statCard">
             <div>
               <div className="statLabel">Alertas</div>
               <div className="statValue">{summary.alertas}</div>
             </div>
-            <div className="iconWrap grayWrap compactIconWrap">
-              <ShieldAlert size={16} />
-            </div>
+            <div className="iconWrap grayWrap"><ShieldAlert size={16} /></div>
           </div>
         </div>
 
-        <div className="tabsBar compactTabsBar">
-          {[
-            ["asistencia", "Asistencia"],
-            ["evidencias", "Evidencias"],
-            ["mis_evidencias", "Mis evidencias"],
-            ["resumen", "Resumen"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={`tabBtn ${selectedModule === key ? "tabBtnActive" : ""}`}
-              onClick={() => setSelectedModule(key as ModuleKey)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {role === "supervisor" ? (
+          <div className="tabsBar tabsBarFour">
+            {supervisorTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`}
+                onClick={() => setSupervisorModule(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="tabsBar tabsBarFour">
+            {promotorTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`}
+                onClick={() => setPromotorModule(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {selectedModule === "asistencia" && (
+        {role === "promotor" && promotorModule === "asistencia" ? (
           <div className="card compactCard">
             <div className="sectionTitle">Asistencia</div>
-            <div className="sectionSub">Fase actual: entrada y salida reales. Siguiente portado: foto, ubicación, historial y corrección de fotos.</div>
+            <div className="sectionSub">Fase actual: entrada y salida reales. Próximo bloque: foto, ubicación, historial y corrección de fotos.</div>
 
-            <div className="twoCol compactTwoCol">
-              <div className="panel compactPanel">
+            <div className="twoCol">
+              <div className="panel">
                 <label className="fieldLabel">Tienda</label>
                 <select className="inputLike" value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)}>
                   {stores.map((store) => (
@@ -499,7 +536,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="panel compactPanel">
+              <div className="panel">
                 <div className="miniTitle">Tiendas activas / visitas abiertas</div>
                 <div className="stack compactStack">
                   {openVisits.map((visit) => (
@@ -517,81 +554,47 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {selectedModule === "evidencias" && (
+        {role === "promotor" && promotorModule === "evidencias" ? (
           <div className="card compactCard">
             <div className="sectionTitle">Evidencias</div>
             <div className="sectionSub">Flujo esperado del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
 
             <div className="flowGrid">
-              {[
-                ["1", "Elegir visita activa", "Tomar la visita abierta correcta antes de capturar."],
-                ["2", "Elegir marca", "Usar catálogo de marcas activas."],
-                ["3", "Elegir tipo", "Precio, promoción, competencia, anaquel, etc."],
-                ["4", "Elegir fase", "Antes / después cuando la regla lo requiera."],
-                ["5", "Cargar fotos", "Con cantidad requerida por regla."],
-                ["6", "Confirmar y continuar", "Nueva evidencia, cambiar marca o volver."],
-              ].map(([step, title, text]) => (
-                <div className="flowCard" key={step}>
-                  <div className="flowStep">{step}</div>
+              {evidenceFlow.map((item, index) => (
+                <div className="flowCard" key={item.key}>
+                  <div className="flowStep">{index + 1}</div>
                   <div>
-                    <div className="flowTitle">{title}</div>
-                    <div className="flowText">{text}</div>
+                    <div className="flowTitle">{item.title}</div>
+                    <div className="flowText">{item.text}</div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {selectedModule === "mis_evidencias" && (
+        {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card compactCard">
             <div className="sectionTitle">Mis evidencias</div>
             <div className="sectionSub">Acciones heredadas del chatbot: ver, anular, reemplazar y agregar nota.</div>
 
             <div className="actionGrid">
-              {[
-                {
-                  key: "ver",
-                  Icon: FolderOpen,
-                  title: "Ver evidencia",
-                  text: "Abrir foto y detalle de la captura.",
-                },
-                {
-                  key: "anular",
-                  Icon: AlertTriangle,
-                  title: "Anular",
-                  text: "Marcar evidencia como anulada con motivo.",
-                },
-                {
-                  key: "reemplazar",
-                  Icon: Camera,
-                  title: "Reemplazar",
-                  text: "Subir una nueva foto y ligar reemplazo.",
-                },
-                {
-                  key: "nota",
-                  Icon: ListChecks,
-                  title: "Agregar nota",
-                  text: "Guardar observación operativa sobre la evidencia.",
-                },
-              ].map(({ key, Icon, title, text }) => (
-                <div className="actionCard" key={key}>
-                  <div className="iconWrap grayWrap compactIconWrap">
-                    <Icon size={16} />
-                  </div>
+              {myEvidenceActions.map((item) => (
+                <div className="actionCard" key={item.key}>
+                  <div className="iconWrap grayWrap"><item.Icon size={16} /></div>
                   <div>
-                    <div className="flowTitle">{title}</div>
-                    <div className="flowText">{text}</div>
+                    <div className="flowTitle">{item.title}</div>
+                    <div className="flowText">{item.text}</div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {selectedModule === "resumen" && (
+        {role === "promotor" && promotorModule === "resumen" ? (
           <div className="card compactCard">
             <div className="sectionTitle">Resumen</div>
             <div className="summaryGrid">
@@ -616,12 +619,30 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
+
+        {role === "supervisor" ? (
+          <div className="card compactCard">
+            <div className="sectionTitle">Supervisor</div>
+            <div className="sectionSub">Estructura visual para hoy: equipo, alertas, evidencias y seguimiento. Siguiente bloque: conectar endpoints reales del supervisor.</div>
+            <div className="actionGrid">
+              {supervisorCards.map((item) => (
+                <div className="actionCard" key={item.key}>
+                  <div className="iconWrap grayWrap"><item.Icon size={16} /></div>
+                  <div>
+                    <div className="flowTitle">{item.title}</div>
+                    <div className="flowText">{item.text}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {gallery.length > 0 ? (
           <div className="card compactCard">
             <div className="sectionTitle">Galería del día</div>
-            <div className="galleryGrid compactGalleryGrid">
+            <div className="galleryGrid">
               {gallery.slice(0, 6).map((item) => (
                 <div className="galleryCard" key={item.evidencia_id}>
                   <div className="imageFrame">
@@ -629,11 +650,7 @@ export default function App() {
                   </div>
                   <div className="galleryTop">
                     <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                    <span
-                      className={`riskBadge ${
-                        item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"
-                      }`}
-                    >
+                    <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>
                       {item.riesgo}
                     </span>
                   </div>
@@ -648,8 +665,8 @@ export default function App() {
 
         {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
-        <div className="footerActions compactFooter">
-          <button className="secondaryBtn footerBtn" onClick={loadRealDashboard} disabled={syncing || !!error}>
+        <div className="footerActions">
+          <button className="secondaryBtn footerBtn" onClick={loadRealDashboard} disabled={syncing || !!error || role !== "promotor"}>
             <RefreshCw size={16} />
             {syncing ? "Sincronizando..." : "Recargar"}
           </button>
@@ -686,7 +703,6 @@ button, input, select { font: inherit; }
   box-shadow: 0 10px 24px rgba(38,50,56,0.08);
 }
 .heroLeft { display: flex; flex-direction: column; gap: 6px; }
-.brandRow { display: inline-flex; align-items: center; gap: 10px; }
 .brandPlate {
   background: #ffffff;
   border: 1px solid rgba(38,50,56,0.08);
@@ -696,7 +712,7 @@ button, input, select { font: inherit; }
   align-items: center;
   box-shadow: 0 5px 14px rgba(38,50,56,0.07);
 }
-.compactBrandPlateHorizontal { min-height: 52px; }
+.brandPlateHorizontal { min-height: 52px; }
 .brandLogoHorizontal { width: 170px; height: auto; display: block; object-fit: contain; }
 .brandWord {
   font-size: 24px;
@@ -730,31 +746,39 @@ button, input, select { font: inherit; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 .statsGrid {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
 }
 .statCard {
   background: rgba(255,255,255,0.95);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 18px;
-  padding: 12px 14px;
-  display: flex; justify-content: space-between; align-items: center; gap: 10px;
-  min-height: 74px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 68px;
 }
 .statLabel { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #607d8b; }
-.statValue { margin-top: 4px; font-size: 24px; font-weight: 800; color: #263238; }
-.iconWrap { border-radius: 14px; padding: 9px; }
+.statValue { margin-top: 4px; font-size: 22px; font-weight: 800; color: #263238; }
+.iconWrap { border-radius: 14px; padding: 8px; }
 .greenWrap { background: rgba(76,175,80,.14); color: #43a047; }
 .grayWrap { background: rgba(96,125,139,.14); color: #607d8b; }
 .sectionTitle { font-size: 18px; font-weight: 800; color: #263238; }
 .sectionSub { margin-top: 4px; color: #607d8b; font-size: 13px; }
 .tabsBar {
   margin-top: 12px;
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  display: grid;
+  gap: 8px;
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 18px;
   padding: 6px;
 }
+.tabsBarFour { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .tabBtn {
   border: 0; border-radius: 12px; background: transparent; color: #546e7a;
   padding: 11px 8px; cursor: pointer; font-weight: 700;
@@ -765,6 +789,7 @@ button, input, select { font: inherit; }
 }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
+.compactStack { max-height: 260px; overflow: auto; }
 .listBtn {
   width: 100%; text-align: left; border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(255,255,255,0.96); padding: 12px; color: #263238; cursor: pointer;
@@ -775,9 +800,6 @@ button, input, select { font: inherit; }
 .panel {
   border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(248,249,251,0.95); padding: 14px;
-}
-.smallInfo {
-  border-radius: 12px; background: rgba(96,125,139,0.08); color: #455a64; padding: 10px 12px; font-size: 13px;
 }
 .fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
 .inputLike {
@@ -803,8 +825,8 @@ button, input, select { font: inherit; }
   font-size: 11px; font-weight: 700; color: #546e7a; background: rgba(96,125,139,0.12);
 }
 .hintLive { background: rgba(76,175,80,.16); color: #2e7d32; }
-.flowGrid {
-  margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+.flowGrid, .actionGrid, .summaryGrid {
+  margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
 }
 .flowCard, .actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
@@ -816,16 +838,13 @@ button, input, select { font: inherit; }
 }
 .flowTitle { font-weight: 800; color: #263238; }
 .flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
-.actionGrid, .summaryGrid {
-  margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
-}
 .summaryBlock {
   border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .galleryGrid {
   margin-top: 14px;
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
 }
 .galleryCard {
   border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
@@ -862,8 +881,7 @@ button, input, select { font: inherit; }
   .twoCol, .galleryGrid, .flowGrid, .actionGrid, .summaryGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .statsGrid, .tabsBar { grid-template-columns: 1fr; }
+  .tabsBarFour { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero { flex-direction: column; }
-  .heroTitle { white-space: normal; }
 }
-`;
+`}
