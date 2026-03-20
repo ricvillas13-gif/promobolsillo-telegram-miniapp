@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Store,
-  MapPin,
-  Image as ImageIcon,
-  CheckCircle2,
-  RefreshCw,
   AlertTriangle,
-  UserCheck,
-  ShieldAlert,
   Camera,
+  CheckCircle2,
+  Clock3,
+  FolderOpen,
+  Image as ImageIcon,
+  ListChecks,
+  MapPin,
+  RefreshCw,
+  ShieldAlert,
+  Store,
+  UserCheck,
 } from "lucide-react";
 
 declare global {
@@ -19,6 +22,7 @@ declare global {
 }
 
 type Role = "promotor" | "supervisor" | "cliente";
+type ModuleKey = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 
 type BootstrapResponse = {
   ok: boolean;
@@ -30,12 +34,6 @@ type BootstrapResponse = {
     cadena_principal?: string;
     external_id?: string;
   };
-  telegramUser?: {
-    id?: number;
-    first_name?: string;
-    username?: string;
-  };
-  serverTime?: string;
   today?: string;
 };
 
@@ -80,11 +78,6 @@ type DashboardResponse = {
   };
   stores?: StoreItem[];
   openVisits?: VisitItem[];
-  summary?: {
-    assignedStores: number;
-    openVisits: number;
-    evidenciasHoy: number;
-  };
 };
 
 type EvidencesTodayResponse = {
@@ -169,20 +162,12 @@ async function postJson<T>(path: string, payload: Record<string, any>, timeoutMs
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        initData: getInitData(),
-        ...payload,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData: getInitData(), ...payload }),
       signal: controller.signal,
     });
 
-    if (!res.ok) {
-      throw new Error(`Error ${res.status}`);
-    }
-
+    if (!res.ok) throw new Error(`Error ${res.status}`);
     return (await res.json()) as T;
   } finally {
     clearTimeout(timeout);
@@ -203,19 +188,20 @@ function formatHourFromIso(iso: string) {
 export default function App() {
   const tg = getTelegramWebApp();
 
-  const [role, setRole] = useState<Role>("promotor");  const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<Role>("promotor");
+  const [promotorLabel, setPromotorLabel] = useState("Promotor");
+  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
+  const [statusMsg, setStatusMsg] = useState("");
+  const [selectedModule, setSelectedModule] = useState<ModuleKey>("asistencia");
+  const [logoMissing, setLogoMissing] = useState(false);
 
   const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
   const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
   const [gallery, setGallery] = useState<EvidenceItem[]>(MOCK_GALLERY);
-
-  const [tab, setTab] = useState<"asistencia" | "evidencias" | "galeria">("asistencia");
   const [selectedStoreId, setSelectedStoreId] = useState(MOCK_STORES[0]?.tienda_id || "");
   const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
-  const [statusMsg, setStatusMsg] = useState("");
-  const [logoMissing, setLogoMissing] = useState(false);
 
   useEffect(() => {
     if (tg) {
@@ -226,18 +212,20 @@ export default function App() {
     }
   }, [tg]);
 
-  const summary = useMemo(() => {
-    return {
+  const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
+
+  const summary = useMemo(
+    () => ({
       assignedStores: stores.length,
-      openVisits: visits.filter((v) => !v.hora_fin).length,
+      openVisits: openVisits.length,
       evidenciasHoy: gallery.length,
       alertas: gallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
-    };
-  }, [stores, visits, gallery]);
+    }),
+    [stores, openVisits, gallery]
+  );
 
   async function loadBootstrap() {
     const initData = getInitData();
-
     if (!initData) {
       setError("Vista local de referencia. Abre la Mini App desde Telegram para usar la operación en línea.");
       setLoading(false);
@@ -245,7 +233,9 @@ export default function App() {
     }
 
     const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {}, 8000);
-    if (data?.role) setRole(data.role);  }
+    if (data?.role) setRole(data.role);
+    if (data?.profile?.nombre) setPromotorLabel(data.profile.nombre);
+  }
 
   async function loadRealDashboard() {
     if (role !== "promotor") return;
@@ -253,6 +243,7 @@ export default function App() {
     try {
       setSyncing(true);
       const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {}, 8000);
+      if (dashboard?.promotor?.nombre) setPromotorLabel(dashboard.promotor.nombre);
       if (dashboard?.stores?.length) {
         setStores(dashboard.stores);
         setSelectedStoreId((prev) => prev || dashboard.stores?.[0]?.tienda_id || "");
@@ -306,8 +297,7 @@ export default function App() {
         return;
       }
 
-      const initData = getInitData();
-      if (!initData) {
+      if (!getInitData()) {
         setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
         return;
       }
@@ -329,7 +319,7 @@ export default function App() {
 
       setVisits((prev) => [newVisit, ...prev.filter((v) => v.visita_id !== newVisit.visita_id)]);
       setSelectedVisitId(newVisit.visita_id);
-      setStatusMsg(`✅ Entrada real registrada en ${response.tienda_nombre}`);
+      setStatusMsg(`✅ Entrada registrada en ${response.tienda_nombre}`);
       await loadRealDashboard();
     } catch (_err) {
       setStatusMsg("⚠️ No se pudo registrar la entrada real.");
@@ -345,8 +335,7 @@ export default function App() {
         return;
       }
 
-      const initData = getInitData();
-      if (!initData) {
+      if (!getInitData()) {
         setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
         return;
       }
@@ -356,7 +345,7 @@ export default function App() {
         visita_id: selectedVisitId,
       });
 
-      setStatusMsg("✅ Salida real registrada correctamente.");
+      setStatusMsg("✅ Salida registrada correctamente.");
       await loadRealDashboard();
     } catch (_err) {
       setStatusMsg("⚠️ No se pudo registrar la salida real.");
@@ -386,25 +375,25 @@ export default function App() {
       <style>{globalCss}</style>
 
       <div className="shell">
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="hero compactHero">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero compactHero">
           <div className="heroLeft compactHeroLeft">
             <div className="brandRow compactBrandRow">
               {!logoMissing ? (
-                <div className="brandPlate brandPlateSquare compactBrandPlate">
+                <div className="brandPlate compactBrandPlateHorizontal">
                   <img
-                    src="/rezgo-square.jpeg"
+                    src="/rezgo-horizontal.jpeg"
                     alt="REZGO"
-                    className="brandIcon"
+                    className="brandLogoHorizontal"
                     onError={() => setLogoMissing(true)}
                   />
                 </div>
-              ) : null}
-              <div>
+              ) : (
                 <div className="brandWord compactBrandWord">REZGO</div>
-                <div className="heroText">Pasión por la movilidad</div>
-              </div>
+              )}
             </div>
             <div className="heroTitle compactTitle">Operación del promotor</div>
+            <div className="heroText">Pasión por la movilidad</div>
+            <div className="heroMeta">{promotorLabel}</div>
           </div>
         </motion.div>
 
@@ -463,22 +452,23 @@ export default function App() {
           {[
             ["asistencia", "Asistencia"],
             ["evidencias", "Evidencias"],
-            ["galeria", "Galería"],
+            ["mis_evidencias", "Mis evidencias"],
+            ["resumen", "Resumen"],
           ].map(([key, label]) => (
             <button
               key={key}
-              className={`tabBtn ${tab === key ? "tabBtnActive" : ""}`}
-              onClick={() => setTab(key as "asistencia" | "evidencias" | "galeria")}
+              className={`tabBtn ${selectedModule === key ? "tabBtnActive" : ""}`}
+              onClick={() => setSelectedModule(key as ModuleKey)}
             >
               {label}
             </button>
           ))}
         </div>
 
-        {tab === "asistencia" && (
+        {selectedModule === "asistencia" && (
           <div className="card compactCard">
             <div className="sectionTitle">Asistencia</div>
-            <div className="sectionSub">La siguiente etapa es portar foto + ubicación como en WhatsApp.</div>
+            <div className="sectionSub">Fase actual: entrada y salida reales. Siguiente portado: foto, ubicación, historial y corrección de fotos.</div>
 
             <div className="twoCol compactTwoCol">
               <div className="panel compactPanel">
@@ -486,15 +476,18 @@ export default function App() {
                 <select className="inputLike" value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)}>
                   {stores.map((store) => (
                     <option key={store.tienda_id} value={store.tienda_id}>
-                      {store.nombre_tienda} · {store.cadena}
+                      {store.nombre_tienda}
                     </option>
                   ))}
                 </select>
 
-                <div className="smallInfo compactInfo" style={{ marginTop: 12 }}>
-                  Cliente: <strong>{stores.find((s) => s.tienda_id === selectedStoreId)?.cliente || "—"}</strong>
-                  <br />
-                  Ciudad: <strong>{stores.find((s) => s.tienda_id === selectedStoreId)?.ciudad || "—"}</strong>
+                <div className="actionHintRow">
+                  <span className="hintChip hintLive">Entrada real</span>
+                  <span className="hintChip hintLive">Salida real</span>
+                  <span className="hintChip">Foto</span>
+                  <span className="hintChip">Ubicación</span>
+                  <span className="hintChip">Historial</span>
+                  <span className="hintChip">Corregir foto</span>
                 </div>
 
                 <button className="primaryBtn" onClick={createEntry} disabled={syncing}>
@@ -509,9 +502,9 @@ export default function App() {
               </div>
 
               <div className="panel compactPanel">
-                <div className="miniTitle">Visitas abiertas</div>
+                <div className="miniTitle">Tiendas activas / visitas abiertas</div>
                 <div className="stack compactStack">
-                  {visits.filter((v) => !v.hora_fin).map((visit) => (
+                  {openVisits.map((visit) => (
                     <button
                       key={visit.visita_id}
                       onClick={() => setSelectedVisitId(visit.visita_id)}
@@ -521,44 +514,97 @@ export default function App() {
                       <div className="listSub">Inicio: {formatHourFromIso(visit.hora_inicio)}</div>
                     </button>
                   ))}
-                  {!visits.filter((v) => !v.hora_fin).length ? (
-                    <div className="emptyBox">No hay visitas abiertas.</div>
-                  ) : null}
+                  {!openVisits.length ? <div className="emptyBox">No hay visitas abiertas.</div> : null}
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {tab === "evidencias" && (
+        {selectedModule === "evidencias" && (
           <div className="card compactCard">
             <div className="sectionTitle">Evidencias</div>
-            <div className="sectionSub">Ya se consumen evidencias reales del backend. Falta portar captura completa de fotos.</div>
+            <div className="sectionSub">Flujo esperado del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
 
-            <div className="evidenceSummary">
-              <div className="summaryMiniCard">
-                <Camera size={16} />
-                <div>
-                  <div className="summaryMiniTitle">Próximo bloque</div>
-                  <div className="summaryMiniText">Captura real con cámara, compresión, orden y validación.</div>
+            <div className="flowGrid">
+              {[
+                ["1", "Elegir visita activa", "Tomar la visita abierta correcta antes de capturar."],
+                ["2", "Elegir marca", "Usar catálogo de marcas activas."],
+                ["3", "Elegir tipo", "Precio, promoción, competencia, anaquel, etc."],
+                ["4", "Elegir fase", "Antes / después cuando la regla lo requiera."],
+                ["5", "Cargar fotos", "Con cantidad requerida por regla."],
+                ["6", "Confirmar y continuar", "Nueva evidencia, cambiar marca o volver."],
+              ].map(([step, title, text]) => (
+                <div className="flowCard" key={step}>
+                  <div className="flowStep">{step}</div>
+                  <div>
+                    <div className="flowTitle">{title}</div>
+                    <div className="flowText">{text}</div>
+                  </div>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedModule === "mis_evidencias" && (
+          <div className="card compactCard">
+            <div className="sectionTitle">Mis evidencias</div>
+            <div className="sectionSub">Acciones heredadas del chatbot: ver, anular, reemplazar y agregar nota.</div>
+
+            <div className="actionGrid">
+              {[
+                [FolderOpen, "Ver evidencia", "Abrir foto y detalle de la captura."],
+                [AlertTriangle, "Anular", "Marcar evidencia como anulada con motivo."],
+                [Camera, "Reemplazar", "Subir una nueva foto y ligar reemplazo."],
+                [ListChecks, "Agregar nota", "Guardar observación operativa sobre la evidencia."],
+              ].map(([Icon, title, text]) => (
+                <div className="actionCard" key={title}>
+                  <div className="iconWrap grayWrap compactIconWrap">
+                    {React.createElement(Icon as React.ElementType, { size: 16 })}
+                  </div>
+                  <div>
+                    <div className="flowTitle">{title}</div>
+                    <div className="flowText">{text}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedModule === "resumen" && (
+          <div className="card compactCard">
+            <div className="sectionTitle">Resumen</div>
+            <div className="summaryGrid">
+              <div className="summaryBlock">
+                <div className="miniTitle">Operación del día</div>
+                <div className="summaryLine">Tiendas asignadas: <strong>{summary.assignedStores}</strong></div>
+                <div className="summaryLine">Visitas abiertas: <strong>{summary.openVisits}</strong></div>
+                <div className="summaryLine">Evidencias hoy: <strong>{summary.evidenciasHoy}</strong></div>
+                <div className="summaryLine">Alertas: <strong>{summary.alertas}</strong></div>
               </div>
-              <div className="summaryMiniCard">
-                <ImageIcon size={16} />
-                <div>
-                  <div className="summaryMiniTitle">Hoy visibles</div>
-                  <div className="summaryMiniText">{summary.evidenciasHoy} evidencia(s) ya consultables.</div>
-                </div>
+              <div className="summaryBlock">
+                <div className="miniTitle">Visitas activas</div>
+                {openVisits.length ? (
+                  openVisits.map((visit) => (
+                    <div className="summaryLine" key={visit.visita_id}>
+                      {visit.tienda_nombre} · <strong>{formatHourFromIso(visit.hora_inicio)}</strong>
+                    </div>
+                  ))
+                ) : (
+                  <div className="summaryLine">No hay visitas activas.</div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {tab === "galeria" && (
+        {gallery.length > 0 ? (
           <div className="card compactCard">
-            <div className="sectionTitle">Galería</div>
+            <div className="sectionTitle">Galería del día</div>
             <div className="galleryGrid compactGalleryGrid">
-              {gallery.map((item) => (
+              {gallery.slice(0, 6).map((item) => (
                 <div className="galleryCard" key={item.evidencia_id}>
                   <div className="imageFrame">
                     <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
@@ -567,11 +613,7 @@ export default function App() {
                     <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
                     <span
                       className={`riskBadge ${
-                        item.riesgo === "ALTO"
-                          ? "riskRed"
-                          : item.riesgo === "MEDIO"
-                          ? "riskAmber"
-                          : "riskGreen"
+                        item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"
                       }`}
                     >
                       {item.riesgo}
@@ -584,7 +626,7 @@ export default function App() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
@@ -605,8 +647,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "linear-gradient(180deg, #eef1f4 0%, #e7ebef 100%)",
     color: "#263238",
     padding: "14px 12px 28px",
-    fontFamily:
-      "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
   },
 };
 
@@ -623,116 +664,89 @@ button, input, select { font: inherit; }
   background: linear-gradient(135deg, #f8f9fb 0%, #edf1f3 100%);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 24px;
-  padding: 18px;
+  padding: 14px 16px;
   box-shadow: 0 10px 24px rgba(38,50,56,0.08);
 }
-.compactHero { padding: 14px 16px; }
-.heroLeft { display: flex; flex-direction: column; gap: 8px; }
-.compactHeroLeft { gap: 6px; }
-.brandRow {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-.compactBrandRow { gap: 10px; }
+.heroLeft { display: flex; flex-direction: column; gap: 6px; }
+.brandRow { display: inline-flex; align-items: center; gap: 10px; }
 .brandPlate {
   background: #ffffff;
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 16px;
-  padding: 10px 12px;
+  border-radius: 14px;
+  padding: 8px 12px;
   display: inline-flex;
   align-items: center;
   box-shadow: 0 5px 14px rgba(38,50,56,0.07);
 }
-.brandPlateSquare {
-  width: 64px;
-  height: 64px;
-  justify-content: center;
-  padding: 6px;
-}
-.compactBrandPlate { width: 58px; height: 58px; }
-.brandIcon { width: 46px; height: 46px; object-fit: contain; display: block; }
+.compactBrandPlateHorizontal { min-height: 52px; }
+.brandLogoHorizontal { width: 170px; height: auto; display: block; object-fit: contain; }
 .brandWord {
-  font-size: 30px;
+  font-size: 24px;
   line-height: 1;
   font-weight: 900;
   letter-spacing: 0.02em;
   color: #43a047;
 }
-.compactBrandWord { font-size: 28px; }
 .heroTitle {
-  font-size: 28px;
+  font-size: 18px;
   line-height: 1.1;
   font-weight: 800;
   color: #263238;
-  margin-top: 2px;
-}
-.compactTitle {
-  font-size: 18px;
-  line-height: 1.1;
   white-space: nowrap;
 }
-.heroText { color: #5f6b72; font-size: 14px; max-width: 700px; }
-.badgeRow { display: none; }
+.heroText { color: #5f6b72; font-size: 14px; }
+.heroMeta { color: #78909c; font-size: 12px; }
 .card {
   margin-top: 12px;
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 22px;
-  padding: 16px;
+  padding: 14px;
   box-shadow: 0 10px 22px rgba(38,50,56,0.07);
 }
-.compactCard { padding: 14px; }
 .loadingCard { background: rgba(255,255,255,0.95); }
 .warning { background: rgba(255,244,229,0.96); border-color: rgba(245,158,11,0.25); }
-.compactNotice { padding: 14px 16px; }
 .warningRow, .loadingRow {
   display: flex; align-items: center; gap: 10px; color: #263238;
 }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 .statsGrid {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px;
 }
-.compactStatsGrid { gap: 10px; }
 .statCard {
   background: rgba(255,255,255,0.95);
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 20px;
-  padding: 14px;
+  border-radius: 18px;
+  padding: 12px 14px;
   display: flex; justify-content: space-between; align-items: center; gap: 10px;
-  min-height: 86px;
+  min-height: 74px;
 }
-.compactStatCard { min-height: 76px; padding: 12px 14px; }
-.statLabel { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #607d8b; }
-.statValue { margin-top: 4px; font-size: 26px; font-weight: 800; color: #263238; }
-.iconWrap { border-radius: 16px; padding: 10px; }
-.compactIconWrap { padding: 9px; }
+.statLabel { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #607d8b; }
+.statValue { margin-top: 4px; font-size: 24px; font-weight: 800; color: #263238; }
+.iconWrap { border-radius: 14px; padding: 9px; }
 .greenWrap { background: rgba(76,175,80,.14); color: #43a047; }
 .grayWrap { background: rgba(96,125,139,.14); color: #607d8b; }
 .sectionTitle { font-size: 18px; font-weight: 800; color: #263238; }
 .sectionSub { margin-top: 4px; color: #607d8b; font-size: 13px; }
 .tabsBar {
   margin-top: 12px;
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 18px;
   padding: 6px;
 }
-.compactTabsBar { margin-top: 12px; }
 .tabBtn {
   border: 0; border-radius: 12px; background: transparent; color: #546e7a;
   padding: 11px 8px; cursor: pointer; font-weight: 700;
 }
 .tabBtnActive { background: rgba(76,175,80,.14); color: #2e7d32; }
 .twoCol {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
 }
-.compactTwoCol { gap: 12px; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
-.compactStack { max-height: 260px; overflow: auto; }
 .listBtn {
   width: 100%; text-align: left; border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(255,255,255,0.96); padding: 12px; color: #263238; cursor: pointer;
@@ -744,14 +758,10 @@ button, input, select { font: inherit; }
   border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(248,249,251,0.95); padding: 14px;
 }
-.compactPanel { padding: 14px; }
 .smallInfo {
   border-radius: 12px; background: rgba(96,125,139,0.08); color: #455a64; padding: 10px 12px; font-size: 13px;
 }
-.compactInfo { font-size: 12px; }
-.fieldLabel {
-  margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a;
-}
+.fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
 .inputLike {
   width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10);
   background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px;
@@ -767,20 +777,38 @@ button, input, select { font: inherit; }
 .emptyBox {
   padding: 12px; border-radius: 12px; background: rgba(96,125,139,0.08); color: #607d8b; font-size: 13px;
 }
-.evidenceSummary {
-  margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+.actionHintRow {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; margin-bottom: 2px;
 }
-.summaryMiniCard {
+.hintChip {
+  display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 10px;
+  font-size: 11px; font-weight: 700; color: #546e7a; background: rgba(96,125,139,0.12);
+}
+.hintLive { background: rgba(76,175,80,.16); color: #2e7d32; }
+.flowGrid {
+  margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+}
+.flowCard, .actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
-.summaryMiniTitle { font-weight: 800; color: #263238; }
-.summaryMiniText { margin-top: 4px; color: #607d8b; font-size: 13px; }
+.flowStep {
+  min-width: 28px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(76,175,80,.14); color: #2e7d32; font-weight: 800; font-size: 13px;
+}
+.flowTitle { font-weight: 800; color: #263238; }
+.flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
+.actionGrid, .summaryGrid {
+  margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+}
+.summaryBlock {
+  border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
+}
+.summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .galleryGrid {
   margin-top: 14px;
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
 }
-.compactGalleryGrid { gap: 12px; }
 .galleryCard {
   border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(255,255,255,0.96); padding: 12px;
@@ -811,15 +839,13 @@ button, input, select { font: inherit; }
   font-weight: 700;
 }
 .footerActions { margin-top: 12px; display: flex; justify-content: flex-end; }
-.compactFooter { margin-top: 10px; }
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .evidenceSummary { grid-template-columns: 1fr; }
+  .twoCol, .galleryGrid, .flowGrid, .actionGrid, .summaryGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .statsGrid, .tabsBar { grid-template-columns: 1fr; }
   .hero { flex-direction: column; }
-  .compactTitle { white-space: normal; }
-  .brandWord { font-size: 24px; }
+  .heroTitle { white-space: normal; }
 }
 `;
