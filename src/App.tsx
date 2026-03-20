@@ -3,9 +3,7 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   Camera,
-  CheckCircle2,
-  Clock3,
-  FolderOpen,
+  CheckCircle2,  FolderOpen,
   Image as ImageIcon,
   ListChecks,
   MapPin,
@@ -554,14 +552,34 @@ export default function App() {
 
             <div className="actionGrid">
               {[
-                [FolderOpen, "Ver evidencia", "Abrir foto y detalle de la captura."],
-                [AlertTriangle, "Anular", "Marcar evidencia como anulada con motivo."],
-                [Camera, "Reemplazar", "Subir una nueva foto y ligar reemplazo."],
-                [ListChecks, "Agregar nota", "Guardar observación operativa sobre la evidencia."],
-              ].map(([Icon, title, text]) => (
-                <div className="actionCard" key={title}>
+                {
+                  key: "ver",
+                  Icon: FolderOpen,
+                  title: "Ver evidencia",
+                  text: "Abrir foto y detalle de la captura.",
+                },
+                {
+                  key: "anular",
+                  Icon: AlertTriangle,
+                  title: "Anular",
+                  text: "Marcar evidencia como anulada con motivo.",
+                },
+                {
+                  key: "reemplazar",
+                  Icon: Camera,
+                  title: "Reemplazar",
+                  text: "Subir una nueva foto y ligar reemplazo.",
+                },
+                {
+                  key: "nota",
+                  Icon: ListChecks,
+                  title: "Agregar nota",
+                  text: "Guardar observación operativa sobre la evidencia.",
+                },
+              ].map(({ key, Icon, title, text }) => (
+                <div className="actionCard" key={key}>
                   <div className="iconWrap grayWrap compactIconWrap">
-                    {React.createElement(Icon as React.ElementType, { size: 16 })}
+                    <Icon size={16} />
                   </div>
                   <div>
                     <div className="flowTitle">{title}</div>
