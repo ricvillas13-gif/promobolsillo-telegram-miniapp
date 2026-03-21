@@ -32,6 +32,7 @@ type Role = "promotor" | "supervisor" | "cliente";
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
+type LogoMode = "primary" | "secondary" | "text";
 
 type BootstrapResponse = {
   ok: boolean;
@@ -101,6 +102,37 @@ type CloseVisitResponse = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
+const ASSET_VERSION = "20260321e";
+
+const MOCK_STORES: StoreItem[] = [
+  { tienda_id: "TDA-001", nombre_tienda: "Bodega Aurrera San Mateo", cadena: "Bodega Aurrera" },
+  { tienda_id: "TDA-002", nombre_tienda: "Walmart Las Torres", cadena: "Walmart" },
+];
+
+const MOCK_VISITS: VisitItem[] = [
+  {
+    visita_id: "V-1001",
+    tienda_id: "TDA-001",
+    tienda_nombre: "Bodega Aurrera San Mateo",
+    hora_inicio: "2026-03-21T09:10:00.000Z",
+    hora_fin: "",
+  },
+];
+
+const MOCK_GALLERY: UiEvidence[] = [
+  {
+    evidencia_id: "EV-1",
+    tipo_evento: "EVIDENCIA_PRECIO",
+    tipo_evidencia: "Precio",
+    marca_nombre: "Marca de ejemplo",
+    riesgo: "BAJO",
+    fecha_hora_fmt: "2026-03-21 09:42",
+    url_foto: "https://picsum.photos/seed/rezgo1/1200/900",
+    descripcion: "Referencia local.",
+    status: "ACTIVA",
+    tienda_nombre: "Bodega Aurrera San Mateo",
+  },
+];
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -112,9 +144,10 @@ function getInitData() {
   return tg?.initData || "";
 }
 
-function getLogoUrl() {
-  if (typeof window === "undefined") return "/rezgo-horizontal.jpeg";
-  return `${window.location.origin}/rezgo-horizontal.jpeg`;
+function getLogoUrl(mode: Exclude<LogoMode, "text">) {
+  const path = mode === "primary" ? "rezgo-horizontal.jpeg" : "rezgo-square.jpeg";
+  if (typeof window === "undefined") return `/${path}?v=${ASSET_VERSION}`;
+  return `${window.location.origin}/${path}?v=${ASSET_VERSION}`;
 }
 
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 8000) {
@@ -157,12 +190,24 @@ function nowMxString() {
   });
 }
 
+function looksLikeStoreId(value: string) {
+  return /^TDA[-_]/i.test(value) || /^TIENDA[-_]/i.test(value) || /^[A-Z]{2,}-\d+/i.test(value);
+}
+
 function getStoreNameById(storeId: string, stores: StoreItem[]) {
-  return stores.find((store) => store.tienda_id === storeId)?.nombre_tienda || "Tienda no informada";
+  const found = stores.find((store) => store.tienda_id === storeId || store.nombre_tienda === storeId);
+  return found?.nombre_tienda || "";
 }
 
 function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
-  return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || "Tienda no informada";
+  const byId = getStoreNameById(visit.tienda_id, stores);
+  if (byId) return byId;
+
+  const byName = getStoreNameById(visit.tienda_nombre, stores);
+  if (byName) return byName;
+
+  if (visit.tienda_nombre && !looksLikeStoreId(visit.tienda_nombre)) return visit.tienda_nombre;
+  return "Visita activa";
 }
 
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
@@ -202,12 +247,13 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
+  const [logoMode, setLogoMode] = useState<LogoMode>("primary");
 
-  const [stores, setStores] = useState<StoreItem[]>([]);
-  const [visits, setVisits] = useState<VisitItem[]>([]);
-  const [gallery, setGallery] = useState<UiEvidence[]>([]);
+  const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
+  const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
+  const [gallery, setGallery] = useState<UiEvidence[]>(MOCK_GALLERY);
   const [selectedStoreId, setSelectedStoreId] = useState("");
-  const [selectedVisitId, setSelectedVisitId] = useState("");
+  const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
 
@@ -217,7 +263,7 @@ export default function App() {
   const [evidenceQty, setEvidenceQty] = useState(1);
   const [evidenceDescription, setEvidenceDescription] = useState("");
 
-  const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState(MOCK_GALLERY[0]?.evidencia_id || "");
   const [noteDraft, setNoteDraft] = useState("");
 
   useEffect(() => {
@@ -265,7 +311,6 @@ export default function App() {
     try {
       setSyncing(true);
       const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
-
       if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
       if (dashboard.stores) setStores(dashboard.stores);
       if (dashboard.openVisits) {
@@ -281,7 +326,6 @@ export default function App() {
           evidences.evidencias.map((item) => ({
             ...item,
             status: "ACTIVA",
-            tienda_nombre: "Tienda no informada",
           }))
         );
         if (!selectedEvidenceId && evidences.evidencias[0]?.evidencia_id) {
@@ -318,6 +362,14 @@ export default function App() {
       loadRealDashboard();
     }
   }, [loading, error, role]);
+
+  function handleLogoError() {
+    setLogoMode((prev) => {
+      if (prev === "primary") return "secondary";
+      if (prev === "secondary") return "text";
+      return prev;
+    });
+  }
 
   async function createEntry() {
     try {
@@ -409,7 +461,7 @@ export default function App() {
     setSelectedEvidenceId(created[0].evidencia_id);
     setEvidenceDescription("");
     setEvidenceQty(1);
-    setStatusMsg("✅ Flujo de evidencias visible. Aún falta conectar foto real, reglas y endpoint final.");
+    setStatusMsg("✅ Flujo visible guardado. La conexión final de evidencias aún está pendiente.");
   }
 
   function markEvidenceAsCancelled() {
@@ -435,11 +487,7 @@ export default function App() {
     setGallery((prev) =>
       prev.map((item) =>
         item.evidencia_id === selectedEvidence.evidencia_id
-          ? {
-              ...item,
-              url_foto: `https://picsum.photos/seed/replaced-${Date.now()}/1200/900`,
-              fecha_hora_fmt: nowMxString(),
-            }
+          ? { ...item, url_foto: `https://picsum.photos/seed/replaced-${Date.now()}/1200/900`, fecha_hora_fmt: nowMxString() }
           : item
       )
     );
@@ -486,13 +534,23 @@ export default function App() {
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
             <div className="heroLogoBlock">
-              <div className="brandPlate brandPlateHorizontal">
-                <img src={getLogoUrl()} alt="REZGO" className="brandLogoHorizontal" />
-              </div>
+              {logoMode !== "text" ? (
+                <div className="brandPlate brandPlateHorizontal">
+                  <img
+                    src={getLogoUrl(logoMode)}
+                    alt=""
+                    aria-label="REZGO"
+                    className={logoMode === "primary" ? "brandLogoHorizontal" : "brandLogoSquare"}
+                    onError={handleLogoError}
+                  />
+                </div>
+              ) : (
+                <div className="brandWord">REZGO</div>
+              )}
             </div>
             <div className="heroTitleBlock">
               <div className="heroTitle heroTitleTight">Operación<br />del promotor</div>
-              <div className="heroMeta heroMetaSingle">{actorLabel}</div>
+              <div className="heroMetaSingle">{actorLabel}</div>
             </div>
           </motion.div>
 
@@ -648,7 +706,7 @@ export default function App() {
                       onClick={() => setSelectedEvidenceId(item.evidencia_id)}
                       className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}
                     >
-                      <div className="listTitle">{item.tienda_nombre || "Tienda no informada"}</div>
+                      <div className="listTitle">{item.tienda_nombre || "Sin nombre de tienda"}</div>
                       <div className="listSub">{item.tipo_evidencia} · {item.marca_nombre}</div>
                     </button>
                   ))}
@@ -663,7 +721,7 @@ export default function App() {
                     <div className="previewFrame">
                       <img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" />
                     </div>
-                    <div className="summaryLine">{selectedEvidence.tienda_nombre || "Tienda no informada"}</div>
+                    {selectedEvidence.tienda_nombre ? <div className="summaryLine">{selectedEvidence.tienda_nombre}</div> : null}
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
                     <div className="actionGrid actionGridButtons">
@@ -765,7 +823,7 @@ export default function App() {
                       {item.riesgo}
                     </span>
                   </div>
-                  <div className="gallerySub">{item.tienda_nombre || "Tienda no informada"}</div>
+                  {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
                   <div className="galleryDate">{item.fecha_hora_fmt}</div>
                   <div className="galleryDesc">{item.descripcion}</div>
                 </div>
@@ -847,6 +905,14 @@ button, input, select { font: inherit; }
 }
 .brandPlateHorizontal { min-height: 34px; }
 .brandLogoHorizontal { width: 108px; height: auto; display: block; object-fit: contain; }
+.brandLogoSquare { width: 26px; height: 26px; display: block; object-fit: contain; }
+.brandWord {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: #43a047;
+}
 .heroTitle {
   font-size: 14px;
   line-height: 1.05;
@@ -949,6 +1015,8 @@ button, input, select { font: inherit; }
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
+.flowTitle { font-weight: 800; color: #263238; }
+.flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
 .summaryBlock {
   border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
