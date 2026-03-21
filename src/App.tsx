@@ -102,39 +102,6 @@ type CloseVisitResponse = {
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
 
-const MOCK_STORES: StoreItem[] = [
-  { tienda_id: "TDA-001", nombre_tienda: "Bodega Aurrera San Mateo", cadena: "Bodega Aurrera" },
-  { tienda_id: "TDA-002", nombre_tienda: "Walmart Las Torres", cadena: "Walmart" },
-];
-
-const MOCK_VISITS: VisitItem[] = [
-  {
-    visita_id: "V-1001",
-    tienda_id: "TDA-001",
-    tienda_nombre: "Bodega Aurrera San Mateo",
-    hora_inicio: "2026-03-20T09:10:00.000Z",
-    hora_fin: "",
-  },
-];
-
-const MOCK_GALLERY: UiEvidence[] = [
-  {
-    evidencia_id: "EV-1",
-    tipo_evento: "EVIDENCIA_PRECIO",
-    tipo_evidencia: "Precio",
-    marca_nombre: "Dove",
-    riesgo: "BAJO",
-    fecha_hora_fmt: "2026-03-20 09:42",
-    url_foto: "https://picsum.photos/seed/rezgo1/1200/900",
-    descripcion: "Referencia local.",
-    status: "ACTIVA",
-    tienda_nombre: "Bodega Aurrera San Mateo",
-  },
-];
-
-const BRAND_OPTIONS = ["Dove", "Axe", "Rexona", "Sedal"];
-const TYPE_OPTIONS = ["Precio", "Promoción", "Competencia", "Anaquel"];
-
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
   return window.Telegram?.WebApp;
@@ -143,6 +110,11 @@ function getTelegramWebApp() {
 function getInitData() {
   const tg = getTelegramWebApp();
   return tg?.initData || "";
+}
+
+function getLogoUrl() {
+  if (typeof window === "undefined") return "/rezgo-horizontal.jpeg";
+  return `${window.location.origin}/rezgo-horizontal.jpeg`;
 }
 
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 8000) {
@@ -186,11 +158,11 @@ function nowMxString() {
 }
 
 function getStoreNameById(storeId: string, stores: StoreItem[]) {
-  return stores.find((store) => store.tienda_id === storeId)?.nombre_tienda || storeId || "Sin tienda";
+  return stores.find((store) => store.tienda_id === storeId)?.nombre_tienda || "Tienda no informada";
 }
 
 function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
-  return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || visit.tienda_id;
+  return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || "Tienda no informada";
 }
 
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
@@ -230,23 +202,22 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
-  const [logoMissing, setLogoMissing] = useState(false);
 
-  const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
-  const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
-  const [gallery, setGallery] = useState<UiEvidence[]>(MOCK_GALLERY);
+  const [stores, setStores] = useState<StoreItem[]>([]);
+  const [visits, setVisits] = useState<VisitItem[]>([]);
+  const [gallery, setGallery] = useState<UiEvidence[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState("");
-  const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
+  const [selectedVisitId, setSelectedVisitId] = useState("");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
 
-  const [evidenceBrand, setEvidenceBrand] = useState(BRAND_OPTIONS[0]);
-  const [evidenceType, setEvidenceType] = useState(TYPE_OPTIONS[0]);
+  const [evidenceBrand, setEvidenceBrand] = useState("");
+  const [evidenceType, setEvidenceType] = useState("");
   const [evidencePhase, setEvidencePhase] = useState<EvidencePhase>("NA");
   const [evidenceQty, setEvidenceQty] = useState(1);
   const [evidenceDescription, setEvidenceDescription] = useState("");
 
-  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string>(MOCK_GALLERY[0]?.evidencia_id || "");
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
 
   useEffect(() => {
@@ -294,15 +265,14 @@ export default function App() {
     try {
       setSyncing(true);
       const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
+
       if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
-      if (dashboard.stores?.length) {
-        setStores(dashboard.stores);
-      }
+      if (dashboard.stores) setStores(dashboard.stores);
       if (dashboard.openVisits) {
         setVisits(dashboard.openVisits);
-        setSelectedVisitId((prev) => prev || dashboard.openVisits?.[0]?.visita_id || "");
-      } else {
-        setVisits([]);
+        if (!selectedVisitId && dashboard.openVisits[0]?.visita_id) {
+          setSelectedVisitId(dashboard.openVisits[0].visita_id);
+        }
       }
 
       const evidences = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
@@ -311,9 +281,12 @@ export default function App() {
           evidences.evidencias.map((item) => ({
             ...item,
             status: "ACTIVA",
-            tienda_nombre: stores.find((store) => item.descripcion.includes(store.tienda_id))?.nombre_tienda,
+            tienda_nombre: "Tienda no informada",
           }))
         );
+        if (!selectedEvidenceId && evidences.evidencias[0]?.evidencia_id) {
+          setSelectedEvidenceId(evidences.evidencias[0].evidencia_id);
+        }
       }
 
       setError("");
@@ -345,12 +318,6 @@ export default function App() {
       loadRealDashboard();
     }
   }, [loading, error, role]);
-
-  useEffect(() => {
-    if (activeGallery.length && !selectedEvidence) {
-      setSelectedEvidenceId(activeGallery[0].evidencia_id);
-    }
-  }, [activeGallery, selectedEvidence]);
 
   async function createEntry() {
     try {
@@ -425,25 +392,24 @@ export default function App() {
       return;
     }
 
-    const storeName = getVisitDisplayName(visit, stores);
     const created: UiEvidence[] = Array.from({ length: evidenceQty }).map((_, index) => ({
       evidencia_id: `UI-${Date.now()}-${index + 1}`,
-      tipo_evento: `EVIDENCIA_${evidenceType.toUpperCase()}`,
-      tipo_evidencia: evidenceType,
-      marca_nombre: evidenceBrand,
+      tipo_evento: `EVIDENCIA_${(evidenceType || "GENERAL").toUpperCase()}`,
+      tipo_evidencia: evidenceType || "Sin tipo",
+      marca_nombre: evidenceBrand || "Sin marca",
       riesgo: index === 0 ? "BAJO" : "MEDIO",
       fecha_hora_fmt: nowMxString(),
       url_foto: `https://picsum.photos/seed/${Date.now()}-${index}/1200/900`,
-      descripcion: `${evidenceDescription || "Captura registrada desde la UI"}${evidencePhase !== "NA" ? ` | FASE=${evidencePhase}` : ""}`,
+      descripcion: evidenceDescription || "Captura registrada desde la UI",
       status: "ACTIVA",
-      tienda_nombre: storeName,
+      tienda_nombre: getVisitDisplayName(visit, stores),
     }));
 
     setGallery((prev) => [...created, ...prev]);
     setSelectedEvidenceId(created[0].evidencia_id);
     setEvidenceDescription("");
     setEvidenceQty(1);
-    setStatusMsg("✅ Flujo de evidencias visible. Falta conectar foto real y endpoint final.");
+    setStatusMsg("✅ Flujo de evidencias visible. Aún falta conectar foto real, reglas y endpoint final.");
   }
 
   function markEvidenceAsCancelled() {
@@ -454,7 +420,7 @@ export default function App() {
     setGallery((prev) =>
       prev.map((item) =>
         item.evidencia_id === selectedEvidence.evidencia_id
-          ? { ...item, status: "ANULADA", descripcion: `${item.descripcion} | STATUS=ANULADA` }
+          ? { ...item, status: "ANULADA" }
           : item
       )
     );
@@ -473,7 +439,6 @@ export default function App() {
               ...item,
               url_foto: `https://picsum.photos/seed/replaced-${Date.now()}/1200/900`,
               fecha_hora_fmt: nowMxString(),
-              descripcion: `${item.descripcion} | REEMPLAZADA_DESDE_UI`,
             }
           : item
       )
@@ -489,11 +454,7 @@ export default function App() {
     setGallery((prev) =>
       prev.map((item) =>
         item.evidencia_id === selectedEvidence.evidencia_id
-          ? {
-              ...item,
-              note: noteDraft.trim(),
-              descripcion: `${item.descripcion} | NOTA=${noteDraft.trim()}`,
-            }
+          ? { ...item, note: noteDraft.trim() }
           : item
       )
     );
@@ -522,26 +483,45 @@ export default function App() {
       <style>{globalCss}</style>
 
       <div className="shell">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
-          <div className="heroLogoBlock">
-            {!logoMissing ? (
+        <div className="stickyTop">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
+            <div className="heroLogoBlock">
               <div className="brandPlate brandPlateHorizontal">
-                <img
-                  src="/rezgo-horizontal.jpeg"
-                  alt="REZGO"
-                  className="brandLogoHorizontal"
-                  onError={() => setLogoMissing(true)}
-                />
+                <img src={getLogoUrl()} alt="REZGO" className="brandLogoHorizontal" />
               </div>
-            ) : (
-              <div className="brandWord">REZGO</div>
-            )}
-          </div>
-          <div className="heroTitleBlock">
-            <div className="heroTitle heroTitleTight">Operación del<br />promotor</div>
-            <div className="heroMeta">{actorLabel}</div>
-          </div>
-        </motion.div>
+            </div>
+            <div className="heroTitleBlock">
+              <div className="heroTitle heroTitleTight">Operación<br />del promotor</div>
+              <div className="heroMeta heroMetaSingle">{actorLabel}</div>
+            </div>
+          </motion.div>
+
+          {role === "supervisor" ? (
+            <div className="tabsBar tabsInline">
+              {supervisorTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`}
+                  onClick={() => setSupervisorModule(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="tabsBar tabsInline">
+              {promotorTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`}
+                  onClick={() => setPromotorModule(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {error ? (
           <div className="card warning">
@@ -551,32 +531,6 @@ export default function App() {
             </div>
           </div>
         ) : null}
-
-        {role === "supervisor" ? (
-          <div className="tabsBar tabsInline">
-            {supervisorTabs.map((tab) => (
-              <button
-                key={tab.key}
-                className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`}
-                onClick={() => setSupervisorModule(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="tabsBar tabsInline">
-            {promotorTabs.map((tab) => (
-              <button
-                key={tab.key}
-                className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`}
-                onClick={() => setPromotorModule(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         {role === "promotor" && promotorModule === "asistencia" ? (
           <div className="card">
@@ -614,7 +568,7 @@ export default function App() {
                       className={`listBtn ${selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}
                     >
                       <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
-                      <div className="listSub">Inicio: {formatHourFromIso(visit.hora_inicio)}</div>
+                      <div className="listSub">Entrada: {formatHourFromIso(visit.hora_inicio)}</div>
                     </button>
                   ))}
                   {!openVisits.length ? <div className="emptyBox">No hay visitas abiertas.</div> : null}
@@ -631,6 +585,7 @@ export default function App() {
               <div className="panel">
                 <label className="fieldLabel">Visita activa</label>
                 <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
+                  <option value="">Selecciona una visita</option>
                   {openVisits.map((visit) => (
                     <option key={visit.visita_id} value={visit.visita_id}>
                       {getVisitDisplayName(visit, stores)}
@@ -639,18 +594,10 @@ export default function App() {
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
-                <select className="inputLike" value={evidenceBrand} onChange={(e) => setEvidenceBrand(e.target.value)}>
-                  {BRAND_OPTIONS.map((brand) => (
-                    <option key={brand} value={brand}>{brand}</option>
-                  ))}
-                </select>
+                <input className="inputLike" value={evidenceBrand} onChange={(e) => setEvidenceBrand(e.target.value)} placeholder="Marca" />
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
-                  {TYPE_OPTIONS.map((type) => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
+                <input className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)} placeholder="Tipo de evidencia" />
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
                 <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)}>
@@ -701,8 +648,8 @@ export default function App() {
                       onClick={() => setSelectedEvidenceId(item.evidencia_id)}
                       className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}
                     >
-                      <div className="listTitle">{item.tienda_nombre || "Sin tienda"} · {item.tipo_evidencia}</div>
-                      <div className="listSub">{item.marca_nombre} · {item.riesgo}</div>
+                      <div className="listTitle">{item.tienda_nombre || "Tienda no informada"}</div>
+                      <div className="listSub">{item.tipo_evidencia} · {item.marca_nombre}</div>
                     </button>
                   ))}
                   {!activeGallery.length ? <div className="emptyBox">No hay evidencias activas.</div> : null}
@@ -716,7 +663,7 @@ export default function App() {
                     <div className="previewFrame">
                       <img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" />
                     </div>
-                    <div className="summaryLine">{selectedEvidence.tienda_nombre || "Sin tienda"}</div>
+                    <div className="summaryLine">{selectedEvidence.tienda_nombre || "Tienda no informada"}</div>
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
                     <div className="actionGrid actionGridButtons">
@@ -768,15 +715,15 @@ export default function App() {
                 <div className="summaryLine">Alertas: <strong>{summary.alertas}</strong></div>
               </div>
               <div className="summaryBlock">
-                <div className="miniTitle">Visitas activas</div>
-                {openVisits.length ? (
-                  openVisits.map((visit) => (
+                <div className="miniTitle">Registros de visitas</div>
+                {visits.length ? (
+                  visits.map((visit) => (
                     <div className="summaryLine" key={visit.visita_id}>
-                      {getVisitDisplayName(visit, stores)} · <strong>{formatHourFromIso(visit.hora_inicio)}</strong>
+                      {getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}
                     </div>
                   ))
                 ) : (
-                  <div className="summaryLine">No hay visitas activas.</div>
+                  <div className="summaryLine">No hay registros del día.</div>
                 )}
               </div>
             </div>
@@ -818,7 +765,7 @@ export default function App() {
                       {item.riesgo}
                     </span>
                   </div>
-                  <div className="gallerySub">{item.tienda_nombre || "Sin tienda"}</div>
+                  <div className="gallerySub">{item.tienda_nombre || "Tienda no informada"}</div>
                   <div className="galleryDate">{item.fecha_hora_fmt}</div>
                   <div className="galleryDesc">{item.descripcion}</div>
                 </div>
@@ -845,7 +792,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     background: "linear-gradient(180deg, #eef1f4 0%, #e7ebef 100%)",
     color: "#263238",
-    padding: "14px 12px 28px",
+    padding: "12px 12px 28px",
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
   },
 };
@@ -855,6 +802,14 @@ const globalCss = `
 body { margin: 0; background: #eef1f4; }
 button, input, select { font: inherit; }
 .shell { max-width: 1180px; margin: 0 auto; }
+.stickyTop {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: linear-gradient(180deg, rgba(238,241,244,0.97) 0%, rgba(238,241,244,0.92) 100%);
+  backdrop-filter: blur(6px);
+  padding-bottom: 8px;
+}
 .hero {
   display: flex;
   background: linear-gradient(135deg, #f8f9fb 0%, #edf1f3 100%);
@@ -871,7 +826,6 @@ button, input, select { font: inherit; }
 .heroLogoBlock {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
   min-width: 0;
 }
 .heroTitleBlock {
@@ -879,10 +833,9 @@ button, input, select { font: inherit; }
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  min-width: 128px;
-  width: 128px;
+  width: 118px;
+  min-width: 118px;
 }
-.heroLeft { display: flex; flex-direction: column; gap: 2px; }
 .brandPlate {
   background: #ffffff;
   border: 1px solid rgba(38,50,56,0.08);
@@ -894,13 +847,6 @@ button, input, select { font: inherit; }
 }
 .brandPlateHorizontal { min-height: 34px; }
 .brandLogoHorizontal { width: 108px; height: auto; display: block; object-fit: contain; }
-.brandWord {
-  font-size: 20px;
-  line-height: 1;
-  font-weight: 900;
-  letter-spacing: 0.02em;
-  color: #43a047;
-}
 .heroTitle {
   font-size: 14px;
   line-height: 1.05;
@@ -909,9 +855,18 @@ button, input, select { font: inherit; }
 }
 .heroTitleTight {
   text-align: right;
-  max-width: 128px;
+  max-width: 118px;
 }
-.heroMeta { color: #78909c; font-size: 11px; text-align: right; margin-top: 2px; }
+.heroMetaSingle {
+  color: #78909c;
+  font-size: 11px;
+  text-align: right;
+  margin-top: 3px;
+  white-space: nowrap;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .card {
   margin-top: 12px;
   background: rgba(255,255,255,0.92);
@@ -929,7 +884,7 @@ button, input, select { font: inherit; }
 @keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 .sectionTitle { font-size: 18px; font-weight: 800; color: #263238; }
 .tabsBar {
-  margin-top: 12px;
+  margin-top: 8px;
   display: flex;
   gap: 4px;
   overflow-x: auto;
@@ -986,36 +941,18 @@ button, input, select { font: inherit; }
 .emptyBox {
   padding: 12px; border-radius: 12px; background: rgba(96,125,139,0.08); color: #607d8b; font-size: 13px;
 }
-.actionHintRow {
-  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; margin-bottom: 2px;
-}
-.hintChip {
-  display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 10px;
-  font-size: 11px; font-weight: 700; color: #546e7a; background: rgba(96,125,139,0.12);
-}
-.hintLive { background: rgba(76,175,80,.16); color: #2e7d32; }
-.flowGrid, .actionGrid, .summaryGrid {
+.actionGrid, .summaryGrid {
   margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
 }
-.flowGridSingle { grid-template-columns: 1fr; }
 .actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
-.flowTitle { font-weight: 800; color: #263238; }
-.flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
 .summaryBlock {
   border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
-.miniFlowPill {
-  border-radius: 12px;
-  background: rgba(96,125,139,0.08);
-  color: #455a64;
-  font-size: 12px;
-  padding: 10px 12px;
-}
 .previewFrame {
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -1075,8 +1012,7 @@ button, input, select { font: inherit; }
   .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .hero { flex-direction: row; }
-  .heroTitleBlock { width: 108px; min-width: 108px; }
-  .heroTitleTight { max-width: 108px; }
+  .heroTitleBlock { width: 112px; min-width: 112px; }
+  .heroTitleTight { max-width: 112px; }
 }
 `;
