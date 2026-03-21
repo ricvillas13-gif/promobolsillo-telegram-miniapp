@@ -16,7 +16,15 @@ import {
 
 declare global {
   interface Window {
-    Telegram?: any;
+    Telegram?: {
+      WebApp?: {
+        initData?: string;
+        ready?: () => void;
+        expand?: () => void;
+        setHeaderColor?: (color: string) => void;
+        setBackgroundColor?: (color: string) => void;
+      };
+    };
   }
 }
 
@@ -61,6 +69,7 @@ type EvidenceItem = {
 type UiEvidence = EvidenceItem & {
   status?: "ACTIVA" | "ANULADA";
   note?: string;
+  tienda_nombre?: string;
 };
 
 type DashboardResponse = {
@@ -119,6 +128,7 @@ const MOCK_GALLERY: UiEvidence[] = [
     url_foto: "https://picsum.photos/seed/rezgo1/1200/900",
     descripcion: "Referencia local.",
     status: "ACTIVA",
+    tienda_nombre: "Bodega Aurrera San Mateo",
   },
 ];
 
@@ -165,12 +175,6 @@ function formatHourFromIso(iso: string) {
   });
 }
 
-function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
-  const byStore = stores.find((store) => store.tienda_id === visit.tienda_id)?.nombre_tienda;
-  if (byStore) return byStore;
-  return visit.tienda_nombre || visit.tienda_id;
-}
-
 function nowMxString() {
   return new Date().toLocaleString("es-MX", {
     year: "numeric",
@@ -179,6 +183,14 @@ function nowMxString() {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function getStoreNameById(storeId: string, stores: StoreItem[]) {
+  return stores.find((store) => store.tienda_id === storeId)?.nombre_tienda || storeId || "Sin tienda";
+}
+
+function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
+  return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || visit.tienda_id;
 }
 
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
@@ -285,7 +297,6 @@ export default function App() {
       if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
       if (dashboard.stores?.length) {
         setStores(dashboard.stores);
-        setSelectedStoreId((prev) => prev || dashboard.stores?.[0]?.tienda_id || "");
       }
       if (dashboard.openVisits) {
         setVisits(dashboard.openVisits);
@@ -300,6 +311,7 @@ export default function App() {
           evidences.evidencias.map((item) => ({
             ...item,
             status: "ACTIVA",
+            tienda_nombre: stores.find((store) => item.descripcion.includes(store.tienda_id))?.nombre_tienda,
           }))
         );
       }
@@ -351,14 +363,13 @@ export default function App() {
         return;
       }
 
-      setSyncing(true);
       const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
       const confirmMessage = `¿Deseas registrar entrada en ${selectedStore?.nombre_tienda || "la tienda seleccionada"}?`;
       if (typeof window !== "undefined" && !window.confirm(confirmMessage)) {
-        setSyncing(false);
         return;
       }
 
+      setSyncing(true);
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
         tienda_id: selectedStoreId,
       });
@@ -414,6 +425,7 @@ export default function App() {
       return;
     }
 
+    const storeName = getVisitDisplayName(visit, stores);
     const created: UiEvidence[] = Array.from({ length: evidenceQty }).map((_, index) => ({
       evidencia_id: `UI-${Date.now()}-${index + 1}`,
       tipo_evento: `EVIDENCIA_${evidenceType.toUpperCase()}`,
@@ -422,8 +434,9 @@ export default function App() {
       riesgo: index === 0 ? "BAJO" : "MEDIO",
       fecha_hora_fmt: nowMxString(),
       url_foto: `https://picsum.photos/seed/${Date.now()}-${index}/1200/900`,
-      descripcion: `${evidenceDescription || "Captura registrada desde la UI"}${evidencePhase !== "NA" ? ` | FASE=${evidencePhase}` : ""} | VISITA=${getVisitDisplayName(visit, stores)}`,
+      descripcion: `${evidenceDescription || "Captura registrada desde la UI"}${evidencePhase !== "NA" ? ` | FASE=${evidencePhase}` : ""}`,
       status: "ACTIVA",
+      tienda_nombre: storeName,
     }));
 
     setGallery((prev) => [...created, ...prev]);
@@ -509,8 +522,8 @@ export default function App() {
       <style>{globalCss}</style>
 
       <div className="shell">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero">
-          <div className="heroLeft">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
+          <div className="heroLogoBlock">
             {!logoMissing ? (
               <div className="brandPlate brandPlateHorizontal">
                 <img
@@ -523,8 +536,10 @@ export default function App() {
             ) : (
               <div className="brandWord">REZGO</div>
             )}
-            <div className="heroTitle">{role === "supervisor" ? "Operación del supervisor" : "Operación del promotor"}</div>
-                        <div className="heroMeta">{actorLabel}</div>
+          </div>
+          <div className="heroTitleBlock">
+            <div className="heroTitle heroTitleTight">Operación del<br />promotor</div>
+            <div className="heroMeta">{actorLabel}</div>
           </div>
         </motion.div>
 
@@ -566,7 +581,6 @@ export default function App() {
         {role === "promotor" && promotorModule === "asistencia" ? (
           <div className="card">
             <div className="sectionTitle">Asistencia</div>
-            
             <div className="twoCol">
               <div className="panel">
                 <label className="fieldLabel">Tienda</label>
@@ -578,15 +592,6 @@ export default function App() {
                     </option>
                   ))}
                 </select>
-
-                <div className="actionHintRow">
-                  <span className="hintChip hintLive">Entrada real</span>
-                  <span className="hintChip hintLive">Salida real</span>
-                  <span className="hintChip">Foto</span>
-                  <span className="hintChip">Ubicación</span>
-                  <span className="hintChip">Historial</span>
-                  <span className="hintChip">Corregir foto</span>
-                </div>
 
                 <button className="primaryBtn" onClick={createEntry} disabled={syncing}>
                   <MapPin size={16} />
@@ -622,7 +627,6 @@ export default function App() {
         {role === "promotor" && promotorModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
-            
             <div className="twoCol">
               <div className="panel">
                 <label className="fieldLabel">Visita activa</label>
@@ -675,19 +679,6 @@ export default function App() {
                   placeholder="Ej. Cabecera completa, competencia lateral..."
                 />
 
-                <div className="flowGrid flowGridSingle">
-                  {[
-                    "1. Elegir visita activa",
-                    "2. Elegir marca",
-                    "3. Elegir tipo",
-                    "4. Elegir fase",
-                    "5. Capturar fotos",
-                    "6. Continuar / cambiar marca / volver",
-                  ].map((text) => (
-                    <div className="miniFlowPill" key={text}>{text}</div>
-                  ))}
-                </div>
-
                 <button className="primaryBtn" onClick={saveEvidenceFlow}>
                   <Camera size={16} />
                   Guardar flujo visible
@@ -700,7 +691,6 @@ export default function App() {
         {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
-            
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Listado</div>
@@ -711,7 +701,7 @@ export default function App() {
                       onClick={() => setSelectedEvidenceId(item.evidencia_id)}
                       className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}
                     >
-                      <div className="listTitle">{item.tipo_evidencia}</div>
+                      <div className="listTitle">{item.tienda_nombre || "Sin tienda"} · {item.tipo_evidencia}</div>
                       <div className="listSub">{item.marca_nombre} · {item.riesgo}</div>
                     </button>
                   ))}
@@ -726,6 +716,7 @@ export default function App() {
                     <div className="previewFrame">
                       <img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" />
                     </div>
+                    <div className="summaryLine">{selectedEvidence.tienda_nombre || "Sin tienda"}</div>
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
                     <div className="actionGrid actionGridButtons">
@@ -795,7 +786,6 @@ export default function App() {
         {role === "supervisor" ? (
           <div className="card">
             <div className="sectionTitle">Supervisor</div>
-            <div className="sectionSub">Base visual para hoy: equipo, alertas, evidencias y resumen. Siguiente bloque: conectar endpoints reales del supervisor.</div>
             <div className="actionGrid">
               {supervisorCards.map((item) => {
                 const Icon = item.Icon;
@@ -828,7 +818,7 @@ export default function App() {
                       {item.riesgo}
                     </span>
                   </div>
-                  <div className="gallerySub">{item.marca_nombre}</div>
+                  <div className="gallerySub">{item.tienda_nombre || "Sin tienda"}</div>
                   <div className="galleryDate">{item.fecha_hora_fmt}</div>
                   <div className="galleryDesc">{item.descripcion}</div>
                 </div>
@@ -867,48 +857,66 @@ button, input, select { font: inherit; }
 .shell { max-width: 1180px; margin: 0 auto; }
 .hero {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
   background: linear-gradient(135deg, #f8f9fb 0%, #edf1f3 100%);
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 18px;
-  padding: 10px 12px;
+  border-radius: 16px;
+  padding: 8px 12px;
   box-shadow: 0 6px 16px rgba(38,50,56,0.06);
 }
-.heroLeft { display: flex; flex-direction: column; gap: 3px; }
+.heroSplit {
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.heroLogoBlock {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.heroTitleBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 128px;
+  width: 128px;
+}
+.heroLeft { display: flex; flex-direction: column; gap: 2px; }
 .brandPlate {
   background: #ffffff;
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 14px;
-  padding: 8px 12px;
+  border-radius: 12px;
+  padding: 5px 8px;
   display: inline-flex;
   align-items: center;
-  box-shadow: 0 5px 14px rgba(38,50,56,0.07);
+  box-shadow: 0 4px 10px rgba(38,50,56,0.05);
 }
-.brandPlateHorizontal { min-height: 40px; padding: 6px 10px; }
-.brandLogoHorizontal { width: 128px; height: auto; display: block; object-fit: contain; }
+.brandPlateHorizontal { min-height: 34px; }
+.brandLogoHorizontal { width: 108px; height: auto; display: block; object-fit: contain; }
 .brandWord {
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1;
   font-weight: 900;
   letter-spacing: 0.02em;
   color: #43a047;
 }
 .heroTitle {
-  font-size: 16px;
-  line-height: 1.1;
+  font-size: 14px;
+  line-height: 1.05;
   font-weight: 800;
   color: #263238;
-  white-space: nowrap;
 }
-.heroText { color: #5f6b72; font-size: 14px; }
-.heroMeta { color: #78909c; font-size: 11px; }
+.heroTitleTight {
+  text-align: right;
+  max-width: 128px;
+}
+.heroMeta { color: #78909c; font-size: 11px; text-align: right; margin-top: 2px; }
 .card {
   margin-top: 12px;
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 22px;
+  border-radius: 18px;
   padding: 14px;
   box-shadow: 0 10px 22px rgba(38,50,56,0.07);
 }
@@ -920,27 +928,26 @@ button, input, select { font: inherit; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 .sectionTitle { font-size: 18px; font-weight: 800; color: #263238; }
-.sectionSub { margin-top: 4px; color: #607d8b; font-size: 13px; }
 .tabsBar {
   margin-top: 12px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
   overflow-x: auto;
   white-space: nowrap;
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 18px;
-  padding: 6px;
+  border-radius: 14px;
+  padding: 4px;
   scrollbar-width: thin;
 }
 .tabsInline::-webkit-scrollbar { height: 6px; }
 .tabsInline::-webkit-scrollbar-thumb { background: rgba(96,125,139,0.24); border-radius: 999px; }
 .tabBtn {
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: #546e7a;
-  padding: 10px 14px;
+  padding: 8px 12px;
   cursor: pointer;
   font-weight: 700;
   flex: 0 0 auto;
@@ -960,7 +967,7 @@ button, input, select { font: inherit; }
 .listTitle { font-weight: 800; }
 .listSub { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .panel {
-  border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
+  border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(248,249,251,0.95); padding: 14px;
 }
 .fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
@@ -991,7 +998,8 @@ button, input, select { font: inherit; }
   margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
 }
 .flowGridSingle { grid-template-columns: 1fr; }
-.flowCard, .actionCard {
+.actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
@@ -1015,7 +1023,6 @@ button, input, select { font: inherit; }
   background: #dfe5e8;
   margin-bottom: 10px;
 }
-.actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .actionButton {
   border: 0;
   border-radius: 12px;
@@ -1065,9 +1072,11 @@ button, input, select { font: inherit; }
 .footerActions { margin-top: 12px; display: flex; justify-content: flex-end; }
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .flowGrid, .actionGrid, .summaryGrid, .actionGridButtons { grid-template-columns: 1fr; }
+  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .hero { flex-direction: column; }
+  .hero { flex-direction: row; }
+  .heroTitleBlock { width: 108px; min-width: 108px; }
+  .heroTitleTight { max-width: 108px; }
 }
 `;
