@@ -165,6 +165,12 @@ function formatHourFromIso(iso: string) {
   });
 }
 
+function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
+  const byStore = stores.find((store) => store.tienda_id === visit.tienda_id)?.nombre_tienda;
+  if (byStore) return byStore;
+  return visit.tienda_nombre || visit.tienda_id;
+}
+
 function nowMxString() {
   return new Date().toLocaleString("es-MX", {
     year: "numeric",
@@ -217,7 +223,7 @@ export default function App() {
   const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
   const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
   const [gallery, setGallery] = useState<UiEvidence[]>(MOCK_GALLERY);
-  const [selectedStoreId, setSelectedStoreId] = useState(MOCK_STORES[0]?.tienda_id || "");
+  const [selectedStoreId, setSelectedStoreId] = useState("");
   const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
@@ -346,6 +352,13 @@ export default function App() {
       }
 
       setSyncing(true);
+      const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
+      const confirmMessage = `¿Deseas registrar entrada en ${selectedStore?.nombre_tienda || "la tienda seleccionada"}?`;
+      if (typeof window !== "undefined" && !window.confirm(confirmMessage)) {
+        setSyncing(false);
+        return;
+      }
+
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
         tienda_id: selectedStoreId,
       });
@@ -409,7 +422,7 @@ export default function App() {
       riesgo: index === 0 ? "BAJO" : "MEDIO",
       fecha_hora_fmt: nowMxString(),
       url_foto: `https://picsum.photos/seed/${Date.now()}-${index}/1200/900`,
-      descripcion: `${evidenceDescription || "Captura registrada desde la UI"}${evidencePhase !== "NA" ? ` | FASE=${evidencePhase}` : ""} | VISITA=${visit.tienda_nombre}`,
+      descripcion: `${evidenceDescription || "Captura registrada desde la UI"}${evidencePhase !== "NA" ? ` | FASE=${evidencePhase}` : ""} | VISITA=${getVisitDisplayName(visit, stores)}`,
       status: "ACTIVA",
     }));
 
@@ -511,8 +524,7 @@ export default function App() {
               <div className="brandWord">REZGO</div>
             )}
             <div className="heroTitle">{role === "supervisor" ? "Operación del supervisor" : "Operación del promotor"}</div>
-            <div className="heroText">Pasión por la movilidad</div>
-            <div className="heroMeta">{actorLabel}</div>
+                        <div className="heroMeta">{actorLabel}</div>
           </div>
         </motion.div>
 
@@ -554,12 +566,12 @@ export default function App() {
         {role === "promotor" && promotorModule === "asistencia" ? (
           <div className="card">
             <div className="sectionTitle">Asistencia</div>
-            <div className="sectionSub">Entrada y salida reales. Próximo bloque: foto, ubicación, historial y corrección de fotos.</div>
-
+            
             <div className="twoCol">
               <div className="panel">
                 <label className="fieldLabel">Tienda</label>
                 <select className="inputLike" value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)}>
+                  <option value="">Selecciona una tienda</option>
                   {stores.map((store) => (
                     <option key={store.tienda_id} value={store.tienda_id}>
                       {store.nombre_tienda}
@@ -596,7 +608,7 @@ export default function App() {
                       onClick={() => setSelectedVisitId(visit.visita_id)}
                       className={`listBtn ${selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}
                     >
-                      <div className="listTitle">{visit.tienda_nombre}</div>
+                      <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
                       <div className="listSub">Inicio: {formatHourFromIso(visit.hora_inicio)}</div>
                     </button>
                   ))}
@@ -610,15 +622,14 @@ export default function App() {
         {role === "promotor" && promotorModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
-            <div className="sectionSub">Flujo visible del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
-
+            
             <div className="twoCol">
               <div className="panel">
                 <label className="fieldLabel">Visita activa</label>
                 <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
                   {openVisits.map((visit) => (
                     <option key={visit.visita_id} value={visit.visita_id}>
-                      {visit.tienda_nombre}
+                      {getVisitDisplayName(visit, stores)}
                     </option>
                   ))}
                 </select>
@@ -689,8 +700,7 @@ export default function App() {
         {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
-            <div className="sectionSub">Acciones visibles: ver, anular, reemplazar y agregar nota.</div>
-
+            
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Listado</div>
@@ -771,7 +781,7 @@ export default function App() {
                 {openVisits.length ? (
                   openVisits.map((visit) => (
                     <div className="summaryLine" key={visit.visita_id}>
-                      {visit.tienda_nombre} · <strong>{formatHourFromIso(visit.hora_inicio)}</strong>
+                      {getVisitDisplayName(visit, stores)} · <strong>{formatHourFromIso(visit.hora_inicio)}</strong>
                     </div>
                   ))
                 ) : (
@@ -858,15 +868,15 @@ button, input, select { font: inherit; }
 .hero {
   display: flex;
   justify-content: space-between;
-  gap: 18px;
+  gap: 12px;
   align-items: flex-start;
   background: linear-gradient(135deg, #f8f9fb 0%, #edf1f3 100%);
   border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 24px;
-  padding: 14px 16px;
-  box-shadow: 0 10px 24px rgba(38,50,56,0.08);
+  border-radius: 18px;
+  padding: 10px 12px;
+  box-shadow: 0 6px 16px rgba(38,50,56,0.06);
 }
-.heroLeft { display: flex; flex-direction: column; gap: 6px; }
+.heroLeft { display: flex; flex-direction: column; gap: 3px; }
 .brandPlate {
   background: #ffffff;
   border: 1px solid rgba(38,50,56,0.08);
@@ -876,8 +886,8 @@ button, input, select { font: inherit; }
   align-items: center;
   box-shadow: 0 5px 14px rgba(38,50,56,0.07);
 }
-.brandPlateHorizontal { min-height: 52px; }
-.brandLogoHorizontal { width: 170px; height: auto; display: block; object-fit: contain; }
+.brandPlateHorizontal { min-height: 40px; padding: 6px 10px; }
+.brandLogoHorizontal { width: 128px; height: auto; display: block; object-fit: contain; }
 .brandWord {
   font-size: 24px;
   line-height: 1;
@@ -886,14 +896,14 @@ button, input, select { font: inherit; }
   color: #43a047;
 }
 .heroTitle {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.1;
   font-weight: 800;
   color: #263238;
   white-space: nowrap;
 }
 .heroText { color: #5f6b72; font-size: 14px; }
-.heroMeta { color: #78909c; font-size: 12px; }
+.heroMeta { color: #78909c; font-size: 11px; }
 .card {
   margin-top: 12px;
   background: rgba(255,255,255,0.92);
