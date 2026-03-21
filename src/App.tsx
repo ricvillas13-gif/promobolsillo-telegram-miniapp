@@ -4,15 +4,17 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  Eye,
   FolderOpen,
   Image as ImageIcon,
   ListChecks,
   MapPin,
+  Pencil,
   RefreshCw,
   ShieldAlert,
   Store,
+  Trash2,
   UserCheck,
-  Users,
 } from "lucide-react";
 
 declare global {
@@ -23,7 +25,7 @@ declare global {
 
 type Role = "promotor" | "supervisor" | "cliente";
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
-type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
+type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 
 type BootstrapResponse = {
   ok: boolean;
@@ -56,6 +58,11 @@ type EvidenceItem = {
   fecha_hora_fmt: string;
   url_foto: string;
   descripcion: string;
+};
+
+type UiEvidence = EvidenceItem & {
+  status?: "ACTIVA" | "ANULADA";
+  note?: string;
 };
 
 type DashboardResponse = {
@@ -103,7 +110,7 @@ const MOCK_VISITS: VisitItem[] = [
   },
 ];
 
-const MOCK_GALLERY: EvidenceItem[] = [
+const MOCK_GALLERY: UiEvidence[] = [
   {
     evidencia_id: "EV-1",
     tipo_evento: "EVIDENCIA_PRECIO",
@@ -113,8 +120,12 @@ const MOCK_GALLERY: EvidenceItem[] = [
     fecha_hora_fmt: "2026-03-20 09:42",
     url_foto: "https://picsum.photos/seed/rezgo1/1200/900",
     descripcion: "Referencia local.",
+    status: "ACTIVA",
   },
 ];
+
+const BRAND_OPTIONS = ["Dove", "Axe", "Rexona", "Sedal"];
+const TYPE_OPTIONS = ["Precio", "Promoción", "Competencia", "Anaquel"];
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -159,6 +170,16 @@ function formatHourFromIso(iso: string) {
   });
 }
 
+function nowMxString() {
+  return new Date().toLocaleString("es-MX", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
   { key: "asistencia", label: "Asistencia" },
   { key: "evidencias", label: "Evidencias" },
@@ -166,34 +187,11 @@ const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
   { key: "resumen", label: "Resumen" },
 ];
 
-const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
-  { key: "equipo", label: "Equipo" },
-  { key: "alertas", label: "Alertas" },
-  { key: "evidencias", label: "Evidencias" },
-  { key: "resumen", label: "Resumen" },
-];
-
-const evidenceFlow: Array<{ key: string; title: string; text: string }> = [
-  { key: "visita", title: "Elegir visita activa", text: "Tomar la visita abierta correcta antes de capturar." },
-  { key: "marca", title: "Elegir marca", text: "Usar catálogo de marcas activas." },
-  { key: "tipo", title: "Elegir tipo", text: "Precio, promoción, competencia, anaquel y otros." },
-  { key: "fase", title: "Elegir fase", text: "Antes o después cuando la regla lo requiera." },
-  { key: "fotos", title: "Cargar fotos", text: "Subir la cantidad requerida por regla." },
-  { key: "continuar", title: "Continuar", text: "Nueva evidencia, cambiar marca o volver." },
-];
-
 const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
-  { key: "ver", Icon: FolderOpen, title: "Ver evidencia", text: "Abrir foto y detalle de la captura." },
-  { key: "anular", Icon: AlertTriangle, title: "Anular", text: "Marcar evidencia como anulada con motivo." },
+  { key: "ver", Icon: Eye, title: "Ver evidencia", text: "Abrir foto y detalle de la captura." },
+  { key: "anular", Icon: Trash2, title: "Anular", text: "Marcar evidencia como anulada con motivo." },
   { key: "reemplazar", Icon: Camera, title: "Reemplazar", text: "Subir nueva foto y ligar reemplazo." },
-  { key: "nota", Icon: ListChecks, title: "Agregar nota", text: "Guardar observación operativa sobre la evidencia." },
-];
-
-const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
-  { key: "equipo", Icon: Users, title: "Equipo del día", text: "Promotores, visitas activas y desempeño del turno." },
-  { key: "alertas", Icon: ShieldAlert, title: "Alertas", text: "Asistencias incompletas, riesgos y pendientes." },
-  { key: "evidencias", Icon: ImageIcon, title: "Evidencias", text: "Revisión operativa y visual por promotor." },
-  { key: "seguimiento", Icon: ListChecks, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
+  { key: "nota", Icon: Pencil, title: "Agregar nota", text: "Guardar observación operativa sobre la evidencia." },
 ];
 
 export default function App() {
@@ -209,12 +207,19 @@ export default function App() {
 
   const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
   const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
-  const [gallery, setGallery] = useState<EvidenceItem[]>(MOCK_GALLERY);
+  const [gallery, setGallery] = useState<UiEvidence[]>(MOCK_GALLERY);
   const [selectedStoreId, setSelectedStoreId] = useState(MOCK_STORES[0]?.tienda_id || "");
   const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
+  const [selectedModule, setSelectedModule] = useState<PromotorModule>("asistencia");
 
-  const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
-  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
+  const [evidenceBrand, setEvidenceBrand] = useState(BRAND_OPTIONS[0]);
+  const [evidenceType, setEvidenceType] = useState(TYPE_OPTIONS[0]);
+  const [evidencePhase, setEvidencePhase] = useState<EvidencePhase>("NA");
+  const [evidenceQty, setEvidenceQty] = useState(1);
+  const [evidenceDescription, setEvidenceDescription] = useState("");
+
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string>(MOCK_GALLERY[0]?.evidencia_id || "");
+  const [noteDraft, setNoteDraft] = useState("");
 
   useEffect(() => {
     if (tg) {
@@ -226,15 +231,20 @@ export default function App() {
   }, [tg]);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
+  const activeGallery = useMemo(() => gallery.filter((item) => item.status !== "ANULADA"), [gallery]);
+  const selectedEvidence = useMemo(
+    () => activeGallery.find((item) => item.evidencia_id === selectedEvidenceId) || activeGallery[0] || null,
+    [activeGallery, selectedEvidenceId]
+  );
 
   const summary = useMemo(
     () => ({
       assignedStores: stores.length,
       openVisits: openVisits.length,
-      evidenciasHoy: gallery.length,
-      alertas: gallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
+      evidenciasHoy: activeGallery.length,
+      alertas: activeGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
     }),
-    [stores, openVisits, gallery]
+    [stores, openVisits, activeGallery]
   );
 
   async function loadBootstrap() {
@@ -270,7 +280,12 @@ export default function App() {
 
       const evidences = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
       if (evidences.evidencias) {
-        setGallery(evidences.evidencias.filter((item) => Boolean(item.url_foto)));
+        setGallery(
+          evidences.evidencias.map((item) => ({
+            ...item,
+            status: "ACTIVA",
+          }))
+        );
       }
 
       setError("");
@@ -302,6 +317,12 @@ export default function App() {
       loadRealDashboard();
     }
   }, [loading, error, role]);
+
+  useEffect(() => {
+    if (activeGallery.length && !selectedEvidence) {
+      setSelectedEvidenceId(activeGallery[0].evidencia_id);
+    }
+  }, [activeGallery, selectedEvidence]);
 
   async function createEntry() {
     try {
@@ -361,6 +382,87 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function saveEvidenceFlow() {
+    const visit = openVisits.find((item) => item.visita_id === selectedVisitId) || openVisits[0];
+    if (!visit) {
+      setStatusMsg("⚠️ Necesitas una visita activa para registrar evidencias.");
+      return;
+    }
+
+    const created: UiEvidence[] = Array.from({ length: evidenceQty }).map((_, index) => ({
+      evidencia_id: `UI-${Date.now()}-${index + 1}`,
+      tipo_evento: `EVIDENCIA_${evidenceType.toUpperCase()}`,
+      tipo_evidencia: evidenceType,
+      marca_nombre: evidenceBrand,
+      riesgo: index === 0 ? "BAJO" : "MEDIO",
+      fecha_hora_fmt: nowMxString(),
+      url_foto: `https://picsum.photos/seed/${Date.now()}-${index}/1200/900`,
+      descripcion: `${evidenceDescription || "Captura registrada desde la UI"}${evidencePhase !== "NA" ? ` | FASE=${evidencePhase}` : ""} | VISITA=${visit.tienda_nombre}`,
+      status: "ACTIVA",
+    }));
+
+    setGallery((prev) => [...created, ...prev]);
+    setSelectedEvidenceId(created[0].evidencia_id);
+    setEvidenceDescription("");
+    setEvidenceQty(1);
+    setStatusMsg("✅ Flujo de evidencias visible en la Mini App. Falta conectar foto real y endpoint final.");
+  }
+
+  function markEvidenceAsCancelled() {
+    if (!selectedEvidence) {
+      setStatusMsg("⚠️ Selecciona una evidencia.");
+      return;
+    }
+    setGallery((prev) =>
+      prev.map((item) =>
+        item.evidencia_id === selectedEvidence.evidencia_id
+          ? { ...item, status: "ANULADA", descripcion: `${item.descripcion} | STATUS=ANULADA` }
+          : item
+      )
+    );
+    setStatusMsg("✅ Evidencia marcada como anulada en la UI.");
+  }
+
+  function replaceEvidence() {
+    if (!selectedEvidence) {
+      setStatusMsg("⚠️ Selecciona una evidencia.");
+      return;
+    }
+    setGallery((prev) =>
+      prev.map((item) =>
+        item.evidencia_id === selectedEvidence.evidencia_id
+          ? {
+              ...item,
+              url_foto: `https://picsum.photos/seed/replaced-${Date.now()}/1200/900`,
+              fecha_hora_fmt: nowMxString(),
+              descripcion: `${item.descripcion} | REEMPLAZADA_DESDE_UI`,
+            }
+          : item
+      )
+    );
+    setStatusMsg("✅ Evidencia reemplazada en la UI.");
+  }
+
+  function saveNote() {
+    if (!selectedEvidence || !noteDraft.trim()) {
+      setStatusMsg("⚠️ Escribe una nota y selecciona una evidencia.");
+      return;
+    }
+    setGallery((prev) =>
+      prev.map((item) =>
+        item.evidencia_id === selectedEvidence.evidencia_id
+          ? {
+              ...item,
+              note: noteDraft.trim(),
+              descripcion: `${item.descripcion} | NOTA=${noteDraft.trim()}`,
+            }
+          : item
+      )
+    );
+    setNoteDraft("");
+    setStatusMsg("✅ Nota agregada en la UI.");
   }
 
   if (loading) {
@@ -447,33 +549,19 @@ export default function App() {
           </div>
         </div>
 
-        {role === "supervisor" ? (
-          <div className="tabsBar tabsBarFour">
-            {supervisorTabs.map((tab) => (
-              <button
-                key={tab.key}
-                className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`}
-                onClick={() => setSupervisorModule(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="tabsBar tabsBarFour">
-            {promotorTabs.map((tab) => (
-              <button
-                key={tab.key}
-                className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`}
-                onClick={() => setPromotorModule(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="tabsBar tabsBarFour">
+          {promotorTabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={`tabBtn ${selectedModule === tab.key ? "tabBtnActive" : ""}`}
+              onClick={() => setSelectedModule(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-        {role === "promotor" && promotorModule === "asistencia" ? (
+        {selectedModule === "asistencia" ? (
           <div className="card">
             <div className="sectionTitle">Asistencia</div>
             <div className="sectionSub">Fase actual: entrada y salida reales. Próximo bloque: foto, ubicación, historial y corrección de fotos.</div>
@@ -529,48 +617,155 @@ export default function App() {
           </div>
         ) : null}
 
-        {role === "promotor" && promotorModule === "evidencias" ? (
+        {selectedModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
             <div className="sectionSub">Flujo esperado del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
 
-            <div className="flowGrid">
-              {evidenceFlow.map((item, index) => (
-                <div className="flowCard" key={item.key}>
-                  <div className="flowStep">{index + 1}</div>
-                  <div>
-                    <div className="flowTitle">{item.title}</div>
-                    <div className="flowText">{item.text}</div>
-                  </div>
+            <div className="twoCol">
+              <div className="panel">
+                <label className="fieldLabel">Visita activa</label>
+                <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
+                  {openVisits.map((visit) => (
+                    <option key={visit.visita_id} value={visit.visita_id}>
+                      {visit.tienda_nombre}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
+                <select className="inputLike" value={evidenceBrand} onChange={(e) => setEvidenceBrand(e.target.value)}>
+                  {BRAND_OPTIONS.map((brand) => (
+                    <option key={brand} value={brand}>{brand}</option>
+                  ))}
+                </select>
+
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
+                <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
+                  {TYPE_OPTIONS.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
+                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)}>
+                  <option value="NA">No aplica</option>
+                  <option value="ANTES">Antes</option>
+                  <option value="DESPUES">Después</option>
+                </select>
+              </div>
+
+              <div className="panel">
+                <label className="fieldLabel">Cantidad de fotos</label>
+                <input
+                  className="inputLike"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={evidenceQty}
+                  onChange={(e) => setEvidenceQty(Math.max(1, Number(e.target.value || 1)))}
+                />
+
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Observación</label>
+                <input
+                  className="inputLike"
+                  value={evidenceDescription}
+                  onChange={(e) => setEvidenceDescription(e.target.value)}
+                  placeholder="Ej. Cabecera completa, competencia lateral..."
+                />
+
+                <div className="flowGrid flowGridSingle">
+                  {[
+                    "1. Elegir visita activa",
+                    "2. Elegir marca",
+                    "3. Elegir tipo",
+                    "4. Elegir fase",
+                    "5. Capturar fotos",
+                    "6. Continuar / cambiar marca / volver",
+                  ].map((text) => (
+                    <div className="miniFlowPill" key={text}>{text}</div>
+                  ))}
                 </div>
-              ))}
+
+                <button className="primaryBtn" onClick={saveEvidenceFlow}>
+                  <Camera size={16} />
+                  Guardar flujo visible
+                </button>
+              </div>
             </div>
           </div>
         ) : null}
 
-        {role === "promotor" && promotorModule === "mis_evidencias" ? (
+        {selectedModule === "mis_evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
             <div className="sectionSub">Acciones heredadas del chatbot: ver, anular, reemplazar y agregar nota.</div>
 
-            <div className="actionGrid">
-              {myEvidenceActions.map((item) => {
-                const Icon = item.Icon;
-                return (
-                  <div className="actionCard" key={item.key}>
-                    <div className="iconWrap grayWrap"><Icon size={16} /></div>
-                    <div>
-                      <div className="flowTitle">{item.title}</div>
-                      <div className="flowText">{item.text}</div>
+            <div className="twoCol">
+              <div className="panel">
+                <div className="miniTitle">Listado</div>
+                <div className="stack compactStack">
+                  {activeGallery.map((item) => (
+                    <button
+                      key={item.evidencia_id}
+                      onClick={() => setSelectedEvidenceId(item.evidencia_id)}
+                      className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}
+                    >
+                      <div className="listTitle">{item.tipo_evidencia}</div>
+                      <div className="listSub">{item.marca_nombre} · {item.riesgo}</div>
+                    </button>
+                  ))}
+                  {!activeGallery.length ? <div className="emptyBox">No hay evidencias activas.</div> : null}
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="miniTitle">Acciones</div>
+                {selectedEvidence ? (
+                  <>
+                    <div className="previewFrame">
+                      <img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" />
                     </div>
-                  </div>
-                );
-              })}
+                    <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
+                    <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
+                    <div className="actionGrid">
+                      {myEvidenceActions.map((item) => {
+                        const Icon = item.Icon;
+                        const onClick =
+                          item.key === "anular"
+                            ? markEvidenceAsCancelled
+                            : item.key === "reemplazar"
+                              ? replaceEvidence
+                              : undefined;
+                        return (
+                          <button className="actionButton" key={item.key} onClick={onClick}>
+                            <Icon size={16} />
+                            <span>{item.title}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
+                    <input
+                      className="inputLike"
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      placeholder="Escribe una observación"
+                    />
+                    <button className="secondaryBtn" onClick={saveNote}>
+                      <Pencil size={16} />
+                      Guardar nota
+                    </button>
+                  </>
+                ) : (
+                  <div className="emptyBox">Selecciona una evidencia.</div>
+                )}
+              </div>
             </div>
           </div>
         ) : null}
 
-        {role === "promotor" && promotorModule === "resumen" ? (
+        {selectedModule === "resumen" ? (
           <div className="card">
             <div className="sectionTitle">Resumen</div>
             <div className="summaryGrid">
@@ -597,32 +792,11 @@ export default function App() {
           </div>
         ) : null}
 
-        {role === "supervisor" ? (
-          <div className="card">
-            <div className="sectionTitle">Supervisor</div>
-            <div className="sectionSub">Estructura visual para hoy: equipo, alertas, evidencias y resumen. Siguiente bloque: conectar endpoints reales del supervisor.</div>
-            <div className="actionGrid">
-              {supervisorCards.map((item) => {
-                const Icon = item.Icon;
-                return (
-                  <div className="actionCard" key={item.key}>
-                    <div className="iconWrap grayWrap"><Icon size={16} /></div>
-                    <div>
-                      <div className="flowTitle">{item.title}</div>
-                      <div className="flowText">{item.text}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        {gallery.length > 0 ? (
+        {activeGallery.length > 0 ? (
           <div className="card">
             <div className="sectionTitle">Galería del día</div>
             <div className="galleryGrid">
-              {gallery.slice(0, 6).map((item) => (
+              {activeGallery.slice(0, 6).map((item) => (
                 <div className="galleryCard" key={item.evidencia_id}>
                   <div className="imageFrame">
                     <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
@@ -807,6 +981,7 @@ button, input, select { font: inherit; }
 .flowGrid, .actionGrid, .summaryGrid {
   margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
 }
+.flowGridSingle { grid-template-columns: 1fr; }
 .flowCard, .actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
@@ -821,6 +996,33 @@ button, input, select { font: inherit; }
   border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
+.miniFlowPill {
+  border-radius: 12px;
+  background: rgba(96,125,139,0.08);
+  color: #455a64;
+  font-size: 12px;
+  padding: 10px 12px;
+}
+.previewFrame {
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #dfe5e8;
+  margin-bottom: 10px;
+}
+.actionButton {
+  border: 0;
+  border-radius: 12px;
+  background: rgba(96,125,139,0.12);
+  color: #37474f;
+  font-weight: 700;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
 .galleryGrid {
   margin-top: 14px;
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
