@@ -28,12 +28,8 @@ type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type BootstrapResponse = {
   ok: boolean;
   role: Role;
-  profile: {
+  profile?: {
     nombre?: string;
-    promotor_id?: string;
-    region?: string;
-    cadena_principal?: string;
-    external_id?: string;
   };
 };
 
@@ -41,19 +37,14 @@ type StoreItem = {
   tienda_id: string;
   nombre_tienda: string;
   cadena: string;
-  ciudad: string;
-  cliente: string;
-  zona: string;
 };
 
 type VisitItem = {
   visita_id: string;
   tienda_id: string;
   tienda_nombre: string;
-  fecha: string;
   hora_inicio: string;
   hora_fin: string;
-  notas: string;
 };
 
 type EvidenceItem = {
@@ -71,10 +62,6 @@ type DashboardResponse = {
   ok: boolean;
   promotor?: {
     nombre?: string;
-    promotor_id?: string;
-    region?: string;
-    cadena_principal?: string;
-    external_id?: string;
   };
   stores?: StoreItem[];
   openVisits?: VisitItem[];
@@ -102,22 +89,8 @@ type CloseVisitResponse = {
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
 
 const MOCK_STORES: StoreItem[] = [
-  {
-    tienda_id: "TDA-001",
-    nombre_tienda: "Bodega Aurrera San Mateo",
-    cadena: "Bodega Aurrera",
-    ciudad: "CDMX",
-    cliente: "REZGO",
-    zona: "Norte",
-  },
-  {
-    tienda_id: "TDA-002",
-    nombre_tienda: "Walmart Las Torres",
-    cadena: "Walmart",
-    ciudad: "CDMX",
-    cliente: "REZGO",
-    zona: "Centro",
-  },
+  { tienda_id: "TDA-001", nombre_tienda: "Bodega Aurrera San Mateo", cadena: "Bodega Aurrera" },
+  { tienda_id: "TDA-002", nombre_tienda: "Walmart Las Torres", cadena: "Walmart" },
 ];
 
 const MOCK_VISITS: VisitItem[] = [
@@ -125,10 +98,8 @@ const MOCK_VISITS: VisitItem[] = [
     visita_id: "V-1001",
     tienda_id: "TDA-001",
     tienda_nombre: "Bodega Aurrera San Mateo",
-    fecha: "2026-03-20",
     hora_inicio: "2026-03-20T09:10:00.000Z",
     hora_fin: "",
-    notas: "",
   },
 ];
 
@@ -155,7 +126,7 @@ function getInitData() {
   return tg?.initData || "";
 }
 
-async function postJson<T>(path: string, payload: Record<string, any>, timeoutMs = 8000) {
+async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -167,7 +138,10 @@ async function postJson<T>(path: string, payload: Record<string, any>, timeoutMs
       signal: controller.signal,
     });
 
-    if (!res.ok) throw new Error(`Error ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`Error ${res.status}`);
+    }
+
     return (await res.json()) as T;
   } finally {
     clearTimeout(timeout);
@@ -184,6 +158,43 @@ function formatHourFromIso(iso: string) {
     hour12: false,
   });
 }
+
+const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
+  { key: "asistencia", label: "Asistencia" },
+  { key: "evidencias", label: "Evidencias" },
+  { key: "mis_evidencias", label: "Mis evidencias" },
+  { key: "resumen", label: "Resumen" },
+];
+
+const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
+  { key: "equipo", label: "Equipo" },
+  { key: "alertas", label: "Alertas" },
+  { key: "evidencias", label: "Evidencias" },
+  { key: "resumen", label: "Resumen" },
+];
+
+const evidenceFlow: Array<{ key: string; title: string; text: string }> = [
+  { key: "visita", title: "Elegir visita activa", text: "Tomar la visita abierta correcta antes de capturar." },
+  { key: "marca", title: "Elegir marca", text: "Usar catálogo de marcas activas." },
+  { key: "tipo", title: "Elegir tipo", text: "Precio, promoción, competencia, anaquel y otros." },
+  { key: "fase", title: "Elegir fase", text: "Antes o después cuando la regla lo requiera." },
+  { key: "fotos", title: "Cargar fotos", text: "Subir la cantidad requerida por regla." },
+  { key: "continuar", title: "Continuar", text: "Nueva evidencia, cambiar marca o volver." },
+];
+
+const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
+  { key: "ver", Icon: FolderOpen, title: "Ver evidencia", text: "Abrir foto y detalle de la captura." },
+  { key: "anular", Icon: AlertTriangle, title: "Anular", text: "Marcar evidencia como anulada con motivo." },
+  { key: "reemplazar", Icon: Camera, title: "Reemplazar", text: "Subir nueva foto y ligar reemplazo." },
+  { key: "nota", Icon: ListChecks, title: "Agregar nota", text: "Guardar observación operativa sobre la evidencia." },
+];
+
+const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
+  { key: "equipo", Icon: Users, title: "Equipo del día", text: "Promotores, visitas activas y desempeño del turno." },
+  { key: "alertas", Icon: ShieldAlert, title: "Alertas", text: "Asistencias incompletas, riesgos y pendientes." },
+  { key: "evidencias", Icon: ImageIcon, title: "Evidencias", text: "Revisión operativa y visual por promotor." },
+  { key: "seguimiento", Icon: ListChecks, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
+];
 
 export default function App() {
   const tg = getTelegramWebApp();
@@ -234,9 +245,9 @@ export default function App() {
       return;
     }
 
-    const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {}, 8000);
-    if (data?.role) setRole(data.role);
-    if (data?.profile?.nombre) setActorLabel(data.profile.nombre);
+    const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {});
+    if (data.role) setRole(data.role);
+    if (data.profile?.nombre) setActorLabel(data.profile.nombre);
   }
 
   async function loadRealDashboard() {
@@ -244,26 +255,26 @@ export default function App() {
 
     try {
       setSyncing(true);
-      const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {}, 8000);
-      if (dashboard?.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
-      if (dashboard?.stores?.length) {
+      const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
+      if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
+      if (dashboard.stores?.length) {
         setStores(dashboard.stores);
         setSelectedStoreId((prev) => prev || dashboard.stores?.[0]?.tienda_id || "");
       }
-      if (dashboard?.openVisits) {
+      if (dashboard.openVisits) {
         setVisits(dashboard.openVisits);
         setSelectedVisitId((prev) => prev || dashboard.openVisits?.[0]?.visita_id || "");
       } else {
         setVisits([]);
       }
 
-      const evidences = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {}, 8000);
-      if (evidences?.evidencias) {
-        setGallery(evidences.evidencias.filter((item) => !!item.url_foto));
+      const evidences = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
+      if (evidences.evidencias) {
+        setGallery(evidences.evidencias.filter((item) => Boolean(item.url_foto)));
       }
 
       setError("");
-    } catch (_err) {
+    } catch {
       setError("No se pudo cargar toda la operación real. Se muestra una vista local de referencia.");
     } finally {
       setSyncing(false);
@@ -275,7 +286,7 @@ export default function App() {
       setLoading(true);
       setError("");
       await loadBootstrap();
-    } catch (_err) {
+    } catch {
       setError("No se pudo validar la sesión en línea. Se muestra una vista local de referencia.");
     } finally {
       setLoading(false);
@@ -298,7 +309,6 @@ export default function App() {
         setStatusMsg("⚠️ Selecciona una tienda.");
         return;
       }
-
       if (!getInitData()) {
         setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
         return;
@@ -313,17 +323,15 @@ export default function App() {
         visita_id: response.visita_id,
         tienda_id: response.tienda_id,
         tienda_nombre: response.tienda_nombre,
-        fecha: new Date().toISOString().slice(0, 10),
         hora_inicio: response.started_at,
         hora_fin: "",
-        notas: "",
       };
 
       setVisits((prev) => [newVisit, ...prev.filter((v) => v.visita_id !== newVisit.visita_id)]);
       setSelectedVisitId(newVisit.visita_id);
       setStatusMsg(`✅ Entrada registrada en ${response.tienda_nombre}`);
       await loadRealDashboard();
-    } catch (_err) {
+    } catch {
       setStatusMsg("⚠️ No se pudo registrar la entrada real.");
     } finally {
       setSyncing(false);
@@ -336,7 +344,6 @@ export default function App() {
         setStatusMsg("⚠️ Selecciona una visita abierta.");
         return;
       }
-
       if (!getInitData()) {
         setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
         return;
@@ -349,49 +356,12 @@ export default function App() {
 
       setStatusMsg("✅ Salida registrada correctamente.");
       await loadRealDashboard();
-    } catch (_err) {
+    } catch {
       setStatusMsg("⚠️ No se pudo registrar la salida real.");
     } finally {
       setSyncing(false);
     }
   }
-
-  const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
-    { key: "asistencia", label: "Asistencia" },
-    { key: "evidencias", label: "Evidencias" },
-    { key: "mis_evidencias", label: "Mis evidencias" },
-    { key: "resumen", label: "Resumen" },
-  ];
-
-  const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
-    { key: "equipo", label: "Equipo" },
-    { key: "alertas", label: "Alertas" },
-    { key: "evidencias", label: "Evidencias" },
-    { key: "resumen", label: "Resumen" },
-  ];
-
-  const evidenceFlow: Array<{ key: string; title: string; text: string }> = [
-    { key: "visita", title: "Elegir visita activa", text: "Usar la visita abierta correcta antes de capturar." },
-    { key: "marca", title: "Elegir marca", text: "Tomar marca del catálogo operativo." },
-    { key: "tipo", title: "Elegir tipo", text: "Precio, promoción, competencia, anaquel u otro tipo." },
-    { key: "fase", title: "Elegir fase", text: "Antes o después cuando la regla lo pida." },
-    { key: "fotos", title: "Cargar fotos", text: "Subir la cantidad requerida por la regla." },
-    { key: "continuar", title: "Continuar", text: "Nueva evidencia, cambiar marca o volver a menú." },
-  ];
-
-  const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
-    { key: "ver", Icon: FolderOpen, title: "Ver evidencia", text: "Abrir foto y detalle de la captura." },
-    { key: "anular", Icon: AlertTriangle, title: "Anular", text: "Marcar evidencia como anulada con motivo." },
-    { key: "reemplazar", Icon: Camera, title: "Reemplazar", text: "Subir nueva foto y ligar reemplazo." },
-    { key: "nota", Icon: ListChecks, title: "Agregar nota", text: "Guardar observación operativa sobre la evidencia." },
-  ];
-
-  const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
-    { key: "equipo", Icon: Users, title: "Equipo del día", text: "Promotores, visitas activas y desempeño del turno." },
-    { key: "alertas", Icon: ShieldAlert, title: "Alertas", text: "Asistencias incompletas, riesgos y pendientes." },
-    { key: "evidencias", Icon: ImageIcon, title: "Evidencias", text: "Revisión operativa y visual por promotor." },
-    { key: "seguimiento", Icon: ListChecks, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
-  ];
 
   if (loading) {
     return (
@@ -435,7 +405,7 @@ export default function App() {
         </motion.div>
 
         {error ? (
-          <div className="card warning compactNotice">
+          <div className="card warning">
             <div className="warningRow">
               <AlertTriangle size={18} />
               <span>{error}</span>
@@ -451,6 +421,7 @@ export default function App() {
             </div>
             <div className="iconWrap greenWrap"><Store size={16} /></div>
           </div>
+
           <div className="statCard">
             <div>
               <div className="statLabel">Visitas abiertas</div>
@@ -458,6 +429,7 @@ export default function App() {
             </div>
             <div className="iconWrap grayWrap"><UserCheck size={16} /></div>
           </div>
+
           <div className="statCard">
             <div>
               <div className="statLabel">Evidencias hoy</div>
@@ -465,6 +437,7 @@ export default function App() {
             </div>
             <div className="iconWrap greenWrap"><ImageIcon size={16} /></div>
           </div>
+
           <div className="statCard">
             <div>
               <div className="statLabel">Alertas</div>
@@ -501,7 +474,7 @@ export default function App() {
         )}
 
         {role === "promotor" && promotorModule === "asistencia" ? (
-          <div className="card compactCard">
+          <div className="card">
             <div className="sectionTitle">Asistencia</div>
             <div className="sectionSub">Fase actual: entrada y salida reales. Próximo bloque: foto, ubicación, historial y corrección de fotos.</div>
 
@@ -557,7 +530,7 @@ export default function App() {
         ) : null}
 
         {role === "promotor" && promotorModule === "evidencias" ? (
-          <div className="card compactCard">
+          <div className="card">
             <div className="sectionTitle">Evidencias</div>
             <div className="sectionSub">Flujo esperado del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
 
@@ -576,26 +549,29 @@ export default function App() {
         ) : null}
 
         {role === "promotor" && promotorModule === "mis_evidencias" ? (
-          <div className="card compactCard">
+          <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
             <div className="sectionSub">Acciones heredadas del chatbot: ver, anular, reemplazar y agregar nota.</div>
 
             <div className="actionGrid">
-              {myEvidenceActions.map((item) => (
-                <div className="actionCard" key={item.key}>
-                  <div className="iconWrap grayWrap"><item.Icon size={16} /></div>
-                  <div>
-                    <div className="flowTitle">{item.title}</div>
-                    <div className="flowText">{item.text}</div>
+              {myEvidenceActions.map((item) => {
+                const Icon = item.Icon;
+                return (
+                  <div className="actionCard" key={item.key}>
+                    <div className="iconWrap grayWrap"><Icon size={16} /></div>
+                    <div>
+                      <div className="flowTitle">{item.title}</div>
+                      <div className="flowText">{item.text}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
 
         {role === "promotor" && promotorModule === "resumen" ? (
-          <div className="card compactCard">
+          <div className="card">
             <div className="sectionTitle">Resumen</div>
             <div className="summaryGrid">
               <div className="summaryBlock">
@@ -622,25 +598,28 @@ export default function App() {
         ) : null}
 
         {role === "supervisor" ? (
-          <div className="card compactCard">
+          <div className="card">
             <div className="sectionTitle">Supervisor</div>
-            <div className="sectionSub">Estructura visual para hoy: equipo, alertas, evidencias y seguimiento. Siguiente bloque: conectar endpoints reales del supervisor.</div>
+            <div className="sectionSub">Estructura visual para hoy: equipo, alertas, evidencias y resumen. Siguiente bloque: conectar endpoints reales del supervisor.</div>
             <div className="actionGrid">
-              {supervisorCards.map((item) => (
-                <div className="actionCard" key={item.key}>
-                  <div className="iconWrap grayWrap"><item.Icon size={16} /></div>
-                  <div>
-                    <div className="flowTitle">{item.title}</div>
-                    <div className="flowText">{item.text}</div>
+              {supervisorCards.map((item) => {
+                const Icon = item.Icon;
+                return (
+                  <div className="actionCard" key={item.key}>
+                    <div className="iconWrap grayWrap"><Icon size={16} /></div>
+                    <div>
+                      <div className="flowTitle">{item.title}</div>
+                      <div className="flowText">{item.text}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
 
         {gallery.length > 0 ? (
-          <div className="card compactCard">
+          <div className="card">
             <div className="sectionTitle">Galería del día</div>
             <div className="galleryGrid">
               {gallery.slice(0, 6).map((item) => (
@@ -884,4 +863,4 @@ button, input, select { font: inherit; }
   .tabsBarFour { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero { flex-direction: column; }
 }
-`}
+`;
