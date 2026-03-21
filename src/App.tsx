@@ -4,13 +4,14 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
-  Eye,  Image as ImageIcon,  MapPin,
+  Eye,
+  Image as ImageIcon,
+  MapPin,
   Pencil,
   RefreshCw,
   ShieldAlert,
-  Store,
   Trash2,
-  UserCheck,
+  Users,
 } from "lucide-react";
 
 declare global {
@@ -21,6 +22,7 @@ declare global {
 
 type Role = "promotor" | "supervisor" | "cliente";
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
+type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 
 type BootstrapResponse = {
@@ -145,10 +147,7 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
       signal: controller.signal,
     });
 
-    if (!res.ok) {
-      throw new Error(`Error ${res.status}`);
-    }
-
+    if (!res.ok) throw new Error(`Error ${res.status}`);
     return (await res.json()) as T;
   } finally {
     clearTimeout(timeout);
@@ -183,11 +182,25 @@ const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
   { key: "resumen", label: "Resumen" },
 ];
 
-const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
-  { key: "ver", Icon: Eye, title: "Ver evidencia", text: "Abrir foto y detalle de la captura." },
-  { key: "anular", Icon: Trash2, title: "Anular", text: "Marcar evidencia como anulada con motivo." },
-  { key: "reemplazar", Icon: Camera, title: "Reemplazar", text: "Subir nueva foto y ligar reemplazo." },
-  { key: "nota", Icon: Pencil, title: "Agregar nota", text: "Guardar observación operativa sobre la evidencia." },
+const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
+  { key: "equipo", label: "Equipo" },
+  { key: "alertas", label: "Alertas" },
+  { key: "evidencias", label: "Evidencias" },
+  { key: "resumen", label: "Resumen" },
+];
+
+const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
+  { key: "equipo", Icon: Users, title: "Equipo del día", text: "Promotores, visitas activas y desempeño del turno." },
+  { key: "alertas", Icon: ShieldAlert, title: "Alertas", text: "Asistencias incompletas, riesgos y pendientes." },
+  { key: "evidencias", Icon: ImageIcon, title: "Evidencias", text: "Revisión operativa y visual por promotor." },
+  { key: "seguimiento", Icon: Pencil, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
+];
+
+const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string }> = [
+  { key: "ver", Icon: Eye, title: "Ver" },
+  { key: "anular", Icon: Trash2, title: "Anular" },
+  { key: "reemplazar", Icon: Camera, title: "Reemplazar" },
+  { key: "nota", Icon: Pencil, title: "Nota" },
 ];
 
 export default function App() {
@@ -206,7 +219,8 @@ export default function App() {
   const [gallery, setGallery] = useState<UiEvidence[]>(MOCK_GALLERY);
   const [selectedStoreId, setSelectedStoreId] = useState(MOCK_STORES[0]?.tienda_id || "");
   const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
-  const [selectedModule, setSelectedModule] = useState<PromotorModule>("asistencia");
+  const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
+  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
 
   const [evidenceBrand, setEvidenceBrand] = useState(BRAND_OPTIONS[0]);
   const [evidenceType, setEvidenceType] = useState(TYPE_OPTIONS[0]);
@@ -380,7 +394,7 @@ export default function App() {
     }
   }
 
-  async function saveEvidenceFlow() {
+  function saveEvidenceFlow() {
     const visit = openVisits.find((item) => item.visita_id === selectedVisitId) || openVisits[0];
     if (!visit) {
       setStatusMsg("⚠️ Necesitas una visita activa para registrar evidencias.");
@@ -403,7 +417,7 @@ export default function App() {
     setSelectedEvidenceId(created[0].evidencia_id);
     setEvidenceDescription("");
     setEvidenceQty(1);
-    setStatusMsg("✅ Flujo de evidencias visible en la Mini App. Falta conectar foto real y endpoint final.");
+    setStatusMsg("✅ Flujo de evidencias visible. Falta conectar foto real y endpoint final.");
   }
 
   function markEvidenceAsCancelled() {
@@ -511,56 +525,36 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="statsGrid">
-          <div className="statCard">
-            <div>
-              <div className="statLabel">Tiendas asignadas</div>
-              <div className="statValue">{summary.assignedStores}</div>
-            </div>
-            <div className="iconWrap greenWrap"><Store size={16} /></div>
+        {role === "supervisor" ? (
+          <div className="tabsBar tabsInline">
+            {supervisorTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`}
+                onClick={() => setSupervisorModule(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-
-          <div className="statCard">
-            <div>
-              <div className="statLabel">Visitas abiertas</div>
-              <div className="statValue">{summary.openVisits}</div>
-            </div>
-            <div className="iconWrap grayWrap"><UserCheck size={16} /></div>
+        ) : (
+          <div className="tabsBar tabsInline">
+            {promotorTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`}
+                onClick={() => setPromotorModule(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
+        )}
 
-          <div className="statCard">
-            <div>
-              <div className="statLabel">Evidencias hoy</div>
-              <div className="statValue">{summary.evidenciasHoy}</div>
-            </div>
-            <div className="iconWrap greenWrap"><ImageIcon size={16} /></div>
-          </div>
-
-          <div className="statCard">
-            <div>
-              <div className="statLabel">Alertas</div>
-              <div className="statValue">{summary.alertas}</div>
-            </div>
-            <div className="iconWrap grayWrap"><ShieldAlert size={16} /></div>
-          </div>
-        </div>
-
-        <div className="tabsBar tabsBarFour">
-          {promotorTabs.map((tab) => (
-            <button
-              key={tab.key}
-              className={`tabBtn ${selectedModule === tab.key ? "tabBtnActive" : ""}`}
-              onClick={() => setSelectedModule(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {selectedModule === "asistencia" ? (
+        {role === "promotor" && promotorModule === "asistencia" ? (
           <div className="card">
             <div className="sectionTitle">Asistencia</div>
-            <div className="sectionSub">Fase actual: entrada y salida reales. Próximo bloque: foto, ubicación, historial y corrección de fotos.</div>
+            <div className="sectionSub">Entrada y salida reales. Próximo bloque: foto, ubicación, historial y corrección de fotos.</div>
 
             <div className="twoCol">
               <div className="panel">
@@ -613,10 +607,10 @@ export default function App() {
           </div>
         ) : null}
 
-        {selectedModule === "evidencias" ? (
+        {role === "promotor" && promotorModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
-            <div className="sectionSub">Flujo esperado del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
+            <div className="sectionSub">Flujo visible del chatbot: visita activa → marca → tipo → fase → fotos → confirmación.</div>
 
             <div className="twoCol">
               <div className="panel">
@@ -692,10 +686,10 @@ export default function App() {
           </div>
         ) : null}
 
-        {selectedModule === "mis_evidencias" ? (
+        {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
-            <div className="sectionSub">Acciones heredadas del chatbot: ver, anular, reemplazar y agregar nota.</div>
+            <div className="sectionSub">Acciones visibles: ver, anular, reemplazar y agregar nota.</div>
 
             <div className="twoCol">
               <div className="panel">
@@ -724,17 +718,17 @@ export default function App() {
                     </div>
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
-                    <div className="actionGrid">
+                    <div className="actionGrid actionGridButtons">
                       {myEvidenceActions.map((item) => {
                         const Icon = item.Icon;
-                        const onClick =
+                        const handleClick =
                           item.key === "anular"
                             ? markEvidenceAsCancelled
                             : item.key === "reemplazar"
                               ? replaceEvidence
                               : undefined;
                         return (
-                          <button className="actionButton" key={item.key} onClick={onClick}>
+                          <button className="actionButton" key={item.key} onClick={handleClick}>
                             <Icon size={16} />
                             <span>{item.title}</span>
                           </button>
@@ -761,7 +755,7 @@ export default function App() {
           </div>
         ) : null}
 
-        {selectedModule === "resumen" ? (
+        {role === "promotor" && promotorModule === "resumen" ? (
           <div className="card">
             <div className="sectionTitle">Resumen</div>
             <div className="summaryGrid">
@@ -784,6 +778,27 @@ export default function App() {
                   <div className="summaryLine">No hay visitas activas.</div>
                 )}
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "supervisor" ? (
+          <div className="card">
+            <div className="sectionTitle">Supervisor</div>
+            <div className="sectionSub">Base visual para hoy: equipo, alertas, evidencias y resumen. Siguiente bloque: conectar endpoints reales del supervisor.</div>
+            <div className="actionGrid">
+              {supervisorCards.map((item) => {
+                const Icon = item.Icon;
+                return (
+                  <div className="actionCard" key={item.key}>
+                    <div className="iconWrap grayWrap"><Icon size={16} /></div>
+                    <div>
+                      <div className="flowTitle">{item.title}</div>
+                      <div className="flowText">{item.text}</div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -894,43 +909,31 @@ button, input, select { font: inherit; }
 }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
-.statsGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-.statCard {
-  background: rgba(255,255,255,0.95);
-  border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 18px;
-  padding: 10px 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  min-height: 68px;
-}
-.statLabel { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #607d8b; }
-.statValue { margin-top: 4px; font-size: 22px; font-weight: 800; color: #263238; }
-.iconWrap { border-radius: 14px; padding: 8px; }
-.greenWrap { background: rgba(76,175,80,.14); color: #43a047; }
-.grayWrap { background: rgba(96,125,139,.14); color: #607d8b; }
 .sectionTitle { font-size: 18px; font-weight: 800; color: #263238; }
 .sectionSub { margin-top: 4px; color: #607d8b; font-size: 13px; }
 .tabsBar {
   margin-top: 12px;
-  display: grid;
-  gap: 8px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(38,50,56,0.08);
   border-radius: 18px;
   padding: 6px;
+  scrollbar-width: thin;
 }
-.tabsBarFour { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tabsInline::-webkit-scrollbar { height: 6px; }
+.tabsInline::-webkit-scrollbar-thumb { background: rgba(96,125,139,0.24); border-radius: 999px; }
 .tabBtn {
-  border: 0; border-radius: 12px; background: transparent; color: #546e7a;
-  padding: 11px 8px; cursor: pointer; font-weight: 700;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #546e7a;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 700;
+  flex: 0 0 auto;
 }
 .tabBtnActive { background: rgba(76,175,80,.14); color: #2e7d32; }
 .twoCol {
@@ -982,10 +985,6 @@ button, input, select { font: inherit; }
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
 }
-.flowStep {
-  min-width: 28px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
-  background: rgba(76,175,80,.14); color: #2e7d32; font-weight: 800; font-size: 13px;
-}
 .flowTitle { font-weight: 800; color: #263238; }
 .flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
 .summaryBlock {
@@ -1006,6 +1005,7 @@ button, input, select { font: inherit; }
   background: #dfe5e8;
   margin-bottom: 10px;
 }
+.actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .actionButton {
   border: 0;
   border-radius: 12px;
@@ -1055,10 +1055,9 @@ button, input, select { font: inherit; }
 .footerActions { margin-top: 12px; display: flex; justify-content: flex-end; }
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .flowGrid, .actionGrid, .summaryGrid { grid-template-columns: 1fr; }
+  .twoCol, .galleryGrid, .flowGrid, .actionGrid, .summaryGrid, .actionGridButtons { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .tabsBarFour { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero { flex-direction: column; }
 }
 `;
