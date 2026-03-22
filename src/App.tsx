@@ -38,9 +38,7 @@ type CaptureKind = "entrada" | "salida";
 type BootstrapResponse = {
   ok: boolean;
   role: Role;
-  profile?: {
-    nombre?: string;
-  };
+  profile?: { nombre?: string };
 };
 
 type StoreItem = {
@@ -72,14 +70,11 @@ type EvidenceItem = {
 
 type UiEvidence = EvidenceItem & {
   status?: "ACTIVA" | "ANULADA";
-  note?: string;
 };
 
 type DashboardResponse = {
   ok: boolean;
-  promotor?: {
-    nombre?: string;
-  };
+  promotor?: { nombre?: string };
   stores?: StoreItem[];
   openVisits?: VisitItem[];
   visitsToday?: VisitItem[];
@@ -106,6 +101,26 @@ type CloseVisitResponse = {
   warning?: string;
 };
 
+type EvidenceContextResponse = {
+  ok: boolean;
+  visita?: {
+    visita_id: string;
+    tienda_id: string;
+    tienda_nombre: string;
+  };
+  marcas?: Array<{ marca_id: string; marca_nombre: string }>;
+};
+
+type EvidenceRulesResponse = {
+  ok: boolean;
+  reglas?: Array<{
+    marca_id: string;
+    tipo_evidencia: string;
+    fotos_requeridas: number;
+    requiere_antes_despues: boolean;
+  }>;
+};
+
 type LocationCapture = {
   lat: number;
   lon: number;
@@ -120,7 +135,7 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260322a";
+const ASSET_VERSION = "20260322b";
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -138,7 +153,7 @@ function getLogoUrl(mode: Exclude<LogoMode, "text">) {
   return `${window.location.origin}/${file}?v=${ASSET_VERSION}`;
 }
 
-async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 15000) {
+async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -181,24 +196,12 @@ function nowMxString() {
   });
 }
 
-function looksLikeStoreId(value: string) {
-  const upper = (value || "").toUpperCase();
-  return upper.startsWith("TDA-") || upper.startsWith("TDA_") || upper.startsWith("TIENDA-") || upper.startsWith("TIENDA_");
-}
-
 function getStoreNameById(storeId: string, stores: StoreItem[]) {
   return stores.find((store) => store.tienda_id === storeId || store.nombre_tienda === storeId)?.nombre_tienda || "";
 }
 
 function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
-  const byId = getStoreNameById(visit.tienda_id, stores);
-  if (byId) return byId;
-
-  const byName = getStoreNameById(visit.tienda_nombre, stores);
-  if (byName) return byName;
-
-  if (visit.tienda_nombre && !looksLikeStoreId(visit.tienda_nombre)) return visit.tienda_nombre;
-  return "Visita activa";
+  return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || "Visita activa";
 }
 
 function fileToDataUrl(file: File) {
@@ -240,8 +243,7 @@ function compressDataUrl(dataUrl: string, maxSide = 1280, quality = 0.82) {
 
 async function readCompressedPhoto(file: File) {
   const raw = await fileToDataUrl(file);
-  const compressed = await compressDataUrl(raw);
-  return compressed;
+  return compressDataUrl(raw);
 }
 
 function getCurrentLocation() {
@@ -312,12 +314,16 @@ export default function App() {
   const [capturingLocation, setCapturingLocation] = useState<CaptureKind | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState<CaptureKind | null>(null);
 
-  const [evidenceBrand, setEvidenceBrand] = useState("");
+  const [evidenceBrandId, setEvidenceBrandId] = useState("");
+  const [evidenceBrandLabel, setEvidenceBrandLabel] = useState("");
   const [evidenceType, setEvidenceType] = useState("");
   const [evidencePhase, setEvidencePhase] = useState<EvidencePhase>("NA");
   const [evidenceQty, setEvidenceQty] = useState(1);
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
+  const [availableBrands, setAvailableBrands] = useState<Array<{ marca_id: string; marca_nombre: string }>>([]);
+  const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean }>>([]);
+  const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
   const [gallery, setGallery] = useState<UiEvidence[]>([]);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
@@ -334,7 +340,7 @@ export default function App() {
 
   useEffect(() => {
     if (!statusMsg) return;
-    const t = setTimeout(() => setStatusMsg(""), 3500);
+    const t = setTimeout(() => setStatusMsg(""), 2800);
     return () => clearTimeout(t);
   }, [statusMsg]);
 
@@ -375,9 +381,13 @@ export default function App() {
     if (dashboard.stores?.length) setStores(dashboard.stores);
     if (dashboard.openVisits) {
       setVisits(dashboard.openVisits);
-      const currentStillExists = dashboard.openVisits.find((v) => v.visita_id === selectedVisitId);
-      if (!currentStillExists) {
+      if (!selectedVisitId) {
         setSelectedVisitId(dashboard.openVisits[0]?.visita_id || "");
+      } else {
+        const currentStillExists = dashboard.openVisits.find((v) => v.visita_id === selectedVisitId);
+        if (!currentStillExists) {
+          setSelectedVisitId(dashboard.openVisits[0]?.visita_id || "");
+        }
       }
     }
   }
@@ -385,13 +395,52 @@ export default function App() {
   async function loadEvidencesToday() {
     if (role !== "promotor") return;
     const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
-    const rows = (data.evidencias || []).map((item) => ({
-      ...item,
-      status: "ACTIVA" as const,
-    }));
+    const rows = (data.evidencias || []).map((item) => ({ ...item, status: "ACTIVA" as const }));
     setGallery(rows);
     if (rows.length && !rows.find((r) => r.evidencia_id === selectedEvidenceId)) {
       setSelectedEvidenceId(rows[0].evidencia_id);
+    }
+  }
+
+  async function loadEvidenceContext(visitaId: string) {
+    if (!visitaId) {
+      setAvailableBrands([]);
+      setBrandRules([]);
+      setSelectedVisitStoreName("");
+      return;
+    }
+
+    try {
+      const ctx = await postJson<EvidenceContextResponse>("/miniapp/promotor/evidence-context", { visita_id: visitaId });
+      setAvailableBrands(ctx.marcas || []);
+      setSelectedVisitStoreName(ctx.visita?.tienda_nombre || "");
+    } catch {
+      setAvailableBrands([]);
+      setSelectedVisitStoreName("");
+    }
+  }
+
+  async function loadRulesForBrand(brandId: string, brandLabel: string) {
+    if (!brandId && !brandLabel) {
+      setBrandRules([]);
+      return;
+    }
+    try {
+      const rules = await postJson<EvidenceRulesResponse>("/miniapp/promotor/evidence-rules", {
+        marca_id: brandId,
+        marca_nombre: brandLabel,
+      });
+      setBrandRules(rules.reglas || []);
+      if (rules.reglas?.length) {
+        const first = rules.reglas[0];
+        if (!evidenceType) setEvidenceType(first.tipo_evidencia);
+        setEvidenceQty(first.fotos_requeridas || 1);
+        if (first.requiere_antes_despues && evidencePhase === "NA") {
+          setEvidencePhase("ANTES");
+        }
+      }
+    } catch {
+      setBrandRules([]);
     }
   }
 
@@ -412,6 +461,18 @@ export default function App() {
   useEffect(() => {
     initialize();
   }, []);
+
+  useEffect(() => {
+    if (role === "promotor") {
+      loadEvidenceContext(selectedVisitId);
+    }
+  }, [selectedVisitId, role]);
+
+  useEffect(() => {
+    if (role === "promotor") {
+      loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
+    }
+  }, [evidenceBrandId]);
 
   function handleLogoError() {
     setLogoMode((prev) => {
@@ -598,26 +659,31 @@ export default function App() {
         setStatusMsg("Selecciona una visita activa.");
         return;
       }
-      if (!evidenceBrand.trim()) {
-        setStatusMsg("Escribe la marca.");
+      if (!evidenceBrandLabel.trim()) {
+        setStatusMsg("Selecciona una marca.");
         return;
       }
       if (!evidenceType.trim()) {
-        setStatusMsg("Escribe el tipo de evidencia.");
+        setStatusMsg("Selecciona o escribe el tipo de evidencia.");
         return;
       }
       if (!evidencePhotos.length) {
         setStatusMsg("Agrega al menos una foto de evidencia.");
         return;
       }
+      if (evidencePhotos.length < evidenceQty) {
+        setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
+        return;
+      }
 
       setSyncing(true);
       await postJson("/miniapp/promotor/evidence-register", {
         visita_id: selectedVisitId,
-        marca_nombre: evidenceBrand,
+        marca_id: evidenceBrandId,
+        marca_nombre: evidenceBrandLabel,
         tipo_evidencia: evidenceType,
         fase: evidencePhase,
-        descripcion: evidenceDescription,
+        descripcion: `${selectedVisitStoreName ? `[${selectedVisitStoreName}] ` : ""}${evidenceDescription}`.trim(),
         fotos: evidencePhotos.map((photo) => ({
           name: photo.name,
           dataUrl: photo.dataUrl,
@@ -625,12 +691,14 @@ export default function App() {
         })),
       });
 
-      setEvidenceBrand("");
+      setEvidenceBrandId("");
+      setEvidenceBrandLabel("");
       setEvidenceType("");
       setEvidencePhase("NA");
       setEvidenceQty(1);
       setEvidenceDescription("");
       setEvidencePhotos([]);
+      setBrandRules([]);
 
       await loadEvidencesToday();
       setStatusMsg("Evidencia registrada correctamente.");
@@ -740,9 +808,9 @@ export default function App() {
                 <div className="brandWord">REZGO</div>
               )}
             </div>
-            <div className="heroTitleBlock">
+            <div className="heroTitleBlock heroTitleBlockWide">
               <div className="heroTitle heroTitleTight">Operación<br />del promotor</div>
-              <div className="heroMetaSingle">{actorLabel}</div>
+              <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
             </div>
           </motion.div>
 
@@ -881,11 +949,40 @@ export default function App() {
                   ))}
                 </select>
 
+                {selectedVisitStoreName ? <div className="contextHint">Tienda vinculada: {selectedVisitStoreName}</div> : null}
+
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
-                <input className="inputLike" value={evidenceBrand} onChange={(e) => setEvidenceBrand(e.target.value)} placeholder="Marca" />
+                <select
+                  className="inputLike"
+                  value={evidenceBrandId}
+                  onChange={(e) => {
+                    const brand = availableBrands.find((item) => item.marca_id === e.target.value);
+                    setEvidenceBrandId(e.target.value);
+                    setEvidenceBrandLabel(brand?.marca_nombre || "");
+                    setEvidenceType("");
+                  }}
+                >
+                  <option value="">Selecciona una marca</option>
+                  {availableBrands.map((brand) => (
+                    <option key={brand.marca_id} value={brand.marca_id}>
+                      {brand.marca_nombre}
+                    </option>
+                  ))}
+                </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <input className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)} placeholder="Tipo de evidencia" />
+                {brandRules.length ? (
+                  <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
+                    <option value="">Selecciona un tipo</option>
+                    {brandRules.map((rule) => (
+                      <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>
+                        {rule.tipo_evidencia}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)} placeholder="Tipo de evidencia" />
+                )}
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
                 <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)}>
@@ -894,7 +991,7 @@ export default function App() {
                   <option value="DESPUES">Después</option>
                 </select>
 
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad esperada</label>
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
                 <input
                   className="inputLike"
                   type="number"
@@ -1154,10 +1251,12 @@ input[type=file] { display: none; }
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  width: 132px;
-  min-width: 132px;
   margin-left: auto;
   overflow: hidden;
+}
+.heroTitleBlockWide {
+  width: min(240px, 48%);
+  min-width: 190px;
 }
 .brandPlate {
   background: #ffffff;
@@ -1186,7 +1285,7 @@ input[type=file] { display: none; }
 }
 .heroTitleTight {
   text-align: right;
-  max-width: 118px;
+  max-width: 132px;
 }
 .heroMetaSingle {
   color: #78909c;
@@ -1194,9 +1293,12 @@ input[type=file] { display: none; }
   text-align: right;
   margin-top: 3px;
   white-space: nowrap;
-  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.heroMetaSingleWide {
+  width: 100%;
+  max-width: 200px;
 }
 .card {
   margin-top: 12px;
@@ -1260,6 +1362,11 @@ input[type=file] { display: none; }
 .inputLike {
   width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10);
   background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px;
+}
+.contextHint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #607d8b;
 }
 .primaryBtn, .secondaryBtn, .fileBtn {
   margin-top: 10px; width: 100%; border: 0; border-radius: 14px; padding: 13px 14px;
@@ -1395,7 +1502,6 @@ input[type=file] { display: none; }
   .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .heroTitleBlock { width: 124px; min-width: 124px; }
-  .heroTitleTight { max-width: 112px; }
+  .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; }
+  .heroMetaSingleWide { max-width: 190px; }
 }
-`;
