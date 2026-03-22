@@ -33,6 +33,7 @@ type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen"
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 type LogoMode = "primary" | "secondary" | "text";
+type CaptureKind = "entrada" | "salida";
 
 type BootstrapResponse = {
   ok: boolean;
@@ -71,6 +72,7 @@ type UiEvidence = EvidenceItem & {
   status?: "ACTIVA" | "ANULADA";
   note?: string;
   tienda_nombre?: string;
+  photos?: PhotoCapture[];
 };
 
 type DashboardResponse = {
@@ -101,36 +103,41 @@ type CloseVisitResponse = {
   closed_at: string;
 };
 
-const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260321g";
+type LocationCapture = {
+  lat: number;
+  lon: number;
+  accuracy: number;
+  capturedAt: string;
+};
 
-const MOCK_STORES: StoreItem[] = [
+type PhotoCapture = {
+  name: string;
+  dataUrl: string;
+  capturedAt: string;
+};
+
+type AttendanceLog = {
+  id: string;
+  type: CaptureKind;
+  storeName: string;
+  happenedAt: string;
+  hasLocation: boolean;
+  hasPhoto: boolean;
+};
+
+const API_BASE = "https://promobolsillo-telegram.onrender.com";
+const ASSET_VERSION = "20260321h";
+const DEMO_STORES: StoreItem[] = [
   { tienda_id: "TDA-001", nombre_tienda: "Bodega Aurrera San Mateo", cadena: "Bodega Aurrera" },
   { tienda_id: "TDA-002", nombre_tienda: "Walmart Las Torres", cadena: "Walmart" },
 ];
-
-const MOCK_VISITS: VisitItem[] = [
+const DEMO_VISITS: VisitItem[] = [
   {
     visita_id: "V-1001",
     tienda_id: "TDA-001",
     tienda_nombre: "Bodega Aurrera San Mateo",
     hora_inicio: "2026-03-21T09:10:00.000Z",
     hora_fin: "",
-  },
-];
-
-const MOCK_GALLERY: UiEvidence[] = [
-  {
-    evidencia_id: "EV-1",
-    tipo_evento: "EVIDENCIA_GENERAL",
-    tipo_evidencia: "Referencia",
-    marca_nombre: "Marca de ejemplo",
-    riesgo: "BAJO",
-    fecha_hora_fmt: "2026-03-21 09:42",
-    url_foto: "https://picsum.photos/seed/rezgo1/1200/900",
-    descripcion: "Referencia local.",
-    status: "ACTIVA",
-    tienda_nombre: "Bodega Aurrera San Mateo",
   },
 ];
 
@@ -150,7 +157,7 @@ function getLogoUrl(mode: Exclude<LogoMode, "text">) {
   return `${window.location.origin}/${file}?v=${ASSET_VERSION}`;
 }
 
-async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 8000) {
+async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 12000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -191,7 +198,8 @@ function nowMxString() {
 }
 
 function looksLikeStoreId(value: string) {
-  return /^TDA[-_]/i.test(value) || /^TIENDA[-_]/i.test(value) || /^[A-Z]{2,}-\d+/i.test(value);
+  const upper = (value || "").toUpperCase();
+  return upper.startsWith("TDA-") || upper.startsWith("TDA_") || upper.startsWith("TIENDA-") || upper.startsWith("TIENDA_");
 }
 
 function getStoreNameById(storeId: string, stores: StoreItem[]) {
@@ -207,6 +215,71 @@ function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
 
   if (visit.tienda_nombre && !looksLikeStoreId(visit.tienda_nombre)) return visit.tienda_nombre;
   return "Visita activa";
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("No se pudo leer la foto"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function compressDataUrl(dataUrl: string, maxSide = 1280, quality = 0.82) {
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let width = img.width;
+      let height = img.height;
+      const larger = Math.max(width, height);
+      if (larger > maxSide) {
+        const scale = maxSide / larger;
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("No se pudo procesar la foto"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => reject(new Error("No se pudo procesar la foto"));
+    img.src = dataUrl;
+  });
+}
+
+async function readCompressedPhoto(file: File) {
+  const raw = await fileToDataUrl(file);
+  const compressed = await compressDataUrl(raw);
+  return compressed;
+}
+
+function getCurrentLocation() {
+  return new Promise<LocationCapture>((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("Geolocalización no disponible"));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          capturedAt: nowMxString(),
+        });
+      },
+      () => reject(new Error("No se pudo obtener la ubicación")),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  });
 }
 
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
@@ -248,21 +321,30 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState("");
   const [logoMode, setLogoMode] = useState<LogoMode>("primary");
 
-  const [stores, setStores] = useState<StoreItem[]>(MOCK_STORES);
-  const [visits, setVisits] = useState<VisitItem[]>(MOCK_VISITS);
-  const [gallery, setGallery] = useState<UiEvidence[]>(MOCK_GALLERY);
+  const [stores, setStores] = useState<StoreItem[]>(DEMO_STORES);
+  const [visits, setVisits] = useState<VisitItem[]>(DEMO_VISITS);
+  const [gallery, setGallery] = useState<UiEvidence[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState("");
-  const [selectedVisitId, setSelectedVisitId] = useState(MOCK_VISITS[0]?.visita_id || "");
+  const [selectedVisitId, setSelectedVisitId] = useState(DEMO_VISITS[0]?.visita_id || "");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
+
+  const [entryLocation, setEntryLocation] = useState<LocationCapture | null>(null);
+  const [exitLocation, setExitLocation] = useState<LocationCapture | null>(null);
+  const [entryPhoto, setEntryPhoto] = useState<PhotoCapture | null>(null);
+  const [exitPhoto, setExitPhoto] = useState<PhotoCapture | null>(null);
+  const [attendanceLog, setAttendanceLog] = useState<AttendanceLog[]>([]);
+  const [capturingLocation, setCapturingLocation] = useState<CaptureKind | null>(null);
+  const [capturingPhoto, setCapturingPhoto] = useState<CaptureKind | null>(null);
 
   const [evidenceBrand, setEvidenceBrand] = useState("");
   const [evidenceType, setEvidenceType] = useState("");
   const [evidencePhase, setEvidencePhase] = useState<EvidencePhase>("NA");
   const [evidenceQty, setEvidenceQty] = useState(1);
   const [evidenceDescription, setEvidenceDescription] = useState("");
+  const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
 
-  const [selectedEvidenceId, setSelectedEvidenceId] = useState(MOCK_GALLERY[0]?.evidencia_id || "");
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
 
   useEffect(() => {
@@ -311,7 +393,7 @@ export default function App() {
       setSyncing(true);
       const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
       if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
-      if (dashboard.stores) setStores(dashboard.stores);
+      if (dashboard.stores?.length) setStores(dashboard.stores);
       if (dashboard.openVisits) {
         setVisits(dashboard.openVisits);
         if (!selectedVisitId && dashboard.openVisits[0]?.visita_id) {
@@ -370,10 +452,85 @@ export default function App() {
     });
   }
 
+  async function captureLocation(kind: CaptureKind) {
+    try {
+      setCapturingLocation(kind);
+      const location = await getCurrentLocation();
+      if (kind === "entrada") {
+        setEntryLocation(location);
+        setStatusMsg("✅ Ubicación de entrada capturada.");
+      } else {
+        setExitLocation(location);
+        setStatusMsg("✅ Ubicación de salida capturada.");
+      }
+    } catch (err) {
+      setStatusMsg(`⚠️ ${err instanceof Error ? err.message : "No se pudo obtener la ubicación"}`);
+    } finally {
+      setCapturingLocation(null);
+    }
+  }
+
+  async function captureAttendancePhoto(kind: CaptureKind, fileList: FileList | null) {
+    const file = fileList?.[0];
+    if (!file) return;
+
+    try {
+      setCapturingPhoto(kind);
+      const dataUrl = await readCompressedPhoto(file);
+      const payload: PhotoCapture = {
+        name: file.name,
+        dataUrl,
+        capturedAt: nowMxString(),
+      };
+
+      if (kind === "entrada") {
+        setEntryPhoto(payload);
+        setStatusMsg("✅ Foto de entrada lista.");
+      } else {
+        setExitPhoto(payload);
+        setStatusMsg("✅ Foto de salida lista.");
+      }
+    } catch (err) {
+      setStatusMsg(`⚠️ ${err instanceof Error ? err.message : "No se pudo procesar la foto"}`);
+    } finally {
+      setCapturingPhoto(null);
+    }
+  }
+
+  async function captureEvidencePhotos(fileList: FileList | null) {
+    const files = Array.from(fileList || []).slice(0, 10);
+    if (!files.length) return;
+
+    try {
+      setCapturingPhoto("entrada");
+      const processed = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          dataUrl: await readCompressedPhoto(file),
+          capturedAt: nowMxString(),
+        }))
+      );
+      setEvidencePhotos(processed);
+      setStatusMsg(`✅ ${processed.length} foto(s) de evidencia listas.`);
+    } catch (err) {
+      setStatusMsg(`⚠️ ${err instanceof Error ? err.message : "No se pudieron procesar las fotos"}`);
+    } finally {
+      setCapturingPhoto(null);
+    }
+  }
+
   async function createEntry() {
     try {
       if (!selectedStoreId) {
         setStatusMsg("⚠️ Selecciona una tienda.");
+        return;
+      }
+      if (!entryLocation) {
+        setStatusMsg("⚠️ Captura la ubicación de entrada.");
+        return;
+      }
+      if (!entryPhoto) {
+        setStatusMsg("⚠️ Captura la foto de entrada.");
         return;
       }
       if (!getInitData()) {
@@ -390,6 +547,11 @@ export default function App() {
       setSyncing(true);
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
         tienda_id: selectedStoreId,
+        lat: entryLocation.lat,
+        lon: entryLocation.lon,
+        accuracy: entryLocation.accuracy,
+        foto_nombre: entryPhoto.name,
+        foto_data_url: entryPhoto.dataUrl,
       });
 
       const newVisit: VisitItem = {
@@ -402,6 +564,19 @@ export default function App() {
 
       setVisits((prev) => [newVisit, ...prev.filter((v) => v.visita_id !== newVisit.visita_id)]);
       setSelectedVisitId(newVisit.visita_id);
+      setAttendanceLog((prev) => [
+        {
+          id: `ENT-${Date.now()}`,
+          type: "entrada",
+          storeName: response.tienda_nombre,
+          happenedAt: response.started_at,
+          hasLocation: true,
+          hasPhoto: true,
+        },
+        ...prev,
+      ]);
+      setEntryLocation(null);
+      setEntryPhoto(null);
       setStatusMsg(`✅ Entrada registrada en ${response.tienda_nombre}`);
       await loadRealDashboard();
     } catch {
@@ -417,6 +592,14 @@ export default function App() {
         setStatusMsg("⚠️ Selecciona una visita abierta.");
         return;
       }
+      if (!exitLocation) {
+        setStatusMsg("⚠️ Captura la ubicación de salida.");
+        return;
+      }
+      if (!exitPhoto) {
+        setStatusMsg("⚠️ Captura la foto de salida.");
+        return;
+      }
       if (!getInitData()) {
         setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
         return;
@@ -429,10 +612,28 @@ export default function App() {
       }
 
       setSyncing(true);
-      await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
+      const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
         visita_id: selectedVisitId,
+        lat: exitLocation.lat,
+        lon: exitLocation.lon,
+        accuracy: exitLocation.accuracy,
+        foto_nombre: exitPhoto.name,
+        foto_data_url: exitPhoto.dataUrl,
       });
 
+      setAttendanceLog((prev) => [
+        {
+          id: `SAL-${Date.now()}`,
+          type: "salida",
+          storeName: selectedVisit ? getVisitDisplayName(selectedVisit, stores) : "Visita activa",
+          happenedAt: response.closed_at,
+          hasLocation: true,
+          hasPhoto: true,
+        },
+        ...prev,
+      ]);
+      setExitLocation(null);
+      setExitPhoto(null);
       setStatusMsg("✅ Salida registrada correctamente.");
       await loadRealDashboard();
     } catch {
@@ -448,25 +649,42 @@ export default function App() {
       setStatusMsg("⚠️ Necesitas una visita activa para registrar evidencias.");
       return;
     }
+    if (!evidenceBrand.trim()) {
+      setStatusMsg("⚠️ Escribe la marca.");
+      return;
+    }
+    if (!evidenceType.trim()) {
+      setStatusMsg("⚠️ Escribe el tipo de evidencia.");
+      return;
+    }
+    if (!evidencePhotos.length) {
+      setStatusMsg("⚠️ Agrega al menos una foto de evidencia.");
+      return;
+    }
 
-    const created: UiEvidence[] = Array.from({ length: evidenceQty }).map((_, index) => ({
+    const created: UiEvidence[] = Array.from({ length: Math.max(1, evidenceQty) }).map((_, index) => ({
       evidencia_id: `UI-${Date.now()}-${index + 1}`,
-      tipo_evento: `EVIDENCIA_${(evidenceType || "GENERAL").toUpperCase()}`,
-      tipo_evidencia: evidenceType || "Sin tipo",
-      marca_nombre: evidenceBrand || "Sin marca",
+      tipo_evento: `EVIDENCIA_${evidenceType.toUpperCase()}`,
+      tipo_evidencia: evidenceType,
+      marca_nombre: evidenceBrand,
       riesgo: index === 0 ? "BAJO" : "MEDIO",
       fecha_hora_fmt: nowMxString(),
-      url_foto: `https://picsum.photos/seed/${Date.now()}-${index}/1200/900`,
-      descripcion: evidenceDescription || "Captura registrada desde la UI",
+      url_foto: evidencePhotos[index]?.dataUrl || evidencePhotos[0].dataUrl,
+      descripcion: `${evidenceDescription || "Captura registrada desde la UI"} | Fase=${evidencePhase}`,
       status: "ACTIVA",
       tienda_nombre: getVisitDisplayName(visit, stores),
+      photos: evidencePhotos,
     }));
 
     setGallery((prev) => [...created, ...prev]);
     setSelectedEvidenceId(created[0].evidencia_id);
     setEvidenceDescription("");
     setEvidenceQty(1);
-    setStatusMsg("✅ Flujo visible guardado. La conexión final de evidencias aún está pendiente.");
+    setEvidenceBrand("");
+    setEvidenceType("");
+    setEvidencePhase("NA");
+    setEvidencePhotos([]);
+    setStatusMsg("✅ Evidencias preparadas en la Mini App. Falta conectar persistencia final del backend.");
   }
 
   function markEvidenceAsCancelled() {
@@ -484,19 +702,22 @@ export default function App() {
     setStatusMsg("✅ Evidencia marcada como anulada en la UI.");
   }
 
-  function replaceEvidence() {
-    if (!selectedEvidence) {
-      setStatusMsg("⚠️ Selecciona una evidencia.");
-      return;
-    }
-    setGallery((prev) =>
-      prev.map((item) =>
-        item.evidencia_id === selectedEvidence.evidencia_id
-          ? { ...item, url_foto: `https://picsum.photos/seed/replaced-${Date.now()}/1200/900`, fecha_hora_fmt: nowMxString() }
-          : item
-      )
-    );
-    setStatusMsg("✅ Evidencia reemplazada en la UI.");
+  function replaceEvidencePhoto(fileList: FileList | null) {
+    const file = fileList?.[0];
+    if (!file || !selectedEvidence) return;
+
+    readCompressedPhoto(file)
+      .then((dataUrl) => {
+        setGallery((prev) =>
+          prev.map((item) =>
+            item.evidencia_id === selectedEvidence.evidencia_id
+              ? { ...item, url_foto: dataUrl, fecha_hora_fmt: nowMxString() }
+              : item
+          )
+        );
+        setStatusMsg("✅ Evidencia reemplazada en la UI.");
+      })
+      .catch(() => setStatusMsg("⚠️ No se pudo procesar la foto de reemplazo."));
   }
 
   function saveNote() {
@@ -609,6 +830,40 @@ export default function App() {
                   ))}
                 </select>
 
+                <div className="captureBlock">
+                  <div className="captureTitle">Entrada</div>
+                  <div className="captureGrid">
+                    <button className="secondaryBtn compactBtn" onClick={() => captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
+                      <MapPin size={16} />
+                      {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
+                    </button>
+                    <label className="fileBtn compactBtn">
+                      <Camera size={16} />
+                      {capturingPhoto === "entrada" ? "Procesando..." : entryPhoto ? "Foto lista" : "Capturar foto"}
+                      <input type="file" accept="image/*" capture="environment" onChange={(e) => captureAttendancePhoto("entrada", e.target.files)} />
+                    </label>
+                  </div>
+                  {entryLocation ? <div className="captureMeta">Lat {entryLocation.lat.toFixed(5)} · Lon {entryLocation.lon.toFixed(5)}</div> : null}
+                  {entryPhoto ? <div className="thumbRow"><img src={entryPhoto.dataUrl} className="thumb" alt="Entrada" /></div> : null}
+                </div>
+
+                <div className="captureBlock">
+                  <div className="captureTitle">Salida</div>
+                  <div className="captureGrid">
+                    <button className="secondaryBtn compactBtn" onClick={() => captureLocation("salida")} disabled={capturingLocation === "salida"}>
+                      <MapPin size={16} />
+                      {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
+                    </button>
+                    <label className="fileBtn compactBtn">
+                      <Camera size={16} />
+                      {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Foto lista" : "Capturar foto"}
+                      <input type="file" accept="image/*" capture="environment" onChange={(e) => captureAttendancePhoto("salida", e.target.files)} />
+                    </label>
+                  </div>
+                  {exitLocation ? <div className="captureMeta">Lat {exitLocation.lat.toFixed(5)} · Lon {exitLocation.lon.toFixed(5)}</div> : null}
+                  {exitPhoto ? <div className="thumbRow"><img src={exitPhoto.dataUrl} className="thumb" alt="Salida" /></div> : null}
+                </div>
+
                 <button className="primaryBtn" onClick={createEntry} disabled={syncing}>
                   <MapPin size={16} />
                   {syncing ? "Procesando..." : "Registrar entrada"}
@@ -634,6 +889,16 @@ export default function App() {
                     </button>
                   ))}
                   {!openVisits.length ? <div className="emptyBox">No hay visitas abiertas.</div> : null}
+                </div>
+
+                <div className="miniTitle" style={{ marginTop: 14 }}>Bitácora inmediata</div>
+                <div className="stack compactStack compactShort">
+                  {attendanceLog.length ? attendanceLog.map((item) => (
+                    <div className="logCard" key={item.id}>
+                      <div className="listTitle">{item.type === "entrada" ? "Entrada" : "Salida"} · {item.storeName}</div>
+                      <div className="listSub">{formatHourFromIso(item.happenedAt)} · Foto {item.hasPhoto ? "OK" : "No"} · Ubicación {item.hasLocation ? "OK" : "No"}</div>
+                    </div>
+                  )) : <div className="emptyBox">Sin movimientos registrados en esta sesión.</div>}
                 </div>
               </div>
             </div>
@@ -667,10 +932,8 @@ export default function App() {
                   <option value="ANTES">Antes</option>
                   <option value="DESPUES">Después</option>
                 </select>
-              </div>
 
-              <div className="panel">
-                <label className="fieldLabel">Cantidad de fotos</label>
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad de fotos esperadas</label>
                 <input
                   className="inputLike"
                   type="number"
@@ -679,8 +942,10 @@ export default function App() {
                   value={evidenceQty}
                   onChange={(e) => setEvidenceQty(Math.max(1, Number(e.target.value || 1)))}
                 />
+              </div>
 
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Observación</label>
+              <div className="panel">
+                <label className="fieldLabel">Observación</label>
                 <input
                   className="inputLike"
                   value={evidenceDescription}
@@ -688,9 +953,23 @@ export default function App() {
                   placeholder="Ej. Cabecera completa, competencia lateral..."
                 />
 
+                <label className="fileBtn wideFileBtn" style={{ marginTop: 12 }}>
+                  <Camera size={16} />
+                  {capturingPhoto ? "Procesando..." : evidencePhotos.length ? `${evidencePhotos.length} foto(s) listas` : "Agregar fotos de evidencia"}
+                  <input type="file" accept="image/*" multiple onChange={(e) => captureEvidencePhotos(e.target.files)} />
+                </label>
+
+                {evidencePhotos.length ? (
+                  <div className="thumbGrid">
+                    {evidencePhotos.map((photo) => (
+                      <img key={`${photo.name}-${photo.capturedAt}`} src={photo.dataUrl} className="thumb" alt={photo.name} />
+                    ))}
+                  </div>
+                ) : null}
+
                 <button className="primaryBtn" onClick={saveEvidenceFlow}>
                   <Camera size={16} />
-                  Guardar flujo visible
+                  Guardar evidencia en UI
                 </button>
               </div>
             </div>
@@ -731,12 +1010,16 @@ export default function App() {
                     <div className="actionGrid actionGridButtons">
                       {myEvidenceActions.map((item) => {
                         const Icon = item.Icon;
-                        const handleClick =
-                          item.key === "anular"
-                            ? markEvidenceAsCancelled
-                            : item.key === "reemplazar"
-                              ? replaceEvidence
-                              : undefined;
+                        if (item.key === "reemplazar") {
+                          return (
+                            <label className="actionButton" key={item.key}>
+                              <Icon size={16} />
+                              <span>{item.title}</span>
+                              <input type="file" accept="image/*" onChange={(e) => replaceEvidencePhoto(e.target.files)} />
+                            </label>
+                          );
+                        }
+                        const handleClick = item.key === "anular" ? markEvidenceAsCancelled : undefined;
                         return (
                           <button className="actionButton" key={item.key} onClick={handleClick}>
                             <Icon size={16} />
@@ -787,6 +1070,9 @@ export default function App() {
                 ) : (
                   <div className="summaryLine">No hay registros del día.</div>
                 )}
+                {attendanceLog.length ? (
+                  <div className="summaryLine">Eventos en esta sesión: <strong>{attendanceLog.length}</strong></div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -864,6 +1150,7 @@ const globalCss = `
 body { margin: 0; background: #eef1f4; }
 button, input, select { font: inherit; }
 .shell { max-width: 1180px; margin: 0 auto; }
+input[type=file] { display: none; }
 .stickyTop {
   position: sticky;
   top: 0;
@@ -982,6 +1269,7 @@ button, input, select { font: inherit; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .compactStack { max-height: 260px; overflow: auto; }
+.compactShort { max-height: 190px; }
 .listBtn {
   width: 100%; text-align: left; border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(255,255,255,0.96); padding: 12px; color: #263238; cursor: pointer;
@@ -998,16 +1286,55 @@ button, input, select { font: inherit; }
   width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10);
   background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px;
 }
-.primaryBtn, .secondaryBtn {
+.primaryBtn, .secondaryBtn, .fileBtn {
   margin-top: 10px; width: 100%; border: 0; border-radius: 14px; padding: 13px 14px;
   display: inline-flex; justify-content: center; align-items: center; gap: 8px;
   font-weight: 800; cursor: pointer;
+  text-decoration: none;
 }
 .primaryBtn { background: #4caf50; color: white; }
-.secondaryBtn { background: #eceff1; color: #37474f; }
+.secondaryBtn, .fileBtn { background: #eceff1; color: #37474f; }
 .primaryBtn:disabled, .secondaryBtn:disabled { opacity: 0.7; cursor: not-allowed; }
+.compactBtn { margin-top: 0; padding: 11px 12px; }
+.wideFileBtn { margin-top: 12px; }
 .emptyBox {
   padding: 12px; border-radius: 12px; background: rgba(96,125,139,0.08); color: #607d8b; font-size: 13px;
+}
+.captureBlock {
+  margin-top: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.86);
+  border: 1px solid rgba(38,50,56,0.08);
+  padding: 12px;
+}
+.captureTitle {
+  font-size: 13px;
+  font-weight: 800;
+  color: #37474f;
+  margin-bottom: 8px;
+}
+.captureGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.captureMeta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #607d8b;
+}
+.thumbRow, .thumbGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.thumb {
+  width: 66px;
+  height: 66px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(38,50,56,0.12);
 }
 .actionGrid, .summaryGrid {
   margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
@@ -1016,6 +1343,12 @@ button, input, select { font: inherit; }
 .actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
+}
+.logCard {
+  border-radius: 12px;
+  border: 1px solid rgba(38,50,56,0.08);
+  background: rgba(255,255,255,0.92);
+  padding: 10px 12px;
 }
 .flowTitle { font-weight: 800; color: #263238; }
 .flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
@@ -1090,7 +1423,7 @@ button, input, select { font: inherit; }
 .footerActions { margin-top: 12px; margin-bottom: 74px; display: flex; justify-content: flex-end; }
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons { grid-template-columns: 1fr; }
+  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .heroTitleBlock { width: 112px; min-width: 112px; }
