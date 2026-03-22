@@ -135,7 +135,7 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260322b";
+const ASSET_VERSION = "20260322c";
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -143,8 +143,7 @@ function getTelegramWebApp() {
 }
 
 function getInitData() {
-  const tg = getTelegramWebApp();
-  return tg?.initData || "";
+  return getTelegramWebApp()?.initData || "";
 }
 
 function getLogoUrl(mode: Exclude<LogoMode, "text">) {
@@ -156,7 +155,6 @@ function getLogoUrl(mode: Exclude<LogoMode, "text">) {
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
@@ -167,7 +165,7 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(json?.error || `Error ${res.status}`);
+      throw new Error((json as { error?: string }).error || `Error ${res.status}`);
     }
     return json as T;
   } finally {
@@ -425,6 +423,7 @@ export default function App() {
       setBrandRules([]);
       return;
     }
+
     try {
       const rules = await postJson<EvidenceRulesResponse>("/miniapp/promotor/evidence-rules", {
         marca_id: brandId,
@@ -464,15 +463,15 @@ export default function App() {
 
   useEffect(() => {
     if (role === "promotor") {
-      loadEvidenceContext(selectedVisitId);
+      void loadEvidenceContext(selectedVisitId);
     }
   }, [selectedVisitId, role]);
 
   useEffect(() => {
     if (role === "promotor") {
-      loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
+      void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
     }
-  }, [evidenceBrandId]);
+  }, [evidenceBrandId, evidenceBrandLabel, role]);
 
   function handleLogoError() {
     setLogoMode((prev) => {
@@ -503,7 +502,6 @@ export default function App() {
   async function captureAttendancePhoto(kind: CaptureKind, fileList: FileList | null) {
     const file = fileList?.[0];
     if (!file) return;
-
     try {
       setCapturingPhoto(kind);
       const dataUrl = await readCompressedPhoto(file);
@@ -512,7 +510,6 @@ export default function App() {
         dataUrl,
         capturedAt: nowMxString(),
       };
-
       if (kind === "entrada") {
         setEntryPhoto(payload);
         setStatusMsg("Foto de entrada lista.");
@@ -808,6 +805,7 @@ export default function App() {
                 <div className="brandWord">REZGO</div>
               )}
             </div>
+
             <div className="heroTitleBlock heroTitleBlockWide">
               <div className="heroTitle heroTitleTight">Operación<br />del promotor</div>
               <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
@@ -868,21 +866,21 @@ export default function App() {
                 <div className="captureBlock">
                   <div className="captureTitle">Entrada</div>
                   <div className="captureGrid">
-                    <button className="secondaryBtn compactBtn" onClick={() => captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
+                    <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
                     </button>
                     <label className="fileBtn compactBtn">
                       <Camera size={16} />
                       {capturingPhoto === "entrada" ? "Procesando..." : entryPhoto ? "Foto lista" : "Capturar foto"}
-                      <input type="file" accept="image/*" capture="environment" onChange={(e) => captureAttendancePhoto("entrada", e.target.files)} />
+                      <input type="file" accept="image/*" capture="environment" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
                     </label>
                   </div>
                   {entryLocation ? <div className="captureMeta">Lat {entryLocation.lat.toFixed(5)} · Lon {entryLocation.lon.toFixed(5)}</div> : null}
                   {entryPhoto ? <div className="thumbRow"><img src={entryPhoto.dataUrl} className="thumb" alt="Entrada" /></div> : null}
                 </div>
 
-                <button className="primaryBtn" onClick={createEntry} disabled={syncing}>
+                <button className="primaryBtn" onClick={() => void createEntry()} disabled={syncing}>
                   <MapPin size={16} />
                   {syncing ? "Procesando..." : "Registrar entrada"}
                 </button>
@@ -892,21 +890,21 @@ export default function App() {
                     <div className="captureBlock">
                       <div className="captureTitle">Salida</div>
                       <div className="captureGrid">
-                        <button className="secondaryBtn compactBtn" onClick={() => captureLocation("salida")} disabled={capturingLocation === "salida"}>
+                        <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("salida")} disabled={capturingLocation === "salida"}>
                           <MapPin size={16} />
                           {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
                         </button>
                         <label className="fileBtn compactBtn">
                           <Camera size={16} />
                           {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Foto lista" : "Capturar foto"}
-                          <input type="file" accept="image/*" capture="environment" onChange={(e) => captureAttendancePhoto("salida", e.target.files)} />
+                          <input type="file" accept="image/*" capture="environment" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
                         </label>
                       </div>
                       {exitLocation ? <div className="captureMeta">Lat {exitLocation.lat.toFixed(5)} · Lon {exitLocation.lon.toFixed(5)}</div> : null}
                       {exitPhoto ? <div className="thumbRow"><img src={exitPhoto.dataUrl} className="thumb" alt="Salida" /></div> : null}
                     </div>
 
-                    <button className="secondaryBtn" onClick={closeVisit} disabled={syncing || !hasOpenVisit}>
+                    <button className="secondaryBtn" onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
                       <CheckCircle2 size={16} />
                       {syncing ? "Procesando..." : "Registrar salida"}
                     </button>
@@ -1014,7 +1012,7 @@ export default function App() {
                 <label className="fileBtn wideFileBtn" style={{ marginTop: 12 }}>
                   <Camera size={16} />
                   {capturingPhoto ? "Procesando..." : evidencePhotos.length ? `${evidencePhotos.length} foto(s) listas` : "Agregar fotos de evidencia"}
-                  <input type="file" accept="image/*" multiple onChange={(e) => captureEvidencePhotos(e.target.files)} />
+                  <input type="file" accept="image/*" multiple onChange={(e) => void captureEvidencePhotos(e.target.files)} />
                 </label>
 
                 {evidencePhotos.length ? (
@@ -1025,7 +1023,7 @@ export default function App() {
                   </div>
                 ) : null}
 
-                <button className="primaryBtn" onClick={saveEvidenceFlow} disabled={syncing}>
+                <button className="primaryBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing}>
                   <Camera size={16} />
                   {syncing ? "Guardando..." : "Registrar evidencia"}
                 </button>
@@ -1067,12 +1065,12 @@ export default function App() {
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
 
                     <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.") }>
+                      <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.")}>
                         <Eye size={16} />
                         <span>Ver</span>
                       </button>
 
-                      <button className="actionButton" onClick={markEvidenceAsCancelled}>
+                      <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}>
                         <Trash2 size={16} />
                         <span>Anular</span>
                       </button>
@@ -1080,10 +1078,10 @@ export default function App() {
                       <label className="actionButton">
                         <Camera size={16} />
                         <span>Reemplazar</span>
-                        <input type="file" accept="image/*" onChange={(e) => replaceEvidencePhoto(e.target.files)} />
+                        <input type="file" accept="image/*" onChange={(e) => void replaceEvidencePhoto(e.target.files)} />
                       </label>
 
-                      <button className="actionButton" onClick={saveNote}>
+                      <button className="actionButton" onClick={() => void saveNote()}>
                         <Pencil size={16} />
                         <span>Guardar nota</span>
                       </button>
@@ -1181,17 +1179,19 @@ export default function App() {
         <div className="footerActions">
           <button
             className="secondaryBtn footerBtn"
-            onClick={async () => {
-              try {
-                setSyncing(true);
-                await loadDashboard();
-                await loadEvidencesToday();
-                setStatusMsg("Información actualizada.");
-              } catch (err) {
-                setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
-              } finally {
-                setSyncing(false);
-              }
+            onClick={() => {
+              void (async () => {
+                try {
+                  setSyncing(true);
+                  await loadDashboard();
+                  await loadEvidencesToday();
+                  setStatusMsg("Información actualizada.");
+                } catch (err) {
+                  setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
+                } finally {
+                  setSyncing(false);
+                }
+              })();
             }}
             disabled={syncing || !!error || role !== "promotor"}
           >
@@ -1311,10 +1311,13 @@ input[type=file] { display: none; }
 .loadingCard { background: rgba(255,255,255,0.95); }
 .warning { background: rgba(255,244,229,0.96); border-color: rgba(245,158,11,0.25); }
 .warningRow, .loadingRow {
-  display: flex; align-items: center; gap: 10px; color: #263238;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #263238;
 }
 .spin { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .sectionTitle { font-size: 18px; font-weight: 800; color: #263238; }
 .tabsBar {
   margin-top: 8px;
@@ -1342,36 +1345,55 @@ input[type=file] { display: none; }
 }
 .tabBtnActive { background: rgba(76,175,80,.14); color: #2e7d32; }
 .twoCol {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
 }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .compactStack { max-height: 260px; overflow: auto; }
 .listBtn {
-  width: 100%; text-align: left; border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
-  background: rgba(255,255,255,0.96); padding: 12px; color: #263238; cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid rgba(38,50,56,0.08);
+  background: rgba(255,255,255,0.96);
+  padding: 12px;
+  color: #263238;
+  cursor: pointer;
 }
 .listBtnGreen { border-color: rgba(76,175,80,.45); background: rgba(232,245,233,0.95); }
 .listTitle { font-weight: 800; }
 .listSub { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .panel {
-  border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
-  background: rgba(248,249,251,0.95); padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(38,50,56,0.08);
+  background: rgba(248,249,251,0.95);
+  padding: 14px;
 }
 .fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
 .inputLike {
-  width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10);
-  background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(38,50,56,0.10);
+  background: rgba(255,255,255,0.96);
+  color: #263238;
+  padding: 11px 12px;
 }
-.contextHint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #607d8b;
-}
+.contextHint { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .primaryBtn, .secondaryBtn, .fileBtn {
-  margin-top: 10px; width: 100%; border: 0; border-radius: 14px; padding: 13px 14px;
-  display: inline-flex; justify-content: center; align-items: center; gap: 8px;
-  font-weight: 800; cursor: pointer;
+  margin-top: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 13px 14px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  cursor: pointer;
   text-decoration: none;
 }
 .primaryBtn { background: #4caf50; color: white; }
@@ -1380,7 +1402,11 @@ input[type=file] { display: none; }
 .compactBtn { margin-top: 0; padding: 11px 12px; }
 .wideFileBtn { margin-top: 12px; }
 .emptyBox {
-  padding: 12px; border-radius: 12px; background: rgba(96,125,139,0.08); color: #607d8b; font-size: 13px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(96,125,139,0.08);
+  color: #607d8b;
+  font-size: 13px;
 }
 .captureBlock {
   margin-top: 12px;
@@ -1400,11 +1426,7 @@ input[type=file] { display: none; }
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
-.captureMeta {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #607d8b;
-}
+.captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .thumbRow, .thumbGrid {
   display: flex;
   flex-wrap: wrap;
@@ -1419,17 +1441,28 @@ input[type=file] { display: none; }
   border: 1px solid rgba(38,50,56,0.12);
 }
 .actionGrid, .summaryGrid {
-  margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 .actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .actionCard {
-  display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
-  padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(248,249,251,0.95);
+  border: 1px solid rgba(38,50,56,0.08);
 }
 .flowTitle { font-weight: 800; color: #263238; }
 .flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
 .summaryBlock {
-  border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(248,249,251,0.95);
+  border: 1px solid rgba(38,50,56,0.08);
 }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .previewFrame {
@@ -1454,11 +1487,15 @@ input[type=file] { display: none; }
 }
 .galleryGrid {
   margin-top: 14px;
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 .galleryCard {
-  border-radius: 18px; border: 1px solid rgba(38,50,56,0.08);
-  background: rgba(255,255,255,0.96); padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(38,50,56,0.08);
+  background: rgba(255,255,255,0.96);
+  padding: 12px;
 }
 .imageFrame {
   aspect-ratio: 4 / 3;
@@ -1468,14 +1505,21 @@ input[type=file] { display: none; }
 }
 .img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .galleryTop {
-  margin-top: 10px; display: flex; justify-content: space-between; gap: 8px; align-items: center;
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
 }
 .galleryTitle { font-weight: 800; color: #263238; }
 .gallerySub { margin-top: 4px; color: #607d8b; font-size: 13px; }
 .galleryDate { margin-top: 4px; color: #78909c; font-size: 12px; }
 .galleryDesc { margin-top: 8px; color: #455a64; font-size: 13px; line-height: 1.45; }
 .riskBadge {
-  border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 800;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 800;
 }
 .riskRed { background: rgba(239,68,68,.14); color: #d32f2f; }
 .riskAmber { background: rgba(245,158,11,.14); color: #ed6c02; }
@@ -1496,12 +1540,20 @@ input[type=file] { display: none; }
   font-weight: 700;
   box-shadow: 0 12px 28px rgba(38,50,56,0.16);
 }
-.footerActions { margin-top: 12px; margin-bottom: 74px; display: flex; justify-content: flex-end; }
+.footerActions {
+  margin-top: 12px;
+  margin-bottom: 74px;
+  display: flex;
+  justify-content: flex-end;
+}
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid { grid-template-columns: 1fr; }
+  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 760px) {
   .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; }
   .heroMetaSingleWide { max-width: 190px; }
 }
+`;
