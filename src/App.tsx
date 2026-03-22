@@ -66,13 +66,13 @@ type EvidenceItem = {
   fecha_hora_fmt: string;
   url_foto: string;
   descripcion: string;
+  tienda_nombre?: string;
+  tienda_id?: string;
 };
 
 type UiEvidence = EvidenceItem & {
   status?: "ACTIVA" | "ANULADA";
   note?: string;
-  tienda_nombre?: string;
-  photos?: PhotoCapture[];
 };
 
 type DashboardResponse = {
@@ -82,6 +82,7 @@ type DashboardResponse = {
   };
   stores?: StoreItem[];
   openVisits?: VisitItem[];
+  visitsToday?: VisitItem[];
 };
 
 type EvidencesTodayResponse = {
@@ -95,12 +96,14 @@ type StartEntryResponse = {
   tienda_id: string;
   tienda_nombre: string;
   started_at: string;
+  warning?: string;
 };
 
 type CloseVisitResponse = {
   ok: boolean;
   visita_id: string;
   closed_at: string;
+  warning?: string;
 };
 
 type LocationCapture = {
@@ -116,30 +119,8 @@ type PhotoCapture = {
   capturedAt: string;
 };
 
-type AttendanceLog = {
-  id: string;
-  type: CaptureKind;
-  storeName: string;
-  happenedAt: string;
-  hasLocation: boolean;
-  hasPhoto: boolean;
-};
-
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260321h";
-const DEMO_STORES: StoreItem[] = [
-  { tienda_id: "TDA-001", nombre_tienda: "Bodega Aurrera San Mateo", cadena: "Bodega Aurrera" },
-  { tienda_id: "TDA-002", nombre_tienda: "Walmart Las Torres", cadena: "Walmart" },
-];
-const DEMO_VISITS: VisitItem[] = [
-  {
-    visita_id: "V-1001",
-    tienda_id: "TDA-001",
-    tienda_nombre: "Bodega Aurrera San Mateo",
-    hora_inicio: "2026-03-21T09:10:00.000Z",
-    hora_fin: "",
-  },
-];
+const ASSET_VERSION = "20260322a";
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -157,7 +138,7 @@ function getLogoUrl(mode: Exclude<LogoMode, "text">) {
   return `${window.location.origin}/${file}?v=${ASSET_VERSION}`;
 }
 
-async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 12000) {
+async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -169,8 +150,11 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
       signal: controller.signal,
     });
 
-    if (!res.ok) throw new Error(`Error ${res.status}`);
-    return (await res.json()) as T;
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json?.error || `Error ${res.status}`);
+    }
+    return json as T;
   } finally {
     clearTimeout(timeout);
   }
@@ -303,13 +287,6 @@ const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: stri
   { key: "seguimiento", Icon: Pencil, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
 ];
 
-const myEvidenceActions: Array<{ key: string; Icon: React.ElementType; title: string }> = [
-  { key: "ver", Icon: Eye, title: "Ver" },
-  { key: "anular", Icon: Trash2, title: "Anular" },
-  { key: "reemplazar", Icon: Camera, title: "Reemplazar" },
-  { key: "nota", Icon: Pencil, title: "Nota" },
-];
-
 export default function App() {
   const tg = getTelegramWebApp();
 
@@ -321,11 +298,10 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState("");
   const [logoMode, setLogoMode] = useState<LogoMode>("primary");
 
-  const [stores, setStores] = useState<StoreItem[]>(DEMO_STORES);
-  const [visits, setVisits] = useState<VisitItem[]>(DEMO_VISITS);
-  const [gallery, setGallery] = useState<UiEvidence[]>([]);
+  const [stores, setStores] = useState<StoreItem[]>([]);
+  const [visits, setVisits] = useState<VisitItem[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState("");
-  const [selectedVisitId, setSelectedVisitId] = useState(DEMO_VISITS[0]?.visita_id || "");
+  const [selectedVisitId, setSelectedVisitId] = useState("");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
 
@@ -333,7 +309,6 @@ export default function App() {
   const [exitLocation, setExitLocation] = useState<LocationCapture | null>(null);
   const [entryPhoto, setEntryPhoto] = useState<PhotoCapture | null>(null);
   const [exitPhoto, setExitPhoto] = useState<PhotoCapture | null>(null);
-  const [attendanceLog, setAttendanceLog] = useState<AttendanceLog[]>([]);
   const [capturingLocation, setCapturingLocation] = useState<CaptureKind | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState<CaptureKind | null>(null);
 
@@ -344,6 +319,7 @@ export default function App() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
 
+  const [gallery, setGallery] = useState<UiEvidence[]>([]);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
 
@@ -356,21 +332,27 @@ export default function App() {
     }
   }, [tg]);
 
+  useEffect(() => {
+    if (!statusMsg) return;
+    const t = setTimeout(() => setStatusMsg(""), 3500);
+    return () => clearTimeout(t);
+  }, [statusMsg]);
+
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
-  const activeGallery = useMemo(() => gallery.filter((item) => item.status !== "ANULADA"), [gallery]);
+  const hasOpenVisit = openVisits.length > 0;
   const selectedEvidence = useMemo(
-    () => activeGallery.find((item) => item.evidencia_id === selectedEvidenceId) || activeGallery[0] || null,
-    [activeGallery, selectedEvidenceId]
+    () => gallery.find((item) => item.evidencia_id === selectedEvidenceId) || gallery[0] || null,
+    [gallery, selectedEvidenceId]
   );
 
   const summary = useMemo(
     () => ({
       assignedStores: stores.length,
       openVisits: openVisits.length,
-      evidenciasHoy: activeGallery.length,
-      alertas: activeGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
+      evidenciasHoy: gallery.length,
+      alertas: gallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
     }),
-    [stores, openVisits, activeGallery]
+    [stores, openVisits, gallery]
   );
 
   async function loadBootstrap() {
@@ -386,39 +368,30 @@ export default function App() {
     if (data.profile?.nombre) setActorLabel(data.profile.nombre);
   }
 
-  async function loadRealDashboard() {
+  async function loadDashboard() {
     if (role !== "promotor") return;
-
-    try {
-      setSyncing(true);
-      const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
-      if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
-      if (dashboard.stores?.length) setStores(dashboard.stores);
-      if (dashboard.openVisits) {
-        setVisits(dashboard.openVisits);
-        if (!selectedVisitId && dashboard.openVisits[0]?.visita_id) {
-          setSelectedVisitId(dashboard.openVisits[0].visita_id);
-        }
+    const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
+    if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
+    if (dashboard.stores?.length) setStores(dashboard.stores);
+    if (dashboard.openVisits) {
+      setVisits(dashboard.openVisits);
+      const currentStillExists = dashboard.openVisits.find((v) => v.visita_id === selectedVisitId);
+      if (!currentStillExists) {
+        setSelectedVisitId(dashboard.openVisits[0]?.visita_id || "");
       }
+    }
+  }
 
-      const evidences = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
-      if (evidences.evidencias) {
-        setGallery(
-          evidences.evidencias.map((item) => ({
-            ...item,
-            status: "ACTIVA",
-          }))
-        );
-        if (!selectedEvidenceId && evidences.evidencias[0]?.evidencia_id) {
-          setSelectedEvidenceId(evidences.evidencias[0].evidencia_id);
-        }
-      }
-
-      setError("");
-    } catch {
-      setError("No se pudo cargar toda la operación real. Se muestra una vista local de referencia.");
-    } finally {
-      setSyncing(false);
+  async function loadEvidencesToday() {
+    if (role !== "promotor") return;
+    const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
+    const rows = (data.evidencias || []).map((item) => ({
+      ...item,
+      status: "ACTIVA" as const,
+    }));
+    setGallery(rows);
+    if (rows.length && !rows.find((r) => r.evidencia_id === selectedEvidenceId)) {
+      setSelectedEvidenceId(rows[0].evidencia_id);
     }
   }
 
@@ -427,8 +400,10 @@ export default function App() {
       setLoading(true);
       setError("");
       await loadBootstrap();
-    } catch {
-      setError("No se pudo validar la sesión en línea. Se muestra una vista local de referencia.");
+      await loadDashboard();
+      await loadEvidencesToday();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar la operación.");
     } finally {
       setLoading(false);
     }
@@ -437,12 +412,6 @@ export default function App() {
   useEffect(() => {
     initialize();
   }, []);
-
-  useEffect(() => {
-    if (!loading && !error && role === "promotor") {
-      loadRealDashboard();
-    }
-  }, [loading, error, role]);
 
   function handleLogoError() {
     setLogoMode((prev) => {
@@ -458,13 +427,13 @@ export default function App() {
       const location = await getCurrentLocation();
       if (kind === "entrada") {
         setEntryLocation(location);
-        setStatusMsg("✅ Ubicación de entrada capturada.");
+        setStatusMsg("Ubicación de entrada capturada.");
       } else {
         setExitLocation(location);
-        setStatusMsg("✅ Ubicación de salida capturada.");
+        setStatusMsg("Ubicación de salida capturada.");
       }
     } catch (err) {
-      setStatusMsg(`⚠️ ${err instanceof Error ? err.message : "No se pudo obtener la ubicación"}`);
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo obtener la ubicación.");
     } finally {
       setCapturingLocation(null);
     }
@@ -485,13 +454,13 @@ export default function App() {
 
       if (kind === "entrada") {
         setEntryPhoto(payload);
-        setStatusMsg("✅ Foto de entrada lista.");
+        setStatusMsg("Foto de entrada lista.");
       } else {
         setExitPhoto(payload);
-        setStatusMsg("✅ Foto de salida lista.");
+        setStatusMsg("Foto de salida lista.");
       }
     } catch (err) {
-      setStatusMsg(`⚠️ ${err instanceof Error ? err.message : "No se pudo procesar la foto"}`);
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo procesar la foto.");
     } finally {
       setCapturingPhoto(null);
     }
@@ -511,9 +480,9 @@ export default function App() {
         }))
       );
       setEvidencePhotos(processed);
-      setStatusMsg(`✅ ${processed.length} foto(s) de evidencia listas.`);
+      setStatusMsg(`${processed.length} foto(s) de evidencia listas.`);
     } catch (err) {
-      setStatusMsg(`⚠️ ${err instanceof Error ? err.message : "No se pudieron procesar las fotos"}`);
+      setStatusMsg(err instanceof Error ? err.message : "No se pudieron procesar las fotos.");
     } finally {
       setCapturingPhoto(null);
     }
@@ -522,27 +491,25 @@ export default function App() {
   async function createEntry() {
     try {
       if (!selectedStoreId) {
-        setStatusMsg("⚠️ Selecciona una tienda.");
+        setStatusMsg("Selecciona una tienda.");
         return;
       }
       if (!entryLocation) {
-        setStatusMsg("⚠️ Captura la ubicación de entrada.");
+        setStatusMsg("Captura la ubicación de entrada.");
         return;
       }
       if (!entryPhoto) {
-        setStatusMsg("⚠️ Captura la foto de entrada.");
+        setStatusMsg("Captura la foto de entrada.");
         return;
       }
       if (!getInitData()) {
-        setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
+        setStatusMsg("Esta acción real solo funciona desde Telegram.");
         return;
       }
 
       const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
       const confirmMessage = `¿Deseas registrar entrada en ${selectedStore?.nombre_tienda || "la tienda seleccionada"}?`;
-      if (typeof window !== "undefined" && !window.confirm(confirmMessage)) {
-        return;
-      }
+      if (typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
 
       setSyncing(true);
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
@@ -554,33 +521,21 @@ export default function App() {
         foto_data_url: entryPhoto.dataUrl,
       });
 
-      const newVisit: VisitItem = {
-        visita_id: response.visita_id,
-        tienda_id: response.tienda_id,
-        tienda_nombre: response.tienda_nombre,
-        hora_inicio: response.started_at,
-        hora_fin: "",
-      };
+      if (response.warning) {
+        setStatusMsg("Entrada registrada. La evidencia auxiliar no se guardó, pero la visita sí.");
+      } else {
+        setStatusMsg(`Entrada registrada en ${response.tienda_nombre}`);
+      }
 
-      setVisits((prev) => [newVisit, ...prev.filter((v) => v.visita_id !== newVisit.visita_id)]);
-      setSelectedVisitId(newVisit.visita_id);
-      setAttendanceLog((prev) => [
-        {
-          id: `ENT-${Date.now()}`,
-          type: "entrada",
-          storeName: response.tienda_nombre,
-          happenedAt: response.started_at,
-          hasLocation: true,
-          hasPhoto: true,
-        },
-        ...prev,
-      ]);
       setEntryLocation(null);
       setEntryPhoto(null);
-      setStatusMsg(`✅ Entrada registrada en ${response.tienda_nombre}`);
-      await loadRealDashboard();
-    } catch {
-      setStatusMsg("⚠️ No se pudo registrar la entrada real.");
+      setExitLocation(null);
+      setExitPhoto(null);
+
+      await loadDashboard();
+      await loadEvidencesToday();
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la entrada real.");
     } finally {
       setSyncing(false);
     }
@@ -589,27 +544,25 @@ export default function App() {
   async function closeVisit() {
     try {
       if (!selectedVisitId) {
-        setStatusMsg("⚠️ Selecciona una visita abierta.");
+        setStatusMsg("Selecciona una visita abierta.");
         return;
       }
       if (!exitLocation) {
-        setStatusMsg("⚠️ Captura la ubicación de salida.");
+        setStatusMsg("Captura la ubicación de salida.");
         return;
       }
       if (!exitPhoto) {
-        setStatusMsg("⚠️ Captura la foto de salida.");
+        setStatusMsg("Captura la foto de salida.");
         return;
       }
       if (!getInitData()) {
-        setStatusMsg("⚠️ Esta acción real solo funciona desde Telegram.");
+        setStatusMsg("Esta acción real solo funciona desde Telegram.");
         return;
       }
 
-      const selectedVisit = visits.find((visit) => visit.visita_id === selectedVisitId);
+      const selectedVisit = openVisits.find((visit) => visit.visita_id === selectedVisitId);
       const confirmMessage = `¿Deseas registrar salida en ${selectedVisit ? getVisitDisplayName(selectedVisit, stores) : "la visita seleccionada"}?`;
-      if (typeof window !== "undefined" && !window.confirm(confirmMessage)) {
-        return;
-      }
+      if (typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
 
       setSyncing(true);
       const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
@@ -621,119 +574,133 @@ export default function App() {
         foto_data_url: exitPhoto.dataUrl,
       });
 
-      setAttendanceLog((prev) => [
-        {
-          id: `SAL-${Date.now()}`,
-          type: "salida",
-          storeName: selectedVisit ? getVisitDisplayName(selectedVisit, stores) : "Visita activa",
-          happenedAt: response.closed_at,
-          hasLocation: true,
-          hasPhoto: true,
-        },
-        ...prev,
-      ]);
+      if (response.warning) {
+        setStatusMsg("Salida registrada. La evidencia auxiliar no se guardó, pero la visita sí.");
+      } else {
+        setStatusMsg("Salida registrada correctamente.");
+      }
+
       setExitLocation(null);
       setExitPhoto(null);
-      setStatusMsg("✅ Salida registrada correctamente.");
-      await loadRealDashboard();
-    } catch {
-      setStatusMsg("⚠️ No se pudo registrar la salida real.");
+
+      await loadDashboard();
+      await loadEvidencesToday();
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la salida real.");
     } finally {
       setSyncing(false);
     }
   }
 
-  function saveEvidenceFlow() {
-    const visit = openVisits.find((item) => item.visita_id === selectedVisitId) || openVisits[0];
-    if (!visit) {
-      setStatusMsg("⚠️ Necesitas una visita activa para registrar evidencias.");
-      return;
-    }
-    if (!evidenceBrand.trim()) {
-      setStatusMsg("⚠️ Escribe la marca.");
-      return;
-    }
-    if (!evidenceType.trim()) {
-      setStatusMsg("⚠️ Escribe el tipo de evidencia.");
-      return;
-    }
-    if (!evidencePhotos.length) {
-      setStatusMsg("⚠️ Agrega al menos una foto de evidencia.");
-      return;
-    }
+  async function saveEvidenceFlow() {
+    try {
+      if (!selectedVisitId) {
+        setStatusMsg("Selecciona una visita activa.");
+        return;
+      }
+      if (!evidenceBrand.trim()) {
+        setStatusMsg("Escribe la marca.");
+        return;
+      }
+      if (!evidenceType.trim()) {
+        setStatusMsg("Escribe el tipo de evidencia.");
+        return;
+      }
+      if (!evidencePhotos.length) {
+        setStatusMsg("Agrega al menos una foto de evidencia.");
+        return;
+      }
 
-    const created: UiEvidence[] = Array.from({ length: Math.max(1, evidenceQty) }).map((_, index) => ({
-      evidencia_id: `UI-${Date.now()}-${index + 1}`,
-      tipo_evento: `EVIDENCIA_${evidenceType.toUpperCase()}`,
-      tipo_evidencia: evidenceType,
-      marca_nombre: evidenceBrand,
-      riesgo: index === 0 ? "BAJO" : "MEDIO",
-      fecha_hora_fmt: nowMxString(),
-      url_foto: evidencePhotos[index]?.dataUrl || evidencePhotos[0].dataUrl,
-      descripcion: `${evidenceDescription || "Captura registrada desde la UI"} | Fase=${evidencePhase}`,
-      status: "ACTIVA",
-      tienda_nombre: getVisitDisplayName(visit, stores),
-      photos: evidencePhotos,
-    }));
+      setSyncing(true);
+      await postJson("/miniapp/promotor/evidence-register", {
+        visita_id: selectedVisitId,
+        marca_nombre: evidenceBrand,
+        tipo_evidencia: evidenceType,
+        fase: evidencePhase,
+        descripcion: evidenceDescription,
+        fotos: evidencePhotos.map((photo) => ({
+          name: photo.name,
+          dataUrl: photo.dataUrl,
+          capturedAt: photo.capturedAt,
+        })),
+      });
 
-    setGallery((prev) => [...created, ...prev]);
-    setSelectedEvidenceId(created[0].evidencia_id);
-    setEvidenceDescription("");
-    setEvidenceQty(1);
-    setEvidenceBrand("");
-    setEvidenceType("");
-    setEvidencePhase("NA");
-    setEvidencePhotos([]);
-    setStatusMsg("✅ Evidencias preparadas en la Mini App. Falta conectar persistencia final del backend.");
+      setEvidenceBrand("");
+      setEvidenceType("");
+      setEvidencePhase("NA");
+      setEvidenceQty(1);
+      setEvidenceDescription("");
+      setEvidencePhotos([]);
+
+      await loadEvidencesToday();
+      setStatusMsg("Evidencia registrada correctamente.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
+    } finally {
+      setSyncing(false);
+    }
   }
 
-  function markEvidenceAsCancelled() {
-    if (!selectedEvidence) {
-      setStatusMsg("⚠️ Selecciona una evidencia.");
-      return;
+  async function markEvidenceAsCancelled() {
+    try {
+      if (!selectedEvidence) {
+        setStatusMsg("Selecciona una evidencia.");
+        return;
+      }
+      setSyncing(true);
+      await postJson("/miniapp/promotor/cancel-evidence", {
+        evidencia_id: selectedEvidence.evidencia_id,
+        note: noteDraft || "",
+      });
+      setNoteDraft("");
+      await loadEvidencesToday();
+      setStatusMsg("Evidencia anulada.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo anular la evidencia.");
+    } finally {
+      setSyncing(false);
     }
-    setGallery((prev) =>
-      prev.map((item) =>
-        item.evidencia_id === selectedEvidence.evidencia_id
-          ? { ...item, status: "ANULADA" }
-          : item
-      )
-    );
-    setStatusMsg("✅ Evidencia marcada como anulada en la UI.");
   }
 
-  function replaceEvidencePhoto(fileList: FileList | null) {
+  async function replaceEvidencePhoto(fileList: FileList | null) {
     const file = fileList?.[0];
     if (!file || !selectedEvidence) return;
 
-    readCompressedPhoto(file)
-      .then((dataUrl) => {
-        setGallery((prev) =>
-          prev.map((item) =>
-            item.evidencia_id === selectedEvidence.evidencia_id
-              ? { ...item, url_foto: dataUrl, fecha_hora_fmt: nowMxString() }
-              : item
-          )
-        );
-        setStatusMsg("✅ Evidencia reemplazada en la UI.");
-      })
-      .catch(() => setStatusMsg("⚠️ No se pudo procesar la foto de reemplazo."));
+    try {
+      setSyncing(true);
+      const dataUrl = await readCompressedPhoto(file);
+      await postJson("/miniapp/promotor/replace-evidence", {
+        evidencia_id: selectedEvidence.evidencia_id,
+        foto_data_url: dataUrl,
+      });
+      await loadEvidencesToday();
+      setStatusMsg("Evidencia reemplazada.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo reemplazar la evidencia.");
+    } finally {
+      setSyncing(false);
+    }
   }
 
-  function saveNote() {
-    if (!selectedEvidence || !noteDraft.trim()) {
-      setStatusMsg("⚠️ Escribe una nota y selecciona una evidencia.");
-      return;
+  async function saveNote() {
+    try {
+      if (!selectedEvidence || !noteDraft.trim()) {
+        setStatusMsg("Escribe una nota y selecciona una evidencia.");
+        return;
+      }
+      setSyncing(true);
+      await postJson("/miniapp/promotor/evidence-note", {
+        evidencia_id: selectedEvidence.evidencia_id,
+        note: noteDraft.trim(),
+      });
+      setNoteDraft("");
+      await loadEvidencesToday();
+      setStatusMsg("Nota guardada.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo guardar la nota.");
+    } finally {
+      setSyncing(false);
     }
-    setGallery((prev) =>
-      prev.map((item) =>
-        item.evidencia_id === selectedEvidence.evidencia_id
-          ? { ...item, note: noteDraft.trim() }
-          : item
-      )
-    );
-    setNoteDraft("");
-    setStatusMsg("✅ Nota agregada en la UI.");
   }
 
   if (loading) {
@@ -847,32 +814,36 @@ export default function App() {
                   {entryPhoto ? <div className="thumbRow"><img src={entryPhoto.dataUrl} className="thumb" alt="Entrada" /></div> : null}
                 </div>
 
-                <div className="captureBlock">
-                  <div className="captureTitle">Salida</div>
-                  <div className="captureGrid">
-                    <button className="secondaryBtn compactBtn" onClick={() => captureLocation("salida")} disabled={capturingLocation === "salida"}>
-                      <MapPin size={16} />
-                      {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
-                    </button>
-                    <label className="fileBtn compactBtn">
-                      <Camera size={16} />
-                      {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Foto lista" : "Capturar foto"}
-                      <input type="file" accept="image/*" capture="environment" onChange={(e) => captureAttendancePhoto("salida", e.target.files)} />
-                    </label>
-                  </div>
-                  {exitLocation ? <div className="captureMeta">Lat {exitLocation.lat.toFixed(5)} · Lon {exitLocation.lon.toFixed(5)}</div> : null}
-                  {exitPhoto ? <div className="thumbRow"><img src={exitPhoto.dataUrl} className="thumb" alt="Salida" /></div> : null}
-                </div>
-
                 <button className="primaryBtn" onClick={createEntry} disabled={syncing}>
                   <MapPin size={16} />
                   {syncing ? "Procesando..." : "Registrar entrada"}
                 </button>
 
-                <button className="secondaryBtn" onClick={closeVisit} disabled={syncing}>
-                  <CheckCircle2 size={16} />
-                  {syncing ? "Procesando..." : "Registrar salida"}
-                </button>
+                {hasOpenVisit ? (
+                  <>
+                    <div className="captureBlock">
+                      <div className="captureTitle">Salida</div>
+                      <div className="captureGrid">
+                        <button className="secondaryBtn compactBtn" onClick={() => captureLocation("salida")} disabled={capturingLocation === "salida"}>
+                          <MapPin size={16} />
+                          {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
+                        </button>
+                        <label className="fileBtn compactBtn">
+                          <Camera size={16} />
+                          {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Foto lista" : "Capturar foto"}
+                          <input type="file" accept="image/*" capture="environment" onChange={(e) => captureAttendancePhoto("salida", e.target.files)} />
+                        </label>
+                      </div>
+                      {exitLocation ? <div className="captureMeta">Lat {exitLocation.lat.toFixed(5)} · Lon {exitLocation.lon.toFixed(5)}</div> : null}
+                      {exitPhoto ? <div className="thumbRow"><img src={exitPhoto.dataUrl} className="thumb" alt="Salida" /></div> : null}
+                    </div>
+
+                    <button className="secondaryBtn" onClick={closeVisit} disabled={syncing || !hasOpenVisit}>
+                      <CheckCircle2 size={16} />
+                      {syncing ? "Procesando..." : "Registrar salida"}
+                    </button>
+                  </>
+                ) : null}
               </div>
 
               <div className="panel">
@@ -889,16 +860,6 @@ export default function App() {
                     </button>
                   ))}
                   {!openVisits.length ? <div className="emptyBox">No hay visitas abiertas.</div> : null}
-                </div>
-
-                <div className="miniTitle" style={{ marginTop: 14 }}>Bitácora inmediata</div>
-                <div className="stack compactStack compactShort">
-                  {attendanceLog.length ? attendanceLog.map((item) => (
-                    <div className="logCard" key={item.id}>
-                      <div className="listTitle">{item.type === "entrada" ? "Entrada" : "Salida"} · {item.storeName}</div>
-                      <div className="listSub">{formatHourFromIso(item.happenedAt)} · Foto {item.hasPhoto ? "OK" : "No"} · Ubicación {item.hasLocation ? "OK" : "No"}</div>
-                    </div>
-                  )) : <div className="emptyBox">Sin movimientos registrados en esta sesión.</div>}
                 </div>
               </div>
             </div>
@@ -933,7 +894,7 @@ export default function App() {
                   <option value="DESPUES">Después</option>
                 </select>
 
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad de fotos esperadas</label>
+                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad esperada</label>
                 <input
                   className="inputLike"
                   type="number"
@@ -967,9 +928,9 @@ export default function App() {
                   </div>
                 ) : null}
 
-                <button className="primaryBtn" onClick={saveEvidenceFlow}>
+                <button className="primaryBtn" onClick={saveEvidenceFlow} disabled={syncing}>
                   <Camera size={16} />
-                  Guardar evidencia en UI
+                  {syncing ? "Guardando..." : "Registrar evidencia"}
                 </button>
               </div>
             </div>
@@ -983,7 +944,7 @@ export default function App() {
               <div className="panel">
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
-                  {activeGallery.map((item) => (
+                  {gallery.map((item) => (
                     <button
                       key={item.evidencia_id}
                       onClick={() => setSelectedEvidenceId(item.evidencia_id)}
@@ -993,7 +954,7 @@ export default function App() {
                       <div className="listSub">{item.tipo_evidencia} · {item.marca_nombre}</div>
                     </button>
                   ))}
-                  {!activeGallery.length ? <div className="emptyBox">No hay evidencias activas.</div> : null}
+                  {!gallery.length ? <div className="emptyBox">No hay evidencias activas.</div> : null}
                 </div>
               </div>
 
@@ -1007,27 +968,30 @@ export default function App() {
                     {selectedEvidence.tienda_nombre ? <div className="summaryLine">{selectedEvidence.tienda_nombre}</div> : null}
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
+
                     <div className="actionGrid actionGridButtons">
-                      {myEvidenceActions.map((item) => {
-                        const Icon = item.Icon;
-                        if (item.key === "reemplazar") {
-                          return (
-                            <label className="actionButton" key={item.key}>
-                              <Icon size={16} />
-                              <span>{item.title}</span>
-                              <input type="file" accept="image/*" onChange={(e) => replaceEvidencePhoto(e.target.files)} />
-                            </label>
-                          );
-                        }
-                        const handleClick = item.key === "anular" ? markEvidenceAsCancelled : undefined;
-                        return (
-                          <button className="actionButton" key={item.key} onClick={handleClick}>
-                            <Icon size={16} />
-                            <span>{item.title}</span>
-                          </button>
-                        );
-                      })}
+                      <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.") }>
+                        <Eye size={16} />
+                        <span>Ver</span>
+                      </button>
+
+                      <button className="actionButton" onClick={markEvidenceAsCancelled}>
+                        <Trash2 size={16} />
+                        <span>Anular</span>
+                      </button>
+
+                      <label className="actionButton">
+                        <Camera size={16} />
+                        <span>Reemplazar</span>
+                        <input type="file" accept="image/*" onChange={(e) => replaceEvidencePhoto(e.target.files)} />
+                      </label>
+
+                      <button className="actionButton" onClick={saveNote}>
+                        <Pencil size={16} />
+                        <span>Guardar nota</span>
+                      </button>
                     </div>
+
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
                     <input
                       className="inputLike"
@@ -1035,10 +999,6 @@ export default function App() {
                       onChange={(e) => setNoteDraft(e.target.value)}
                       placeholder="Escribe una observación"
                     />
-                    <button className="secondaryBtn" onClick={saveNote}>
-                      <Pencil size={16} />
-                      Guardar nota
-                    </button>
                   </>
                 ) : (
                   <div className="emptyBox">Selecciona una evidencia.</div>
@@ -1070,9 +1030,6 @@ export default function App() {
                 ) : (
                   <div className="summaryLine">No hay registros del día.</div>
                 )}
-                {attendanceLog.length ? (
-                  <div className="summaryLine">Eventos en esta sesión: <strong>{attendanceLog.length}</strong></div>
-                ) : null}
               </div>
             </div>
           </div>
@@ -1098,11 +1055,11 @@ export default function App() {
           </div>
         ) : null}
 
-        {activeGallery.length > 0 ? (
+        {gallery.length > 0 ? (
           <div className="card">
             <div className="sectionTitle">Galería del día</div>
             <div className="galleryGrid">
-              {activeGallery.slice(0, 6).map((item) => (
+              {gallery.slice(0, 6).map((item) => (
                 <div className="galleryCard" key={item.evidencia_id}>
                   <div className="imageFrame">
                     <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
@@ -1125,7 +1082,22 @@ export default function App() {
         {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
-          <button className="secondaryBtn footerBtn" onClick={loadRealDashboard} disabled={syncing || !!error || role !== "promotor"}>
+          <button
+            className="secondaryBtn footerBtn"
+            onClick={async () => {
+              try {
+                setSyncing(true);
+                await loadDashboard();
+                await loadEvidencesToday();
+                setStatusMsg("Información actualizada.");
+              } catch (err) {
+                setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
+              } finally {
+                setSyncing(false);
+              }
+            }}
+            disabled={syncing || !!error || role !== "promotor"}
+          >
             <RefreshCw size={16} />
             {syncing ? "Sincronizando..." : "Recargar"}
           </button>
@@ -1149,8 +1121,8 @@ const globalCss = `
 * { box-sizing: border-box; }
 body { margin: 0; background: #eef1f4; }
 button, input, select { font: inherit; }
-.shell { max-width: 1180px; margin: 0 auto; }
 input[type=file] { display: none; }
+.shell { max-width: 1180px; margin: 0 auto; }
 .stickyTop {
   position: sticky;
   top: 0;
@@ -1182,8 +1154,10 @@ input[type=file] { display: none; }
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  width: 118px;
-  min-width: 118px;
+  width: 132px;
+  min-width: 132px;
+  margin-left: auto;
+  overflow: hidden;
 }
 .brandPlate {
   background: #ffffff;
@@ -1221,6 +1195,8 @@ input[type=file] { display: none; }
   margin-top: 3px;
   white-space: nowrap;
   width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card {
   margin-top: 12px;
@@ -1269,7 +1245,6 @@ input[type=file] { display: none; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .compactStack { max-height: 260px; overflow: auto; }
-.compactShort { max-height: 190px; }
 .listBtn {
   width: 100%; text-align: left; border-radius: 16px; border: 1px solid rgba(38,50,56,0.08);
   background: rgba(255,255,255,0.96); padding: 12px; color: #263238; cursor: pointer;
@@ -1343,12 +1318,6 @@ input[type=file] { display: none; }
 .actionCard {
   display: flex; gap: 10px; align-items: flex-start; border-radius: 16px;
   padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08);
-}
-.logCard {
-  border-radius: 12px;
-  border: 1px solid rgba(38,50,56,0.08);
-  background: rgba(255,255,255,0.92);
-  padding: 10px 12px;
 }
 .flowTitle { font-weight: 800; color: #263238; }
 .flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
@@ -1426,7 +1395,7 @@ input[type=file] { display: none; }
   .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .heroTitleBlock { width: 112px; min-width: 112px; }
+  .heroTitleBlock { width: 124px; min-width: 124px; }
   .heroTitleTight { max-width: 112px; }
 }
 `;
