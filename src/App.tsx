@@ -66,6 +66,7 @@ type EvidenceItem = {
   descripcion: string;
   tienda_nombre?: string;
   tienda_id?: string;
+  fase?: string;
 };
 
 type UiEvidence = EvidenceItem & {
