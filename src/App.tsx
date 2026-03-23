@@ -375,9 +375,13 @@ export default function App() {
   const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean }>>([]);
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
-  const [gallery, setGallery] = useState<UiEvidence[]>([]);
+  const [allEvidenceRows, setAllEvidenceRows] = useState<UiEvidence[]>([]);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
+  const [evidenceFilterStore, setEvidenceFilterStore] = useState("");
+  const [evidenceFilterBrand, setEvidenceFilterBrand] = useState("");
+  const [evidenceFilterType, setEvidenceFilterType] = useState("");
+  const [evidenceFilterPhase, setEvidenceFilterPhase] = useState("");
 
   useEffect(() => {
     if (tg) {
@@ -401,19 +405,46 @@ export default function App() {
   );
   const hasOpenVisit = Boolean(exitVisit);
 
-  const selectedEvidence = useMemo(
-    () => gallery.find((item) => item.evidencia_id === selectedEvidenceId) || gallery[0] || null,
-    [gallery, selectedEvidenceId]
+  const attendanceGallery = useMemo(
+    () => allEvidenceRows.filter((item) => !isOperationalEvidence(item)),
+    [allEvidenceRows]
   );
+
+  const operationalGallery = useMemo(
+    () => allEvidenceRows.filter((item) => isOperationalEvidence(item)),
+    [allEvidenceRows]
+  );
+
+  const filteredOperationalGallery = useMemo(() => {
+    return operationalGallery.filter((item) => {
+      const byStore = !evidenceFilterStore || (item.tienda_nombre || "") === evidenceFilterStore;
+      const byBrand = !evidenceFilterBrand || (item.marca_nombre || "") === evidenceFilterBrand;
+      const byType = !evidenceFilterType || (item.tipo_evidencia || "") === evidenceFilterType;
+      const byPhase = !evidenceFilterPhase || ((item.fase || "") === evidenceFilterPhase);
+      return byStore && byBrand && byType && byPhase;
+    });
+  }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
+
+  const selectedEvidence = useMemo(
+    () => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || operationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || operationalGallery[0] || null,
+    [filteredOperationalGallery, operationalGallery, selectedEvidenceId]
+  );
+
+  const evidenceFilterOptions = useMemo(() => ({
+    stores: Array.from(new Set(operationalGallery.map((item) => item.tienda_nombre || "").filter(Boolean))).sort(),
+    brands: Array.from(new Set(operationalGallery.map((item) => item.marca_nombre || "").filter(Boolean))).sort(),
+    types: Array.from(new Set(operationalGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
+    phases: Array.from(new Set(operationalGallery.map((item) => item.fase || "").filter(Boolean))).sort(),
+  }), [operationalGallery]);
 
   const summary = useMemo(
     () => ({
       assignedStores: stores.length,
       openVisits: openVisits.length,
-      evidenciasHoy: gallery.length,
-      alertas: gallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
+      evidenciasHoy: operationalGallery.length,
+      alertas: operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
     }),
-    [stores, openVisits, gallery]
+    [stores, openVisits, operationalGallery]
   );
 
   async function loadBootstrap() {
@@ -452,14 +483,13 @@ export default function App() {
   async function loadEvidencesToday() {
     if (role !== "promotor") return;
     const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
-    const rows = (data.evidencias || [])
-      .filter(isOperationalEvidence)
-      .map((item) => ({ ...item, status: "ACTIVA" as const }));
-    setGallery(rows);
-    if (rows.length && !rows.find((r) => r.evidencia_id === selectedEvidenceId)) {
-      setSelectedEvidenceId(rows[0].evidencia_id);
+    const rows = (data.evidencias || []).map((item) => ({ ...item, status: "ACTIVA" as const }));
+    const operationalRows = rows.filter(isOperationalEvidence);
+    setAllEvidenceRows(rows);
+    if (operationalRows.length && !operationalRows.find((r) => r.evidencia_id === selectedEvidenceId)) {
+      setSelectedEvidenceId(operationalRows[0].evidencia_id);
     }
-    if (!rows.length) setSelectedEvidenceId("");
+    if (!operationalRows.length) setSelectedEvidenceId("");
   }
 
   async function loadEvidenceContext(visitaId: string) {
@@ -591,8 +621,8 @@ export default function App() {
           capturedAt: nowMxString(),
         }))
       );
-      setEvidencePhotos(processed);
-      setStatusMsg(`${processed.length} foto(s) de evidencia listas.`);
+      setEvidencePhotos((prev) => [...prev, ...processed].slice(0, 12));
+      setStatusMsg(`${processed.length} foto(s) agregadas.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudieron procesar las fotos.");
     } finally {
@@ -890,7 +920,7 @@ export default function App() {
                     </label>
                     <label className="fileBtn compactBtn">
                       <ImageIcon size={16} />
-                      {entryPhoto ? "Cambiar galería" : "Elegir galería"}
+                      {entryPhoto ? "Reemplazar con galería" : "Elegir de galería"}
                       <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
                     </label>
                   </div>
@@ -919,7 +949,7 @@ export default function App() {
                         </label>
                         <label className="fileBtn compactBtn">
                           <ImageIcon size={16} />
-                          {exitPhoto ? "Cambiar galería" : "Elegir galería"}
+                          {exitPhoto ? "Reemplazar con galería" : "Elegir de galería"}
                           <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
                         </label>
                       </div>
@@ -957,6 +987,28 @@ export default function App() {
                   })}
                   {!visits.length ? <div className="emptyBox">No hay visitas registradas hoy.</div> : null}
                 </div>
+
+                {attendanceGallery.length ? (
+                  <div className="attendanceGalleryBlock">
+                    <div className="miniTitle" style={{ marginTop: 12 }}>Fotos de asistencia</div>
+                    <div className="galleryScroll compactGalleryScroll">
+                      <div className="galleryGrid attendanceGalleryGrid">
+                        {attendanceGallery.map((item) => (
+                          <div className="galleryCard" key={item.evidencia_id}>
+                            <div className="imageFrame">
+                              <img src={item.url_foto} alt={item.tipo_evento} className="img" />
+                            </div>
+                            <div className="galleryTop">
+                              <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
+                            </div>
+                            {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
+                            <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1058,11 +1110,29 @@ export default function App() {
         {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
+            <div className="filtersRow">
+              <select className="inputLike" value={evidenceFilterStore} onChange={(e) => setEvidenceFilterStore(e.target.value)}>
+                <option value="">Todas las tiendas</option>
+                {evidenceFilterOptions.stores.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className="inputLike" value={evidenceFilterBrand} onChange={(e) => setEvidenceFilterBrand(e.target.value)}>
+                <option value="">Todas las marcas</option>
+                {evidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className="inputLike" value={evidenceFilterType} onChange={(e) => setEvidenceFilterType(e.target.value)}>
+                <option value="">Todos los tipos</option>
+                {evidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className="inputLike" value={evidenceFilterPhase} onChange={(e) => setEvidenceFilterPhase(e.target.value)}>
+                <option value="">Todas las fases</option>
+                {evidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
-                  {gallery.map((item) => (
+                  {filteredOperationalGallery.map((item) => (
                     <button
                       key={item.evidencia_id}
                       onClick={() => setSelectedEvidenceId(item.evidencia_id)}
@@ -1072,7 +1142,7 @@ export default function App() {
                       <div className="listSub">{item.tipo_evidencia} · {item.marca_nombre}</div>
                     </button>
                   ))}
-                  {!gallery.length ? <div className="emptyBox">No hay evidencias activas.</div> : null}
+                  {!filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
                 </div>
               </div>
 
@@ -1169,23 +1239,23 @@ export default function App() {
           </div>
         ) : null}
 
-        {gallery.length > 0 ? (
+        {role === "promotor" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
           <div className="card">
-            <div className="sectionTitle">Galería del día</div>
+            <div className="sectionTitle">Galería de evidencias</div>
             <div className="galleryScroll">
               <div className="galleryGrid">
-                {gallery.slice(0, 20).map((item) => (
+                {filteredOperationalGallery.slice(0, 30).map((item) => (
                   <div className="galleryCard" key={item.evidencia_id}>
                     <div className="imageFrame">
                       <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
                     </div>
                     <div className="galleryTop">
                       <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                      <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>
-                        {item.riesgo}
-                      </span>
+                      <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo}</span>
                     </div>
                     {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
+                    <div className="gallerySub">{item.marca_nombre}</div>
+                    {item.fase ? <div className="gallerySub">Fase: {item.fase}</div> : null}
                     <div className="galleryDate">{item.fecha_hora_fmt}</div>
                     <div className="galleryDesc">{item.descripcion}</div>
                   </div>
@@ -1510,6 +1580,15 @@ input[type=file] { display: none; }
   cursor: pointer;
 }
 .galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
+.filtersRow {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.compactGalleryScroll { max-height: 320px; }
+.attendanceGalleryGrid { grid-template-columns: 1fr; }
+.attendanceGalleryBlock { margin-top: 8px; }
 .galleryGrid {
   margin-top: 14px;
   display: grid;
@@ -1573,7 +1652,7 @@ input[type=file] { display: none; }
 }
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols {
+  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow {
     grid-template-columns: 1fr;
   }
 }
