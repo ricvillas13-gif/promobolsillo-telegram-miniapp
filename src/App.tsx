@@ -44,7 +44,7 @@ type BootstrapResponse = {
 type StoreItem = {
   tienda_id: string;
   nombre_tienda: string;
-  cadena: string;
+  cadena?: string;
 };
 
 type VisitItem = {
@@ -150,7 +150,7 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260323a";
+const ASSET_VERSION = "20260323b";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
 
 function getTelegramWebApp() {
@@ -178,7 +178,6 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
       body: JSON.stringify({ initData: getInitData(), ...payload }),
       signal: controller.signal,
     });
-
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error((json as { error?: string }).error || `Error ${res.status}`);
@@ -304,7 +303,6 @@ function getCurrentLocation() {
       reject(new Error("Geolocalización no disponible"));
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
         resolve({
@@ -402,6 +400,7 @@ export default function App() {
     [openVisits, selectedVisitId]
   );
   const hasOpenVisit = Boolean(exitVisit);
+
   const selectedEvidence = useMemo(
     () => gallery.find((item) => item.evidencia_id === selectedEvidenceId) || gallery[0] || null,
     [gallery, selectedEvidenceId]
@@ -424,7 +423,6 @@ export default function App() {
       setLoading(false);
       return;
     }
-
     const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {});
     if (data.role) setRole(data.role);
     if (data.profile?.nombre) setActorLabel(data.profile.nombre);
@@ -461,9 +459,7 @@ export default function App() {
     if (rows.length && !rows.find((r) => r.evidencia_id === selectedEvidenceId)) {
       setSelectedEvidenceId(rows[0].evidencia_id);
     }
-    if (!rows.length) {
-      setSelectedEvidenceId("");
-    }
+    if (!rows.length) setSelectedEvidenceId("");
   }
 
   async function loadEvidenceContext(visitaId: string) {
@@ -473,7 +469,6 @@ export default function App() {
       setSelectedVisitStoreName("");
       return;
     }
-
     try {
       const ctx = await postJson<EvidenceContextResponse>("/miniapp/promotor/evidence-context", { visita_id: visitaId });
       setAvailableBrands(ctx.marcas || []);
@@ -489,7 +484,6 @@ export default function App() {
       setBrandRules([]);
       return;
     }
-
     try {
       const rules = await postJson<EvidenceRulesResponse>("/miniapp/promotor/evidence-rules", {
         marca_id: brandId,
@@ -797,7 +791,7 @@ export default function App() {
             <div className="loadingRow">
               <RefreshCw className="spin" size={18} />
               <span>Cargando operación...</span>
-            </div></div>
+            </div>
           </div>
         </div>
       </div>
@@ -807,7 +801,6 @@ export default function App() {
   return (
     <div style={styles.page}>
       <style>{globalCss}</style>
-
       <div className="shell">
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
@@ -885,7 +878,7 @@ export default function App() {
 
                 <div className="captureBlock">
                   <div className="captureTitle">Entrada</div>
-                  <div className="captureGrid">
+                  <div className="captureGrid threeCols">
                     <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
@@ -897,7 +890,7 @@ export default function App() {
                     </label>
                     <label className="fileBtn compactBtn">
                       <ImageIcon size={16} />
-                      {entryPhoto ? "Cambiar desde galería" : "Elegir de galería"}
+                      {entryPhoto ? "Cambiar galería" : "Elegir galería"}
                       <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
                     </label>
                   </div>
@@ -914,19 +907,19 @@ export default function App() {
                   <>
                     <div className="captureBlock">
                       <div className="captureTitle">Salida · {getVisitDisplayName(exitVisit, stores)}</div>
-                      <div className="captureGrid">
+                      <div className="captureGrid threeCols">
                         <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("salida")} disabled={capturingLocation === "salida"}>
                           <MapPin size={16} />
                           {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
                         </button>
-                            <label className="fileBtn compactBtn">
+                        <label className="fileBtn compactBtn">
                           <Camera size={16} />
                           {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Selfie lista" : "Tomar selfie"}
                           <input type="file" accept="image/*" capture="user" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
                         </label>
                         <label className="fileBtn compactBtn">
                           <ImageIcon size={16} />
-                          {exitPhoto ? "Cambiar desde galería" : "Elegir de galería"}
+                          {exitPhoto ? "Cambiar galería" : "Elegir galería"}
                           <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
                         </label>
                       </div>
@@ -1006,7 +999,7 @@ export default function App() {
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                {brandRules.filter((rule) => isValidRuleType(rule.tipo_evidencia)).length ? (
+                {brandRules.length ? (
                   <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
                     <option value="">Selecciona un tipo</option>
                     {brandRules.filter((rule) => isValidRuleType(rule.tipo_evidencia)).map((rule) => (
@@ -1027,15 +1020,7 @@ export default function App() {
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
-                <input
-                  className="inputLike"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={evidenceQty}
-                  readOnly
-                  disabled
-                />
+                <input className="inputLike" type="number" min={1} max={10} value={evidenceQty} readOnly disabled />
               </div>
 
               <div className="panel">
@@ -1126,12 +1111,7 @@ export default function App() {
                     </div>
 
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
-                    <input
-                      className="inputLike"
-                      value={noteDraft}
-                      onChange={(e) => setNoteDraft(e.target.value)}
-                      placeholder="Escribe una observación"
-                    />
+                    <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe una observación" />
                   </>
                 ) : (
                   <div className="emptyBox">Selecciona una evidencia.</div>
@@ -1157,7 +1137,8 @@ export default function App() {
                 {visits.length ? (
                   visits.map((visit) => (
                     <div className="summaryLine" key={visit.visita_id}>
-                      {getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}
+                      {getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>
+                      {visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}
                     </div>
                   ))
                 ) : (
@@ -1191,23 +1172,25 @@ export default function App() {
         {gallery.length > 0 ? (
           <div className="card">
             <div className="sectionTitle">Galería del día</div>
-            <div className="galleryScroll"><div className="galleryGrid">
-              {gallery.slice(0, 6).map((item) => (
-                <div className="galleryCard" key={item.evidencia_id}>
-                  <div className="imageFrame">
-                    <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
+            <div className="galleryScroll">
+              <div className="galleryGrid">
+                {gallery.slice(0, 20).map((item) => (
+                  <div className="galleryCard" key={item.evidencia_id}>
+                    <div className="imageFrame">
+                      <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
+                    </div>
+                    <div className="galleryTop">
+                      <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                      <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>
+                        {item.riesgo}
+                      </span>
+                    </div>
+                    {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
+                    <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                    <div className="galleryDesc">{item.descripcion}</div>
                   </div>
-                  <div className="galleryTop">
-                    <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                    <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>
-                      {item.riesgo}
-                    </span>
-                  </div>
-                  {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
-                  <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                  <div className="galleryDesc">{item.descripcion}</div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         ) : null}
@@ -1391,7 +1374,6 @@ input[type=file] { display: none; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .compactStack { max-height: 260px; overflow: auto; }
-.galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
 .listBtn {
   width: 100%;
   text-align: left;
@@ -1437,7 +1419,7 @@ input[type=file] { display: none; }
 }
 .primaryBtn { background: #4caf50; color: white; }
 .secondaryBtn, .fileBtn { background: #eceff1; color: #37474f; }
-.primaryBtn:disabled, .secondaryBtn:disabled { opacity: 0.7; cursor: not-allowed; }
+.primaryBtn:disabled, .secondaryBtn:disabled, .inputLike:disabled { opacity: 0.7; cursor: not-allowed; }
 .compactBtn { margin-top: 0; padding: 11px 12px; }
 .wideFileBtn { margin-top: 12px; }
 .emptyBox {
@@ -1462,8 +1444,11 @@ input[type=file] { display: none; }
 }
 .captureGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+.captureGrid.threeCols {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .thumbRow, .thumbGrid {
@@ -1524,6 +1509,7 @@ input[type=file] { display: none; }
   gap: 8px;
   cursor: pointer;
 }
+.galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
 .galleryGrid {
   margin-top: 14px;
   display: grid;
@@ -1587,7 +1573,7 @@ input[type=file] { display: none; }
 }
 .footerBtn { width: auto; min-width: 160px; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid {
+  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols {
     grid-template-columns: 1fr;
   }
 }
