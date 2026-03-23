@@ -218,6 +218,24 @@ function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
   return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || "Visita activa";
 }
 
+function normalizeBrandLabel(rawLabel: string, fallbackId: string) {
+  const label = (rawLabel || "").trim();
+  if (!label) return fallbackId || "Marca";
+  if (/^(true|false)$/i.test(label)) return fallbackId || "Marca";
+  return label;
+}
+
+function isOperationalEvidence(item: EvidenceItem) {
+  return (item.tipo_evidencia || "").trim().toUpperCase() !== "ASISTENCIA";
+}
+
+function isValidRuleType(value: string) {
+  const v = (value || "").trim();
+  if (!v) return false;
+  if (/^(true|false)$/i.test(v)) return false;
+  return true;
+}
+
 function fileToDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -418,8 +436,9 @@ export default function App() {
     if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
     setStores(dashboard.stores || []);
 
-    const nextOpenVisits = dashboard.openVisits || [];
-    setVisits(nextOpenVisits);
+    const nextVisits = dashboard.visitsToday || [];
+    const nextOpenVisits = nextVisits.filter((visit) => !visit.hora_fin);
+    setVisits(nextVisits);
 
     if (!nextOpenVisits.length) {
       setSelectedVisitId("");
@@ -435,7 +454,9 @@ export default function App() {
   async function loadEvidencesToday() {
     if (role !== "promotor") return;
     const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
-    const rows = (data.evidencias || []).map((item) => ({ ...item, status: "ACTIVA" as const }));
+    const rows = (data.evidencias || [])
+      .filter(isOperationalEvidence)
+      .map((item) => ({ ...item, status: "ACTIVA" as const }));
     setGallery(rows);
     if (rows.length && !rows.find((r) => r.evidencia_id === selectedEvidenceId)) {
       setSelectedEvidenceId(rows[0].evidencia_id);
@@ -474,10 +495,11 @@ export default function App() {
         marca_id: brandId,
         marca_nombre: brandLabel,
       });
-      setBrandRules(rules.reglas || []);
-      if (rules.reglas?.length) {
-        const first = rules.reglas[0];
-        if (!evidenceType) setEvidenceType(first.tipo_evidencia);
+      const usableRules = (rules.reglas || []).filter((rule) => isValidRuleType(rule.tipo_evidencia));
+      setBrandRules(usableRules);
+      if (usableRules.length) {
+        const first = usableRules[0];
+        if (!evidenceType || !isValidRuleType(evidenceType)) setEvidenceType(first.tipo_evidencia);
         setEvidenceQty(first.fotos_requeridas || 1);
         if (first.requiere_antes_despues && evidencePhase === "NA") setEvidencePhase("ANTES");
       }
@@ -775,7 +797,7 @@ export default function App() {
             <div className="loadingRow">
               <RefreshCw className="spin" size={18} />
               <span>Cargando operación...</span>
-            </div>
+            </div></div>
           </div>
         </div>
       </div>
@@ -870,8 +892,13 @@ export default function App() {
                     </button>
                     <label className="fileBtn compactBtn">
                       <Camera size={16} />
-                      {capturingPhoto === "entrada" ? "Procesando..." : entryPhoto ? "Foto lista" : "Capturar foto"}
-                      <input type="file" accept="image/*" capture="environment" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
+                      {capturingPhoto === "entrada" ? "Procesando..." : entryPhoto ? "Selfie lista" : "Tomar selfie"}
+                      <input type="file" accept="image/*" capture="user" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
+                    </label>
+                    <label className="fileBtn compactBtn">
+                      <ImageIcon size={16} />
+                      {entryPhoto ? "Cambiar desde galería" : "Elegir de galería"}
+                      <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
                     </label>
                   </div>
                   {entryLocation ? <div className="captureMeta">Lat {entryLocation.lat.toFixed(5)} · Lon {entryLocation.lon.toFixed(5)}</div> : null}
@@ -892,10 +919,15 @@ export default function App() {
                           <MapPin size={16} />
                           {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
                         </button>
-                        <label className="fileBtn compactBtn">
+                            <label className="fileBtn compactBtn">
                           <Camera size={16} />
-                          {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Foto lista" : "Capturar foto"}
-                          <input type="file" accept="image/*" capture="environment" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
+                          {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Selfie lista" : "Tomar selfie"}
+                          <input type="file" accept="image/*" capture="user" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
+                        </label>
+                        <label className="fileBtn compactBtn">
+                          <ImageIcon size={16} />
+                          {exitPhoto ? "Cambiar desde galería" : "Elegir de galería"}
+                          <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
                         </label>
                       </div>
                       {exitLocation ? <div className="captureMeta">Lat {exitLocation.lat.toFixed(5)} · Lon {exitLocation.lon.toFixed(5)}</div> : null}
@@ -911,19 +943,26 @@ export default function App() {
               </div>
 
               <div className="panel">
-                <div className="miniTitle">Tiendas activas / visitas abiertas</div>
+                <div className="miniTitle">Visitas de hoy</div>
                 <div className="stack compactStack">
-                  {openVisits.map((visit) => (
-                    <button
-                      key={visit.visita_id}
-                      onClick={() => setSelectedVisitId(visit.visita_id)}
-                      className={`listBtn ${selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}
-                    >
-                      <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
-                      <div className="listSub">Entrada: {formatHourFromIso(visit.hora_inicio)}</div>
-                    </button>
-                  ))}
-                  {!openVisits.length ? <div className="emptyBox">No hay visitas abiertas.</div> : null}
+                  {visits.map((visit) => {
+                    const isOpen = !visit.hora_fin;
+                    return (
+                      <button
+                        key={visit.visita_id}
+                        onClick={() => {
+                          if (isOpen) setSelectedVisitId(visit.visita_id);
+                        }}
+                        className={`listBtn ${isOpen && selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}
+                      >
+                        <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
+                        <div className="listSub">
+                          Entrada: {formatHourFromIso(visit.hora_inicio)} · {isOpen ? "Salida pendiente" : `Salida: ${formatHourFromIso(visit.hora_fin)}`}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!visits.length ? <div className="emptyBox">No hay visitas registradas hoy.</div> : null}
                 </div>
               </div>
             </div>
@@ -954,23 +993,23 @@ export default function App() {
                   onChange={(e) => {
                     const brand = availableBrands.find((item) => item.marca_id === e.target.value);
                     setEvidenceBrandId(e.target.value);
-                    setEvidenceBrandLabel(brand?.marca_nombre || "");
+                    setEvidenceBrandLabel(normalizeBrandLabel(brand?.marca_nombre || "", brand?.marca_id || ""));
                     setEvidenceType("");
                   }}
                 >
                   <option value="">Selecciona una marca</option>
                   {availableBrands.map((brand) => (
                     <option key={brand.marca_id} value={brand.marca_id}>
-                      {brand.marca_nombre}
+                      {normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}
                     </option>
                   ))}
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                {brandRules.length ? (
+                {brandRules.filter((rule) => isValidRuleType(rule.tipo_evidencia)).length ? (
                   <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
                     <option value="">Selecciona un tipo</option>
-                    {brandRules.map((rule) => (
+                    {brandRules.filter((rule) => isValidRuleType(rule.tipo_evidencia)).map((rule) => (
                       <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>
                         {rule.tipo_evidencia}
                       </option>
@@ -994,7 +1033,8 @@ export default function App() {
                   min={1}
                   max={10}
                   value={evidenceQty}
-                  onChange={(e) => setEvidenceQty(Math.max(1, Number(e.target.value || 1)))}
+                  readOnly
+                  disabled
                 />
               </div>
 
@@ -1151,7 +1191,7 @@ export default function App() {
         {gallery.length > 0 ? (
           <div className="card">
             <div className="sectionTitle">Galería del día</div>
-            <div className="galleryGrid">
+            <div className="galleryScroll"><div className="galleryGrid">
               {gallery.slice(0, 6).map((item) => (
                 <div className="galleryCard" key={item.evidencia_id}>
                   <div className="imageFrame">
@@ -1351,6 +1391,7 @@ input[type=file] { display: none; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .compactStack { max-height: 260px; overflow: auto; }
+.galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
 .listBtn {
   width: 100%;
   text-align: left;
@@ -1421,7 +1462,7 @@ input[type=file] { display: none; }
 }
 .captureGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 .captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
