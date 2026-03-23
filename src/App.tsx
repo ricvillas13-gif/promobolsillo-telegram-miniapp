@@ -101,6 +101,21 @@ type CloseVisitResponse = {
   warning?: string;
 };
 
+type EvidenceRegisterResponse = {
+  ok: boolean;
+  visita_id: string;
+  created: string[];
+  count: number;
+  warning?: string;
+};
+
+type ReplaceEvidenceResponse = {
+  ok: boolean;
+  evidencia_id: string;
+  replaced: boolean;
+  warning?: string;
+};
+
 type EvidenceContextResponse = {
   ok: boolean;
   visita?: {
@@ -135,7 +150,8 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260322c";
+const ASSET_VERSION = "20260323a";
+const SHEETS_SAFE_PHOTO_CHARS = 43000;
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -211,7 +227,7 @@ function fileToDataUrl(file: File) {
   });
 }
 
-function compressDataUrl(dataUrl: string, maxSide = 1280, quality = 0.82) {
+function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   return new Promise<string>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -239,9 +255,29 @@ function compressDataUrl(dataUrl: string, maxSide = 1280, quality = 0.82) {
   });
 }
 
-async function readCompressedPhoto(file: File) {
+async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+  const attempts = [
+    { side: 720, quality: 0.72 },
+    { side: 640, quality: 0.65 },
+    { side: 560, quality: 0.58 },
+    { side: 480, quality: 0.5 },
+    { side: 420, quality: 0.44 },
+    { side: 360, quality: 0.38 },
+    { side: 320, quality: 0.32 },
+    { side: 280, quality: 0.28 },
+  ];
+
+  let last = dataUrl;
+  for (const attempt of attempts) {
+    last = await compressDataUrl(dataUrl, attempt.side, attempt.quality);
+    if (last.length <= maxChars) return last;
+  }
+  return last;
+}
+
+async function readPhotoForSheets(file: File) {
   const raw = await fileToDataUrl(file);
-  return compressDataUrl(raw);
+  return compressDataUrlToSheetsSafeSize(raw);
 }
 
 function getCurrentLocation() {
@@ -338,12 +374,16 @@ export default function App() {
 
   useEffect(() => {
     if (!statusMsg) return;
-    const t = setTimeout(() => setStatusMsg(""), 2800);
+    const t = setTimeout(() => setStatusMsg(""), 3200);
     return () => clearTimeout(t);
   }, [statusMsg]);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
-  const hasOpenVisit = openVisits.length > 0;
+  const exitVisit = useMemo(
+    () => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null,
+    [openVisits, selectedVisitId]
+  );
+  const hasOpenVisit = Boolean(exitVisit);
   const selectedEvidence = useMemo(
     () => gallery.find((item) => item.evidencia_id === selectedEvidenceId) || gallery[0] || null,
     [gallery, selectedEvidenceId]
@@ -376,18 +416,20 @@ export default function App() {
     if (role !== "promotor") return;
     const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
     if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
-    if (dashboard.stores?.length) setStores(dashboard.stores);
-    if (dashboard.openVisits) {
-      setVisits(dashboard.openVisits);
-      if (!selectedVisitId) {
-        setSelectedVisitId(dashboard.openVisits[0]?.visita_id || "");
-      } else {
-        const currentStillExists = dashboard.openVisits.find((v) => v.visita_id === selectedVisitId);
-        if (!currentStillExists) {
-          setSelectedVisitId(dashboard.openVisits[0]?.visita_id || "");
-        }
-      }
+    setStores(dashboard.stores || []);
+
+    const nextOpenVisits = dashboard.openVisits || [];
+    setVisits(nextOpenVisits);
+
+    if (!nextOpenVisits.length) {
+      setSelectedVisitId("");
+      setExitLocation(null);
+      setExitPhoto(null);
+      return;
     }
+
+    const currentStillExists = nextOpenVisits.find((v) => v.visita_id === selectedVisitId);
+    setSelectedVisitId(currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
   }
 
   async function loadEvidencesToday() {
@@ -397,6 +439,9 @@ export default function App() {
     setGallery(rows);
     if (rows.length && !rows.find((r) => r.evidencia_id === selectedEvidenceId)) {
       setSelectedEvidenceId(rows[0].evidencia_id);
+    }
+    if (!rows.length) {
+      setSelectedEvidenceId("");
     }
   }
 
@@ -434,9 +479,7 @@ export default function App() {
         const first = rules.reglas[0];
         if (!evidenceType) setEvidenceType(first.tipo_evidencia);
         setEvidenceQty(first.fotos_requeridas || 1);
-        if (first.requiere_antes_despues && evidencePhase === "NA") {
-          setEvidencePhase("ANTES");
-        }
+        if (first.requiere_antes_despues && evidencePhase === "NA") setEvidencePhase("ANTES");
       }
     } catch {
       setBrandRules([]);
@@ -458,19 +501,15 @@ export default function App() {
   }
 
   useEffect(() => {
-    initialize();
+    void initialize();
   }, []);
 
   useEffect(() => {
-    if (role === "promotor") {
-      void loadEvidenceContext(selectedVisitId);
-    }
+    if (role === "promotor") void loadEvidenceContext(selectedVisitId);
   }, [selectedVisitId, role]);
 
   useEffect(() => {
-    if (role === "promotor") {
-      void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
-    }
+    if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
   }, [evidenceBrandId, evidenceBrandLabel, role]);
 
   function handleLogoError() {
@@ -504,7 +543,7 @@ export default function App() {
     if (!file) return;
     try {
       setCapturingPhoto(kind);
-      const dataUrl = await readCompressedPhoto(file);
+      const dataUrl = await readPhotoForSheets(file);
       const payload: PhotoCapture = {
         name: file.name,
         dataUrl,
@@ -527,13 +566,12 @@ export default function App() {
   async function captureEvidencePhotos(fileList: FileList | null) {
     const files = Array.from(fileList || []).slice(0, 10);
     if (!files.length) return;
-
     try {
       setCapturingPhoto("entrada");
       const processed = await Promise.all(
         files.map(async (file) => ({
           name: file.name,
-          dataUrl: await readCompressedPhoto(file),
+          dataUrl: await readPhotoForSheets(file),
           capturedAt: nowMxString(),
         }))
       );
@@ -548,22 +586,10 @@ export default function App() {
 
   async function createEntry() {
     try {
-      if (!selectedStoreId) {
-        setStatusMsg("Selecciona una tienda.");
-        return;
-      }
-      if (!entryLocation) {
-        setStatusMsg("Captura la ubicación de entrada.");
-        return;
-      }
-      if (!entryPhoto) {
-        setStatusMsg("Captura la foto de entrada.");
-        return;
-      }
-      if (!getInitData()) {
-        setStatusMsg("Esta acción real solo funciona desde Telegram.");
-        return;
-      }
+      if (!selectedStoreId) return setStatusMsg("Selecciona una tienda.");
+      if (!entryLocation) return setStatusMsg("Captura la ubicación de entrada.");
+      if (!entryPhoto) return setStatusMsg("Captura la foto de entrada.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
 
       const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
       const confirmMessage = `¿Deseas registrar entrada en ${selectedStore?.nombre_tienda || "la tienda seleccionada"}?`;
@@ -579,8 +605,8 @@ export default function App() {
         foto_data_url: entryPhoto.dataUrl,
       });
 
-      if (response.warning) {
-        setStatusMsg("Entrada registrada. La evidencia auxiliar no se guardó, pero la visita sí.");
+      if (response.warning === "attendance_photo_too_large_for_sheets") {
+        setStatusMsg("Entrada registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets.");
       } else {
         setStatusMsg(`Entrada registrada en ${response.tienda_nombre}`);
       }
@@ -589,7 +615,6 @@ export default function App() {
       setEntryPhoto(null);
       setExitLocation(null);
       setExitPhoto(null);
-
       await loadDashboard();
       await loadEvidencesToday();
     } catch (err) {
@@ -601,30 +626,17 @@ export default function App() {
 
   async function closeVisit() {
     try {
-      if (!selectedVisitId) {
-        setStatusMsg("Selecciona una visita abierta.");
-        return;
-      }
-      if (!exitLocation) {
-        setStatusMsg("Captura la ubicación de salida.");
-        return;
-      }
-      if (!exitPhoto) {
-        setStatusMsg("Captura la foto de salida.");
-        return;
-      }
-      if (!getInitData()) {
-        setStatusMsg("Esta acción real solo funciona desde Telegram.");
-        return;
-      }
+      if (!exitVisit) return setStatusMsg("No hay visita abierta para registrar salida.");
+      if (!exitLocation) return setStatusMsg("Captura la ubicación de salida.");
+      if (!exitPhoto) return setStatusMsg("Captura la foto de salida.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
 
-      const selectedVisit = openVisits.find((visit) => visit.visita_id === selectedVisitId);
-      const confirmMessage = `¿Deseas registrar salida en ${selectedVisit ? getVisitDisplayName(selectedVisit, stores) : "la visita seleccionada"}?`;
+      const confirmMessage = `¿Deseas registrar salida en ${getVisitDisplayName(exitVisit, stores)}?`;
       if (typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
 
       setSyncing(true);
       const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
-        visita_id: selectedVisitId,
+        visita_id: exitVisit.visita_id,
         lat: exitLocation.lat,
         lon: exitLocation.lon,
         accuracy: exitLocation.accuracy,
@@ -632,15 +644,14 @@ export default function App() {
         foto_data_url: exitPhoto.dataUrl,
       });
 
-      if (response.warning) {
-        setStatusMsg("Salida registrada. La evidencia auxiliar no se guardó, pero la visita sí.");
+      if (response.warning === "attendance_photo_too_large_for_sheets") {
+        setStatusMsg("Salida registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets.");
       } else {
         setStatusMsg("Salida registrada correctamente.");
       }
 
       setExitLocation(null);
       setExitPhoto(null);
-
       await loadDashboard();
       await loadEvidencesToday();
     } catch (err) {
@@ -652,29 +663,14 @@ export default function App() {
 
   async function saveEvidenceFlow() {
     try {
-      if (!selectedVisitId) {
-        setStatusMsg("Selecciona una visita activa.");
-        return;
-      }
-      if (!evidenceBrandLabel.trim()) {
-        setStatusMsg("Selecciona una marca.");
-        return;
-      }
-      if (!evidenceType.trim()) {
-        setStatusMsg("Selecciona o escribe el tipo de evidencia.");
-        return;
-      }
-      if (!evidencePhotos.length) {
-        setStatusMsg("Agrega al menos una foto de evidencia.");
-        return;
-      }
-      if (evidencePhotos.length < evidenceQty) {
-        setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
-        return;
-      }
+      if (!selectedVisitId) return setStatusMsg("Selecciona una visita activa.");
+      if (!evidenceBrandLabel.trim()) return setStatusMsg("Selecciona una marca.");
+      if (!evidenceType.trim()) return setStatusMsg("Selecciona o escribe el tipo de evidencia.");
+      if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
+      if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
 
       setSyncing(true);
-      await postJson("/miniapp/promotor/evidence-register", {
+      const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", {
         visita_id: selectedVisitId,
         marca_id: evidenceBrandId,
         marca_nombre: evidenceBrandLabel,
@@ -696,9 +692,13 @@ export default function App() {
       setEvidenceDescription("");
       setEvidencePhotos([]);
       setBrandRules([]);
-
       await loadEvidencesToday();
-      setStatusMsg("Evidencia registrada correctamente.");
+
+      if (result.warning === "evidence_photo_too_large_for_sheets") {
+        setStatusMsg("Evidencia registrada, pero al menos una foto no cupo completa en Sheets.");
+      } else {
+        setStatusMsg("Evidencia registrada correctamente.");
+      }
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
     } finally {
@@ -708,10 +708,7 @@ export default function App() {
 
   async function markEvidenceAsCancelled() {
     try {
-      if (!selectedEvidence) {
-        setStatusMsg("Selecciona una evidencia.");
-        return;
-      }
+      if (!selectedEvidence) return setStatusMsg("Selecciona una evidencia.");
       setSyncing(true);
       await postJson("/miniapp/promotor/cancel-evidence", {
         evidencia_id: selectedEvidence.evidencia_id,
@@ -730,16 +727,20 @@ export default function App() {
   async function replaceEvidencePhoto(fileList: FileList | null) {
     const file = fileList?.[0];
     if (!file || !selectedEvidence) return;
-
     try {
       setSyncing(true);
-      const dataUrl = await readCompressedPhoto(file);
-      await postJson("/miniapp/promotor/replace-evidence", {
+      const dataUrl = await readPhotoForSheets(file);
+      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", {
         evidencia_id: selectedEvidence.evidencia_id,
+        foto_nombre: file.name,
         foto_data_url: dataUrl,
       });
       await loadEvidencesToday();
-      setStatusMsg("Evidencia reemplazada.");
+      if (result.warning === "evidence_photo_too_large_for_sheets") {
+        setStatusMsg("La evidencia se reemplazó, pero la foto no cupo completa en Sheets.");
+      } else {
+        setStatusMsg("Evidencia reemplazada.");
+      }
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo reemplazar la evidencia.");
     } finally {
@@ -749,10 +750,7 @@ export default function App() {
 
   async function saveNote() {
     try {
-      if (!selectedEvidence || !noteDraft.trim()) {
-        setStatusMsg("Escribe una nota y selecciona una evidencia.");
-        return;
-      }
+      if (!selectedEvidence || !noteDraft.trim()) return setStatusMsg("Escribe una nota y selecciona una evidencia.");
       setSyncing(true);
       await postJson("/miniapp/promotor/evidence-note", {
         evidencia_id: selectedEvidence.evidencia_id,
@@ -885,10 +883,10 @@ export default function App() {
                   {syncing ? "Procesando..." : "Registrar entrada"}
                 </button>
 
-                {hasOpenVisit ? (
+                {hasOpenVisit && exitVisit ? (
                   <>
                     <div className="captureBlock">
-                      <div className="captureTitle">Salida</div>
+                      <div className="captureTitle">Salida · {getVisitDisplayName(exitVisit, stores)}</div>
                       <div className="captureGrid">
                         <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("salida")} disabled={capturingLocation === "salida"}>
                           <MapPin size={16} />
@@ -1298,7 +1296,7 @@ input[type=file] { display: none; }
 }
 .heroMetaSingleWide {
   width: 100%;
-  max-width: 200px;
+  max-width: 220px;
 }
 .card {
   margin-top: 12px;
