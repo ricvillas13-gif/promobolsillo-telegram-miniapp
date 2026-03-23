@@ -151,7 +151,7 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260323b";
+const ASSET_VERSION = "20260323c";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
 
 function getTelegramWebApp() {
@@ -180,9 +180,7 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
       signal: controller.signal,
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error((json as { error?: string }).error || `Error ${res.status}`);
-    }
+    if (!res.ok) throw new Error((json as { error?: string }).error || `Error ${res.status}`);
     return json as T;
   } finally {
     clearTimeout(timeout);
@@ -225,15 +223,6 @@ function normalizeBrandLabel(rawLabel: string, fallbackId: string) {
   return label;
 }
 
-function compactMetaLine(item: EvidenceItem) {
-  const parts = [
-    item.tienda_nombre || "",
-    normalizeBrandLabel(item.marca_nombre || "", "Marca"),
-    item.fase ? `Fase: ${item.fase}` : "",
-  ].filter(Boolean);
-  return parts.join(" · ");
-}
-
 function isOperationalEvidence(item: EvidenceItem) {
   return (item.tipo_evidencia || "").trim().toUpperCase() !== "ASISTENCIA";
 }
@@ -243,6 +232,15 @@ function isValidRuleType(value: string) {
   if (!v) return false;
   if (/^(true|false)$/i.test(v)) return false;
   return true;
+}
+
+function compactMetaLine(item: EvidenceItem) {
+  const parts = [
+    item.tienda_nombre || "",
+    normalizeBrandLabel(item.marca_nombre || "", "Marca"),
+    item.fase ? `Fase: ${item.fase}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 function fileToDataUrl(file: File) {
@@ -293,7 +291,6 @@ async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEET
     { side: 320, quality: 0.32 },
     { side: 280, quality: 0.28 },
   ];
-
   let last = dataUrl;
   for (const attempt of attempts) {
     last = await compressDataUrl(dataUrl, attempt.side, attempt.quality);
@@ -409,52 +406,49 @@ export default function App() {
   }, [statusMsg]);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
-  const exitVisit = useMemo(
-    () => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null,
-    [openVisits, selectedVisitId]
-  );
+  const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
 
-  const attendanceGallery = useMemo(
-    () => allEvidenceRows.filter((item) => !isOperationalEvidence(item)),
-    [allEvidenceRows]
-  );
-
-  const operationalGallery = useMemo(
-    () => allEvidenceRows.filter((item) => isOperationalEvidence(item)),
-    [allEvidenceRows]
-  );
+  const attendanceGallery = useMemo(() => allEvidenceRows.filter((item) => !isOperationalEvidence(item)), [allEvidenceRows]);
+  const operationalGallery = useMemo(() => allEvidenceRows.filter((item) => isOperationalEvidence(item)), [allEvidenceRows]);
 
   const filteredOperationalGallery = useMemo(() => {
     return operationalGallery.filter((item) => {
       const byStore = !evidenceFilterStore || (item.tienda_nombre || "") === evidenceFilterStore;
-      a") === evidenceFilterBrand;
+      const byBrand = !evidenceFilterBrand || normalizeBrandLabel(item.marca_nombre || "", "Marca") === evidenceFilterBrand;
       const byType = !evidenceFilterType || (item.tipo_evidencia || "") === evidenceFilterType;
-      const byPhase = !evidenceFilterPhase || ((item.fase || "") === evidenceFilterPhase);
+      const byPhase = !evidenceFilterPhase || (item.fase || "") === evidenceFilterPhase;
       return byStore && byBrand && byType && byPhase;
     });
   }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
 
-  const selectedEvidence = useMemo(
-    () => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || operationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || operationalGallery[0] || null,
-    [filteredOperationalGallery, operationalGallery, selectedEvidenceId]
-  );
+  const selectedEvidence = useMemo(() => {
+    return (
+      filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) ||
+      operationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) ||
+      filteredOperationalGallery[0] ||
+      operationalGallery[0] ||
+      null
+    );
+  }, [filteredOperationalGallery, operationalGallery, selectedEvidenceId]);
 
-  const evidenceFilterOptions = useMemo(() => ({
-    stores: Array.from(new Set(operationalGallery.map((item) => item.tienda_nombre || "").fiem.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
-    types: Array.from(new Set(operationalGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
-    phases: Array.from(new Set(operationalGallery.map((item) => item.fase || "").filter(Boolean))).sort(),
-  }), [operationalGallery]);
+  const evidenceFilterOptions = useMemo(() => {
+    return {
+      stores: Array.from(new Set(operationalGallery.map((item) => item.tienda_nombre || "").filter(Boolean))).sort(),
+      brands: Array.from(new Set(operationalGallery.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
+      types: Array.from(new Set(operationalGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
+      phases: Array.from(new Set(operationalGallery.map((item) => item.fase || "").filter(Boolean))).sort(),
+    };
+  }, [operationalGallery]);
 
-  const summary = useMemo(
-    () => ({
+  const summary = useMemo(() => {
+    return {
       assignedStores: stores.length,
       openVisits: openVisits.length,
       evidenciasHoy: operationalGallery.length,
       alertas: operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
-    }),
-    [stores, openVisits, operationalGallery]
-  );
+    };
+  }, [stores, openVisits, operationalGallery]);
 
   async function loadBootstrap() {
     const initData = getInitData();
@@ -570,10 +564,14 @@ export default function App() {
   function handleLogoError() {
     setLogoMode((prev) => {
       if (prev === "primary") return "secondary";
-      if (prev === "sec  }
+      if (prev === "secondary") return "text";
+      return prev;
+    });
+  }
 
   async function captureLocation(kind: CaptureKind) {
-    setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu{
+    setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
+    try {
       setCapturingLocation(kind);
       const location = await getCurrentLocation();
       if (kind === "entrada") {
@@ -596,11 +594,7 @@ export default function App() {
     try {
       setCapturingPhoto(kind);
       const dataUrl = await readPhotoForSheets(file);
-      const payload: PhotoCapture = {
-        name: file.name,
-        dataUrl,
-        capturedAt: nowMxString(),
-      };
+      const payload: PhotoCapture = { name: file.name, dataUrl, capturedAt: nowMxString() };
       if (kind === "entrada") {
         setEntryPhoto(payload);
         setStatusMsg("Foto de entrada lista.");
@@ -854,7 +848,6 @@ export default function App() {
                 <div className="brandWord">REZGO</div>
               )}
             </div>
-
             <div className="heroTitleBlock heroTitleBlockWide">
               <div className="heroTitle heroTitleTight">Operación<br />del promotor</div>
               <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
@@ -864,11 +857,7 @@ export default function App() {
           {role === "supervisor" ? (
             <div className="tabsBar tabsInline">
               {supervisorTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`}
-                  onClick={() => setSupervisorModule(tab.key)}
-                >
+                <button key={tab.key} className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`} onClick={() => setSupervisorModule(tab.key)}>
                   {tab.label}
                 </button>
               ))}
@@ -876,11 +865,7 @@ export default function App() {
           ) : (
             <div className="tabsBar tabsInline">
               {promotorTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`}
-                  onClick={() => setPromotorModule(tab.key)}
-                >
+                <button key={tab.key} className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`} onClick={() => setPromotorModule(tab.key)}>
                   {tab.label}
                 </button>
               ))}
@@ -906,9 +891,7 @@ export default function App() {
                 <select className="inputLike" value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)}>
                   <option value="">Selecciona una tienda</option>
                   {stores.map((store) => (
-                    <option key={store.tienda_id} value={store.tienda_id}>
-                      {store.nombre_tienda}
-                    </option>
+                    <option key={store.tienda_id} value={store.tienda_id}>{store.nombre_tienda}</option>
                   ))}
                 </select>
 
@@ -979,15 +962,11 @@ export default function App() {
                     return (
                       <button
                         key={visit.visita_id}
-                        onClick={() => {
-                          if (isOpen) setSelectedVisitId(visit.visita_id);
-                        }}
+                        onClick={() => { if (isOpen) setSelectedVisitId(visit.visita_id); }}
                         className={`listBtn ${isOpen && selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}
                       >
                         <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
-                        <div className="listSub">
-                          Entrada: {formatHourFromIso(visit.hora_inicio)} · {isOpen ? "Salida pendiente" : `Salida: ${formatHourFromIso(visit.hora_fin)}`}
-                        </div>
+                        <div className="listSub">Entrada: {formatHourFromIso(visit.hora_inicio)} · {isOpen ? "Salida pendiente" : `Salida: ${formatHourFromIso(visit.hora_fin)}`}</div>
                       </button>
                     );
                   })}
@@ -1005,7 +984,10 @@ export default function App() {
                               <img src={item.url_foto} alt={item.tipo_evento} className="img" />
                             </div>
                             <div className="galleryTop">
-            className="gallerySub compactMeta">{item.tienda_nombre}</div> : null}
+                              <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
+                              <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo || "BAJO"}</span>
+                            </div>
+                            {item.tienda_nombre ? <div className="gallerySub compactMeta">{item.tienda_nombre}</div> : null}
                             <div className="galleryDate">{item.fecha_hora_fmt}</div>
                           </div>
                         ))}
@@ -1027,9 +1009,7 @@ export default function App() {
                 <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
                   <option value="">Selecciona una visita</option>
                   {openVisits.map((visit) => (
-                    <option key={visit.visita_id} value={visit.visita_id}>
-                      {getVisitDisplayName(visit, stores)}
-                    </option>
+                    <option key={visit.visita_id} value={visit.visita_id}>{getVisitDisplayName(visit, stores)}</option>
                   ))}
                 </select>
 
@@ -1048,9 +1028,7 @@ export default function App() {
                 >
                   <option value="">Selecciona una marca</option>
                   {availableBrands.map((brand) => (
-                    <option key={brand.marca_id} value={brand.marca_id}>
-                      {normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}
-                    </option>
+                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}</option>
                   ))}
                 </select>
 
@@ -1059,9 +1037,7 @@ export default function App() {
                   <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
                     <option value="">Selecciona un tipo</option>
                     {brandRules.filter((rule) => isValidRuleType(rule.tipo_evidencia)).map((rule) => (
-                      <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>
-                        {rule.tipo_evidencia}
-                      </option>
+                      <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>{rule.tipo_evidencia}</option>
                     ))}
                   </select>
                 ) : (
@@ -1081,12 +1057,7 @@ export default function App() {
 
               <div className="panel">
                 <label className="fieldLabel">Observación</label>
-                <input
-                  className="inputLike"
-                  value={evidenceDescription}
-                  onChange={(e) => setEvidenceDescription(e.target.value)}
-                  placeholder="Ej. Cabecera completa, competencia lateral..."
-                />
+                <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
 
                 <label className="fileBtn wideFileBtn" style={{ marginTop: 12 }}>
                   <Camera size={16} />
@@ -1125,21 +1096,20 @@ export default function App() {
               </select>
               <select className="inputLike" value={evidenceFilterType} onChange={(e) => setEvidenceFilterType(e.target.value)}>
                 <option value="">Todos los tipos</option>
-                {evidenceFilterOptions.types.map((value) => <option key={value} value={value}>{vaceFilterPhase} onChange={(e) => setEvidenceFilterPhase(e.target.value)}>
+                {evidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className="inputLike" value={evidenceFilterPhase} onChange={(e) => setEvidenceFilterPhase(e.target.value)}>
                 <option value="">Todas las fases</option>
                 {evidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </div>
+
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
                   {filteredOperationalGallery.map((item) => (
-                    <button
-                      key={item.evidencia_id}
-                      onClick={() => setSelectedEvidenceId(item.evidencia_id)}
-                      className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}
-                    >
+                    <button key={item.evidencia_id} onClick={() => setSelectedEvidenceId(item.evidencia_id)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
                       <div className="listTitle">{item.tienda_nombre || "Visita activa"}</div>
                       <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
                     </button>
@@ -1149,28 +1119,31 @@ export default function App() {
               </div>
 
               <div className="panel">
-                <div className="m       <>
+                <div className="miniTitle">Acciones</div>
+                {selectedEvidence ? (
+                  <>
                     <div className="previewFrame">
                       <img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" />
                     </div>
                     {selectedEvidence.tienda_nombre ? <div className="summaryLine">{selectedEvidence.tienda_nombre}</div> : null}
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
+                    <div className="summaryLine">Riesgo: <strong>{selectedEvidence.riesgo}</strong></div>
 
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.")}>
                         <Eye size={16} />
-                      => void markEvidenceAsCancelled()}>
+                        <span>Ver</span>
+                      </button>
+                      <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}>
                         <Trash2 size={16} />
                         <span>Anular</span>
                       </button>
-
                       <label className="actionButton">
                         <Camera size={16} />
                         <span>Reemplazar</span>
                         <input type="file" accept="image/*" onChange={(e) => void replaceEvidencePhoto(e.target.files)} />
                       </label>
-
                       <button className="actionButton" onClick={() => void saveNote()}>
                         <Pencil size={16} />
                         <span>Guardar nota</span>
@@ -1204,8 +1177,7 @@ export default function App() {
                 {visits.length ? (
                   visits.map((visit) => (
                     <div className="summaryLine" key={visit.visita_id}>
-                      {getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>
-                      {visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}
+                      {getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}
                     </div>
                   ))
                 ) : (
@@ -1250,7 +1222,24 @@ export default function App() {
                       <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
                       <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo}</span>
                     </div>
-                    <divy {
+                    <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre, "Marca") })}</div>
+                    <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                    <div className="galleryDesc">{item.descripcion}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
+
+        <div className="footerActions">
+          <button
+            className="secondaryBtn footerBtn"
+            onClick={() => {
+              void (async () => {
+                try {
                   setSyncing(true);
                   await loadDashboard();
                   await loadEvidencesToday();
@@ -1352,10 +1341,7 @@ input[type=file] { display: none; }
   font-weight: 800;
   color: #263238;
 }
-.heroTitleTight {
-  text-align: right;
-  max-width: 132px;
-}
+.heroTitleTight { text-align: right; max-width: 132px; }
 .heroMetaSingle {
   color: #78909c;
   font-size: 10px;
@@ -1365,10 +1351,7 @@ input[type=file] { display: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.heroMetaSingleWide {
-  width: 100%;
-  max-width: 220px;
-}
+.heroMetaSingleWide { width: 100%; max-width: 220px; }
 .card {
   margin-top: 12px;
   background: rgba(255,255,255,0.92);
@@ -1495,9 +1478,7 @@ input[type=file] { display: none; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-.captureGrid.threeCols {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
+.captureGrid.threeCols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .thumbRow, .thumbGrid {
   display: flex;
@@ -1558,21 +1539,15 @@ input[type=file] { display: none; }
   cursor: pointer;
 }
 .galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
-.filtersRow {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
 .compactGalleryScroll { max-height: 320px; }
-.attendanceGalleryGrid { grid-template-columns: 1fr; }
-.attendanceGalleryBlock { margin-top: 8px; }
 .galleryGrid {
   margin-top: 14px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
+.attendanceGalleryGrid { grid-template-columns: 1fr; }
+.attendanceGalleryBlock { margin-top: 8px; }
 .galleryCard {
   border-radius: 18px;
   border: 1px solid rgba(38,50,56,0.08);
@@ -1607,6 +1582,12 @@ input[type=file] { display: none; }
 .riskRed { background: rgba(239,68,68,.14); color: #d32f2f; }
 .riskAmber { background: rgba(245,158,11,.14); color: #ed6c02; }
 .riskGreen { background: rgba(76,175,80,.14); color: #2e7d32; }
+.filtersRow {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
 .statusBar {
   position: fixed;
   left: 50%;
