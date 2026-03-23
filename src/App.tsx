@@ -225,6 +225,15 @@ function normalizeBrandLabel(rawLabel: string, fallbackId: string) {
   return label;
 }
 
+function compactMetaLine(item: EvidenceItem) {
+  const parts = [
+    item.tienda_nombre || "",
+    normalizeBrandLabel(item.marca_nombre || "", "Marca"),
+    item.fase ? `Fase: ${item.fase}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 function isOperationalEvidence(item: EvidenceItem) {
   return (item.tipo_evidencia || "").trim().toUpperCase() !== "ASISTENCIA";
 }
@@ -419,7 +428,7 @@ export default function App() {
   const filteredOperationalGallery = useMemo(() => {
     return operationalGallery.filter((item) => {
       const byStore = !evidenceFilterStore || (item.tienda_nombre || "") === evidenceFilterStore;
-      const byBrand = !evidenceFilterBrand || (item.marca_nombre || "") === evidenceFilterBrand;
+      a") === evidenceFilterBrand;
       const byType = !evidenceFilterType || (item.tipo_evidencia || "") === evidenceFilterType;
       const byPhase = !evidenceFilterPhase || ((item.fase || "") === evidenceFilterPhase);
       return byStore && byBrand && byType && byPhase;
@@ -432,8 +441,7 @@ export default function App() {
   );
 
   const evidenceFilterOptions = useMemo(() => ({
-    stores: Array.from(new Set(operationalGallery.map((item) => item.tienda_nombre || "").filter(Boolean))).sort(),
-    brands: Array.from(new Set(operationalGallery.map((item) => item.marca_nombre || "").filter(Boolean))).sort(),
+    stores: Array.from(new Set(operationalGallery.map((item) => item.tienda_nombre || "").fiem.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
     types: Array.from(new Set(operationalGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
     phases: Array.from(new Set(operationalGallery.map((item) => item.fase || "").filter(Boolean))).sort(),
   }), [operationalGallery]);
@@ -562,13 +570,10 @@ export default function App() {
   function handleLogoError() {
     setLogoMode((prev) => {
       if (prev === "primary") return "secondary";
-      if (prev === "secondary") return "text";
-      return prev;
-    });
-  }
+      if (prev === "sec  }
 
   async function captureLocation(kind: CaptureKind) {
-    try {
+    setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu{
       setCapturingLocation(kind);
       const location = await getCurrentLocation();
       if (kind === "entrada") {
@@ -1000,9 +1005,7 @@ export default function App() {
                               <img src={item.url_foto} alt={item.tipo_evento} className="img" />
                             </div>
                             <div className="galleryTop">
-                              <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
-                            </div>
-                            {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
+            className="gallerySub compactMeta">{item.tienda_nombre}</div> : null}
                             <div className="galleryDate">{item.fecha_hora_fmt}</div>
                           </div>
                         ))}
@@ -1118,13 +1121,11 @@ export default function App() {
               </select>
               <select className="inputLike" value={evidenceFilterBrand} onChange={(e) => setEvidenceFilterBrand(e.target.value)}>
                 <option value="">Todas las marcas</option>
-                {evidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}
+                {evidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{normalizeBrandLabel(value, "Marca")}</option>)}
               </select>
               <select className="inputLike" value={evidenceFilterType} onChange={(e) => setEvidenceFilterType(e.target.value)}>
                 <option value="">Todos los tipos</option>
-                {evidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-              <select className="inputLike" value={evidenceFilterPhase} onChange={(e) => setEvidenceFilterPhase(e.target.value)}>
+                {evidenceFilterOptions.types.map((value) => <option key={value} value={value}>{vaceFilterPhase} onChange={(e) => setEvidenceFilterPhase(e.target.value)}>
                 <option value="">Todas las fases</option>
                 {evidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
@@ -1140,7 +1141,7 @@ export default function App() {
                       className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}
                     >
                       <div className="listTitle">{item.tienda_nombre || "Visita activa"}</div>
-                      <div className="listSub">{item.tipo_evidencia} · {item.marca_nombre}</div>
+                      <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
                     </button>
                   ))}
                   {!filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
@@ -1148,23 +1149,18 @@ export default function App() {
               </div>
 
               <div className="panel">
-                <div className="miniTitle">Acciones</div>
-                {selectedEvidence ? (
-                  <>
+                <div className="m       <>
                     <div className="previewFrame">
                       <img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" />
                     </div>
                     {selectedEvidence.tienda_nombre ? <div className="summaryLine">{selectedEvidence.tienda_nombre}</div> : null}
-                    <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{selectedEvidence.marca_nombre}</strong></div>
+                    <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
 
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.")}>
                         <Eye size={16} />
-                        <span>Ver</span>
-                      </button>
-
-                      <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}>
+                      => void markEvidenceAsCancelled()}>
                         <Trash2 size={16} />
                         <span>Anular</span>
                       </button>
@@ -1254,26 +1250,7 @@ export default function App() {
                       <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
                       <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo}</span>
                     </div>
-                    {item.tienda_nombre ? <div className="gallerySub">{item.tienda_nombre}</div> : null}
-                    <div className="gallerySub">{item.marca_nombre}</div>
-                    {item.fase ? <div className="gallerySub">Fase: {item.fase}</div> : null}
-                    <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                    <div className="galleryDesc">{item.descripcion}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
-
-        <div className="footerActions">
-          <button
-            className="secondaryBtn footerBtn"
-            onClick={() => {
-              void (async () => {
-                try {
+                    <divy {
                   setSyncing(true);
                   await loadDashboard();
                   await loadEvidencesToday();
@@ -1618,6 +1595,7 @@ input[type=file] { display: none; }
 }
 .galleryTitle { font-weight: 800; color: #263238; }
 .gallerySub { margin-top: 4px; color: #607d8b; font-size: 13px; }
+.compactMeta { line-height: 1.2; }
 .galleryDate { margin-top: 4px; color: #78909c; font-size: 12px; }
 .galleryDesc { margin-top: 8px; color: #455a64; font-size: 13px; line-height: 1.45; }
 .riskBadge {
