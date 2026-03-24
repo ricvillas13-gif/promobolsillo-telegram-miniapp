@@ -626,7 +626,10 @@ export default function App() {
   );
 
   const selectedSupervisorEvidence = useMemo(
-    () => supervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) || supervisorEvidences[0] || null,
+    () =>
+      supervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) ||
+      supervisorEvidences[0] ||
+      null,
     [supervisorEvidences, selectedSupEvidenceId]
   );
 
@@ -817,6 +820,16 @@ export default function App() {
   useEffect(() => {
     if (role === "supervisor") void loadSupervisorEvidences();
   }, [supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+
+  useEffect(() => {
+    if (role !== "supervisor") return;
+    if (!supEvidencePromotorFilter) return;
+    const hasVisibleEvidenceForPromotor = supervisorEvidences.some((item) => item.promotor_id === supEvidencePromotorFilter);
+    if (!hasVisibleEvidenceForPromotor) {
+      setSelectedSupEvidenceId("");
+      setExpedient(null);
+    }
+  }, [supEvidencePromotorFilter, supervisorEvidences, role]);
 
   async function captureLocation(kind: CaptureKind) {
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
@@ -1674,7 +1687,7 @@ export default function App() {
               </div>
               <div className="panel">
                 <div className="miniTitle">Revisión</div>
-                {selectedSupervisorEvidence ? (
+                {!selectedSupervisorEvidence && supEvidencePromotorFilter ? <div className="emptyBox">Este promotor no tiene evidencias operativas con los filtros actuales.</div> :
                   <>
                     <div className="previewFrame">
                       <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" />
