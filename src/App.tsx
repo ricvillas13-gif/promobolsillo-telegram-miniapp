@@ -13,7 +13,6 @@ import {
   Trash2,
   Users,
   Check,
-  X,
   ClipboardList,
   Store,
 } from "lucide-react";
