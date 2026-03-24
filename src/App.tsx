@@ -12,6 +12,10 @@ import {
   ShieldAlert,
   Trash2,
   Users,
+  Check,
+  X,
+  ClipboardList,
+  Store,
 } from "lucide-react";
 
 declare global {
@@ -33,23 +37,12 @@ type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen"
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 type CaptureKind = "entrada" | "salida";
+type SupervisorDecision = "APROBADA" | "OBSERVADA" | "RECHAZADA";
 
 type BootstrapResponse = {
   ok: boolean;
   role: Role;
   profile?: { nombre?: string };
-};
-
-type SupervisorDashboardResponse = {
-  ok: boolean;
-  supervisor?: { nombre?: string };
-  summary?: {
-    promotores?: number;
-    visitasHoy?: number;
-    abiertas?: number;
-    evidenciasHoy?: number;
-    alertas?: number;
-  };
 };
 
 type StoreItem = {
@@ -73,18 +66,25 @@ type EvidenceItem = {
   evidencia_id: string;
   tipo_evento: string;
   tipo_evidencia: string;
+  marca_id?: string;
   marca_nombre: string;
   riesgo: string;
   fecha_hora_fmt: string;
+  fecha_hora?: string;
   url_foto: string;
   descripcion: string;
   tienda_nombre?: string;
   tienda_id?: string;
+  promotor_id?: string;
+  promotor_nombre?: string;
   fase?: string;
+  status?: string;
+  decision_supervisor?: string;
+  motivo_revision?: string;
 };
 
 type UiEvidence = EvidenceItem & {
-  status?: "ACTIVA" | "ANULADA";
+  status?: "ACTIVA" | "ANULADA" | string;
 };
 
 type DashboardResponse = {
@@ -93,6 +93,12 @@ type DashboardResponse = {
   stores?: StoreItem[];
   openVisits?: VisitItem[];
   visitsToday?: VisitItem[];
+  summary?: {
+    assignedStores?: number;
+    openVisits?: number;
+    closedVisits?: number;
+    evidenciasHoy?: number;
+  };
 };
 
 type EvidencesTodayResponse = {
@@ -151,6 +157,95 @@ type EvidenceRulesResponse = {
   }>;
 };
 
+type SupervisorSummary = {
+  promotores: number;
+  visitasHoy: number;
+  abiertas: number;
+  evidenciasHoy: number;
+  alertas: number;
+};
+
+type SupervisorDashboardResponse = {
+  ok: boolean;
+  supervisor?: { nombre?: string };
+  summary?: Partial<SupervisorSummary>;
+};
+
+type SupervisorTeamRow = {
+  promotor_id: string;
+  external_id: string;
+  nombre: string;
+  region: string;
+  visitas_hoy: number;
+  visitas_abiertas: number;
+  evidencias_hoy: number;
+  alertas_abiertas: number;
+  ultima_tienda: string;
+  ultima_entrada: string;
+  ultima_salida: string;
+  ultima_visita_id: string;
+  status_general: string;
+};
+
+type SupervisorTeamResponse = {
+  ok: boolean;
+  team?: SupervisorTeamRow[];
+};
+
+type SupervisorAlert = {
+  alerta_id: string;
+  fecha_hora: string;
+  fecha_hora_fmt: string;
+  promotor_id: string;
+  promotor_nombre: string;
+  visita_id: string;
+  evidencia_id: string;
+  tipo_alerta: string;
+  severidad: string;
+  descripcion: string;
+  status: string;
+  supervisor_id?: string;
+  tienda_id?: string;
+  tienda_nombre?: string;
+  atendida_por?: string;
+  fecha_atencion?: string;
+  canal_notificacion?: string;
+  comentario_cierre?: string;
+  origen_cierre?: string;
+};
+
+type SupervisorAlertsResponse = {
+  ok: boolean;
+  alerts?: SupervisorAlert[];
+};
+
+type SupervisorAlertCloseResponse = {
+  ok: boolean;
+  alerta_id: string;
+  status: string;
+};
+
+type SupervisorEvidenceReviewResponse = {
+  ok: boolean;
+  evidencia_id: string;
+  decision_supervisor: string;
+  status: string;
+};
+
+type SupervisorEvidencesResponse = {
+  ok: boolean;
+  evidences?: EvidenceItem[];
+};
+
+type VisitExpedientResponse = {
+  ok: boolean;
+  visita?: VisitItem & {
+    promotor_nombre?: string;
+  };
+  evidencias?: EvidenceItem[];
+  alertas?: SupervisorAlert[];
+};
+
 type LocationCapture = {
   lat: number;
   lon: number;
@@ -174,20 +269,6 @@ function getTelegramWebApp() {
 
 function getInitData() {
   return getTelegramWebApp()?.initData || "";
-}
-
-function getInlineLogoSvg() {
-  const svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="220" height="64" viewBox="0 0 220 64" fill="none">
-    <rect x="2" y="8" width="48" height="48" rx="14" fill="#43A047"/>
-    <path d="M18 24h13c7 0 11 3.8 11 9.5S38 43 31 43H26v7h-8V24Zm8 6v7h5c2.2 0 3.5-1.2 3.5-3.5S33.2 30 31 30h-5Z" fill="white"/>
-    <path d="M62 23h18.5c8 0 12.7 4 12.7 10.2 0 4.4-2.5 7.7-6.8 9.1L95 50H84.8l-7.4-6.7h-5.1V50H62V23Zm10.3 6.8v7.2h7.4c2.3 0 3.8-1.4 3.8-3.6 0-2.1-1.5-3.6-3.8-3.6h-7.4Z" fill="#263238"/>
-    <path d="M101 23h36v7.6h-25.7v3.2h23.9v7.1h-23.9v3.5H137V50h-36V23Z" fill="#263238"/>
-    <path d="M144 23h10.8l7.9 15.1L170.6 23h10.8l-15.1 27H159L144 23Z" fill="#263238"/>
-    <path d="M185 23h10.3V50H185V23Z" fill="#263238"/>
-    <path d="M200 23h18v7.6h-7.1V50h-10.3V30.6H200V23Z" fill="#263238"/>
-  </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
@@ -287,6 +368,20 @@ function geofenceClass(value?: string) {
   return "geoNeutral";
 }
 
+function severityClass(value?: string) {
+  const v = (value || "").trim().toUpperCase();
+  if (v === "ALTA") return "riskRed";
+  if (v === "MEDIA") return "riskAmber";
+  return "riskGreen";
+}
+
+function statusClass(value?: string) {
+  const v = (value || "").trim().toUpperCase();
+  if (v === "ALERTA" || v === "ABIERTA" || v === "RECHAZADA") return "riskRed";
+  if (v === "OBSERVADA" || v === "PENDIENTE_REVISION" || v === "ABIERTA_CON_ALERTA") return "riskAmber";
+  return "riskGreen";
+}
+
 function fileToDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -383,18 +478,11 @@ const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
   { key: "resumen", label: "Resumen" },
 ];
 
-const supervisorCards: Array<{ key: string; Icon: React.ElementType; title: string; text: string }> = [
-  { key: "equipo", Icon: Users, title: "Equipo del día", text: "Promotores, visitas activas y desempeño del turno." },
-  { key: "alertas", Icon: ShieldAlert, title: "Alertas", text: "Asistencias incompletas, riesgos y pendientes." },
-  { key: "evidencias", Icon: ImageIcon, title: "Evidencias", text: "Revisión operativa y visual por promotor." },
-  { key: "seguimiento", Icon: Pencil, title: "Seguimiento", text: "Casos por continuar y validaciones del supervisor." },
-];
-
 export default function App() {
   const tg = getTelegramWebApp();
 
   const [role, setRole] = useState<Role>("promotor");
-  const [actorLabel, setActorLabel] = useState("Promotor");
+  const [actorLabel, setActorLabel] = useState("Operador");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
@@ -405,14 +493,6 @@ export default function App() {
   const [selectedStoreId, setSelectedStoreId] = useState("");
   const [selectedVisitId, setSelectedVisitId] = useState("");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
-  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
-  const [supervisorSummary, setSupervisorSummary] = useState({
-    promotores: 0,
-    visitasHoy: 0,
-    abiertas: 0,
-    evidenciasHoy: 0,
-    alertas: 0,
-  });
 
   const [entryLocation, setEntryLocation] = useState<LocationCapture | null>(null);
   const [exitLocation, setExitLocation] = useState<LocationCapture | null>(null);
@@ -439,6 +519,33 @@ export default function App() {
   const [evidenceFilterBrand, setEvidenceFilterBrand] = useState("");
   const [evidenceFilterType, setEvidenceFilterType] = useState("");
   const [evidenceFilterPhase, setEvidenceFilterPhase] = useState("");
+
+  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
+  const [supervisorSummary, setSupervisorSummary] = useState<SupervisorSummary>({
+    promotores: 0,
+    visitasHoy: 0,
+    abiertas: 0,
+    evidenciasHoy: 0,
+    alertas: 0,
+  });
+  const [supervisorTeam, setSupervisorTeam] = useState<SupervisorTeamRow[]>([]);
+  const [selectedTeamPromotorId, setSelectedTeamPromotorId] = useState("");
+  const [supervisorAlerts, setSupervisorAlerts] = useState<SupervisorAlert[]>([]);
+  const [selectedAlertId, setSelectedAlertId] = useState("");
+  const [alertStatusFilter, setAlertStatusFilter] = useState("");
+  const [alertSeverityFilter, setAlertSeverityFilter] = useState("");
+  const [supervisorEvidences, setSupervisorEvidences] = useState<EvidenceItem[]>([]);
+  const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
+  const [supEvidencePromotorFilter, setSupEvidencePromotorFilter] = useState("");
+  const [supEvidenceStoreFilter, setSupEvidenceStoreFilter] = useState("");
+  const [supEvidenceBrandFilter, setSupEvidenceBrandFilter] = useState("");
+  const [supEvidenceTypeFilter, setSupEvidenceTypeFilter] = useState("");
+  const [supEvidenceRiskFilter, setSupEvidenceRiskFilter] = useState("");
+  const [reviewDecision, setReviewDecision] = useState<SupervisorDecision>("APROBADA");
+  const [reviewNote, setReviewNote] = useState("");
+  const [alertCloseNote, setAlertCloseNote] = useState("");
+  const [expedient, setExpedient] = useState<VisitExpedientResponse | null>(null);
+  const [expedientLoading, setExpedientLoading] = useState(false);
 
   useEffect(() => {
     if (tg) {
@@ -494,14 +601,34 @@ export default function App() {
     };
   }, [operationalGallery]);
 
-  const summary = useMemo(() => {
+  const supervisorPromotorOptions = useMemo(
+    () => supervisorTeam.map((item) => ({ id: item.promotor_id, nombre: item.nombre })),
+    [supervisorTeam]
+  );
+
+  const supervisorEvidenceFilterOptions = useMemo(() => {
     return {
-      assignedStores: stores.length,
-      openVisits: openVisits.length,
-      evidenciasHoy: operationalGallery.length,
-      alertas: operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length,
+      stores: Array.from(new Set(supervisorEvidences.map((item) => item.tienda_nombre || "").filter(Boolean))).sort(),
+      brands: Array.from(new Set(supervisorEvidences.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
+      types: Array.from(new Set(supervisorEvidences.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
+      risks: Array.from(new Set(supervisorEvidences.map((item) => item.riesgo || "").filter(Boolean))).sort(),
     };
-  }, [stores, openVisits, operationalGallery]);
+  }, [supervisorEvidences]);
+
+  const selectedTeamMember = useMemo(
+    () => supervisorTeam.find((item) => item.promotor_id === selectedTeamPromotorId) || supervisorTeam[0] || null,
+    [supervisorTeam, selectedTeamPromotorId]
+  );
+
+  const selectedAlert = useMemo(
+    () => supervisorAlerts.find((item) => item.alerta_id === selectedAlertId) || supervisorAlerts[0] || null,
+    [supervisorAlerts, selectedAlertId]
+  );
+
+  const selectedSupervisorEvidence = useMemo(
+    () => supervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) || supervisorEvidences[0] || null,
+    [supervisorEvidences, selectedSupEvidenceId]
+  );
 
   async function loadBootstrap() {
     const initData = getInitData();
@@ -515,44 +642,26 @@ export default function App() {
     if (data.profile?.nombre) setActorLabel(data.profile.nombre);
   }
 
-  async function loadSupervisorDashboard() {
-    if (role !== "supervisor") return;
-    const data = await postJson<SupervisorDashboardResponse>("/miniapp/supervisor/dashboard", {});
-    if (data.supervisor?.nombre) setActorLabel(data.supervisor.nombre);
-    setSupervisorSummary({
-      promotores: data.summary?.promotores || 0,
-      visitasHoy: data.summary?.visitasHoy || 0,
-      abiertas: data.summary?.abiertas || 0,
-      evidenciasHoy: data.summary?.evidenciasHoy || 0,
-      alertas: data.summary?.alertas || 0,
-    });
-  }
-
-  async function loadDashboard() {
-    if (role !== "promotor") return;
+  async function loadPromotorDashboard() {
     const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
     if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
     setStores(dashboard.stores || []);
-
     const nextVisits = dashboard.visitsToday || [];
     const nextOpenVisits = nextVisits.filter((visit) => !visit.hora_fin);
     setVisits(nextVisits);
-
     if (!nextOpenVisits.length) {
       setSelectedVisitId("");
       setExitLocation(null);
       setExitPhoto(null);
       return;
     }
-
     const currentStillExists = nextOpenVisits.find((v) => v.visita_id === selectedVisitId);
     setSelectedVisitId(currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
   }
 
   async function loadEvidencesToday() {
-    if (role !== "promotor") return;
     const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
-    const rows = (data.evidencias || []).map((item) => ({ ...item, status: "ACTIVA" as const }));
+    const rows = (data.evidencias || []).map((item) => ({ ...item, status: item.status || "ACTIVA" as const }));
     const operationalRows = rows.filter(isOperationalEvidence);
     setAllEvidenceRows(rows);
     if (operationalRows.length && !operationalRows.find((r) => r.evidencia_id === selectedEvidenceId)) {
@@ -601,6 +710,69 @@ export default function App() {
     }
   }
 
+  async function loadSupervisorDashboard() {
+    const data = await postJson<SupervisorDashboardResponse>("/miniapp/supervisor/dashboard", {});
+    if (data.supervisor?.nombre) setActorLabel(data.supervisor.nombre);
+    setSupervisorSummary({
+      promotores: data.summary?.promotores || 0,
+      visitasHoy: data.summary?.visitasHoy || 0,
+      abiertas: data.summary?.abiertas || 0,
+      evidenciasHoy: data.summary?.evidenciasHoy || 0,
+      alertas: data.summary?.alertas || 0,
+    });
+  }
+
+  async function loadSupervisorTeam() {
+    const data = await postJson<SupervisorTeamResponse>("/miniapp/supervisor/team", {});
+    const rows = data.team || [];
+    setSupervisorTeam(rows);
+    if (rows.length && !rows.find((row) => row.promotor_id === selectedTeamPromotorId)) {
+      setSelectedTeamPromotorId(rows[0].promotor_id);
+    }
+  }
+
+  async function loadSupervisorAlerts() {
+    const data = await postJson<SupervisorAlertsResponse>("/miniapp/supervisor/alerts", {
+      status: alertStatusFilter,
+      severidad: alertSeverityFilter,
+    });
+    const rows = data.alerts || [];
+    setSupervisorAlerts(rows);
+    if (rows.length && !rows.find((row) => row.alerta_id === selectedAlertId)) {
+      setSelectedAlertId(rows[0].alerta_id);
+    }
+    if (!rows.length) setSelectedAlertId("");
+  }
+
+  async function loadSupervisorEvidences() {
+    const data = await postJson<SupervisorEvidencesResponse>("/miniapp/supervisor/evidences", {
+      promotor_id: supEvidencePromotorFilter,
+      tienda_id: supEvidenceStoreFilter,
+      marca_id: supEvidenceBrandFilter,
+      tipo_evidencia: supEvidenceTypeFilter,
+      riesgo: supEvidenceRiskFilter,
+    });
+    const rows = data.evidences || [];
+    setSupervisorEvidences(rows);
+    if (rows.length && !rows.find((row) => row.evidencia_id === selectedSupEvidenceId)) {
+      setSelectedSupEvidenceId(rows[0].evidencia_id);
+    }
+    if (!rows.length) setSelectedSupEvidenceId("");
+  }
+
+  async function openVisitExpedient(visitaId: string) {
+    if (!visitaId) return;
+    try {
+      setExpedientLoading(true);
+      const data = await postJson<VisitExpedientResponse>("/miniapp/supervisor/visit-expedient", { visita_id: visitaId });
+      setExpedient(data);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo abrir el expediente.");
+    } finally {
+      setExpedientLoading(false);
+    }
+  }
+
   async function initialize() {
     try {
       setLoading(true);
@@ -619,11 +791,14 @@ export default function App() {
 
   useEffect(() => {
     if (role === "promotor") {
-      void loadDashboard();
+      void loadPromotorDashboard();
       void loadEvidencesToday();
     }
     if (role === "supervisor") {
       void loadSupervisorDashboard();
+      void loadSupervisorTeam();
+      void loadSupervisorAlerts();
+      void loadSupervisorEvidences();
     }
   }, [role]);
 
@@ -634,6 +809,14 @@ export default function App() {
   useEffect(() => {
     if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
   }, [evidenceBrandId, evidenceBrandLabel, role]);
+
+  useEffect(() => {
+    if (role === "supervisor") void loadSupervisorAlerts();
+  }, [alertStatusFilter, alertSeverityFilter]);
+
+  useEffect(() => {
+    if (role === "supervisor") void loadSupervisorEvidences();
+  }, [supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   async function captureLocation(kind: CaptureKind) {
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
@@ -702,11 +885,9 @@ export default function App() {
       if (!entryLocation) return setStatusMsg("Captura la ubicación de entrada.");
       if (!entryPhoto) return setStatusMsg("Captura la foto de entrada.");
       if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
-
       const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
       const confirmMessage = `¿Deseas registrar entrada en ${selectedStore?.nombre_tienda || "la tienda seleccionada"}?`;
       if (typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
-
       setSyncing(true);
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
         tienda_id: selectedStoreId,
@@ -716,18 +897,16 @@ export default function App() {
         foto_nombre: entryPhoto.name,
         foto_data_url: entryPhoto.dataUrl,
       });
-
       if (response.warning === "attendance_photo_too_large_for_sheets") {
         setStatusMsg("Entrada registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets.");
       } else {
         setStatusMsg(`Entrada registrada en ${response.tienda_nombre}`);
       }
-
       setEntryLocation(null);
       setEntryPhoto(null);
       setExitLocation(null);
       setExitPhoto(null);
-      await loadDashboard();
+      await loadPromotorDashboard();
       await loadEvidencesToday();
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la entrada real.");
@@ -742,10 +921,8 @@ export default function App() {
       if (!exitLocation) return setStatusMsg("Captura la ubicación de salida.");
       if (!exitPhoto) return setStatusMsg("Captura la foto de salida.");
       if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
-
       const confirmMessage = `¿Deseas registrar salida en ${getVisitDisplayName(exitVisit, stores)}?`;
       if (typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
-
       setSyncing(true);
       const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
         visita_id: exitVisit.visita_id,
@@ -755,16 +932,14 @@ export default function App() {
         foto_nombre: exitPhoto.name,
         foto_data_url: exitPhoto.dataUrl,
       });
-
       if (response.warning === "attendance_photo_too_large_for_sheets") {
         setStatusMsg("Salida registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets.");
       } else {
         setStatusMsg("Salida registrada correctamente.");
       }
-
       setExitLocation(null);
       setExitPhoto(null);
-      await loadDashboard();
+      await loadPromotorDashboard();
       await loadEvidencesToday();
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la salida real.");
@@ -780,7 +955,6 @@ export default function App() {
       if (!evidenceType.trim()) return setStatusMsg("Selecciona o escribe el tipo de evidencia.");
       if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
-
       setSyncing(true);
       const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", {
         visita_id: selectedVisitId,
@@ -795,7 +969,6 @@ export default function App() {
           capturedAt: photo.capturedAt,
         })),
       });
-
       setEvidenceBrandId("");
       setEvidenceBrandLabel("");
       setEvidenceType("");
@@ -805,7 +978,6 @@ export default function App() {
       setEvidencePhotos([]);
       setBrandRules([]);
       await loadEvidencesToday();
-
       if (result.warning === "evidence_photo_too_large_for_sheets") {
         setStatusMsg("Evidencia registrada, pero al menos una foto no cupo completa en Sheets.");
       } else {
@@ -878,6 +1050,47 @@ export default function App() {
     }
   }
 
+  async function closeSelectedAlert() {
+    try {
+      if (!selectedAlert) return setStatusMsg("Selecciona una alerta.");
+      setSyncing(true);
+      await postJson<SupervisorAlertCloseResponse>("/miniapp/supervisor/alert-close", {
+        alerta_id: selectedAlert.alerta_id,
+        comentario_cierre: alertCloseNote.trim(),
+        origen_cierre: "SUPERVISOR",
+      });
+      setAlertCloseNote("");
+      await loadSupervisorDashboard();
+      await loadSupervisorAlerts();
+      setStatusMsg("Alerta atendida.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo cerrar la alerta.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function reviewSelectedEvidence() {
+    try {
+      if (!selectedSupervisorEvidence) return setStatusMsg("Selecciona una evidencia.");
+      setSyncing(true);
+      await postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
+        evidencia_id: selectedSupervisorEvidence.evidencia_id,
+        decision_supervisor: reviewDecision,
+        motivo_revision: reviewNote.trim(),
+        requiere_revision_supervisor: reviewDecision !== "APROBADA",
+      });
+      setReviewNote("");
+      await loadSupervisorDashboard();
+      await loadSupervisorEvidences();
+      setStatusMsg(`Evidencia ${reviewDecision.toLowerCase()}.`);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo revisar la evidencia.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   if (loading) {
     return (
       <div style={styles.page}>
@@ -901,9 +1114,7 @@ export default function App() {
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
             <div className="heroLogoBlock">
-              <div className="brandPlate brandPlateHorizontal brandPlateInline">
-                <img src={getInlineLogoSvg()} alt="REZGO" className="brandLogoInline" />
-              </div>
+              <div className="brandWord">REZGO</div>
             </div>
             <div className="heroTitleBlock heroTitleBlockWide">
               <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : <>Operación<br />del promotor</>}</div>
@@ -1048,7 +1259,7 @@ export default function App() {
                             </div>
                             <div className="galleryTop">
                               <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
-                              <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo || "BAJO"}</span>
+                              <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo || "BAJO"}</span>
                             </div>
                             {item.tienda_nombre ? <div className="gallerySub compactMeta">{item.tienda_nombre}</div> : null}
                             <div className="galleryDate">{item.fecha_hora_fmt}</div>
@@ -1075,7 +1286,6 @@ export default function App() {
                     <option key={visit.visita_id} value={visit.visita_id}>{getVisitDisplayName(visit, stores)}</option>
                   ))}
                 </select>
-
                 {selectedVisitStoreName ? <div className="contextHint">Tienda vinculada: {selectedVisitStoreName}</div> : null}
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
@@ -1121,13 +1331,11 @@ export default function App() {
               <div className="panel">
                 <label className="fieldLabel">Observación</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
-
                 <label className="fileBtn wideFileBtn" style={{ marginTop: 12 }}>
                   <Camera size={16} />
                   {capturingPhoto ? "Procesando..." : evidencePhotos.length ? `${evidencePhotos.length} foto(s) listas` : "Agregar fotos de evidencia"}
                   <input type="file" accept="image/*" multiple onChange={(e) => void captureEvidencePhotos(e.target.files)} />
                 </label>
-
                 {evidencePhotos.length ? (
                   <div className="thumbGrid">
                     {evidencePhotos.map((photo) => (
@@ -1135,7 +1343,6 @@ export default function App() {
                     ))}
                   </div>
                 ) : null}
-
                 <button className="primaryBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing}>
                   <Camera size={16} />
                   {syncing ? "Guardando..." : "Registrar evidencia"}
@@ -1166,7 +1373,6 @@ export default function App() {
                 {evidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </div>
-
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Listado</div>
@@ -1180,7 +1386,6 @@ export default function App() {
                   {!filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
                 </div>
               </div>
-
               <div className="panel">
                 <div className="miniTitle">Acciones</div>
                 {selectedEvidence ? (
@@ -1192,7 +1397,6 @@ export default function App() {
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
                     <div className="summaryLine">Riesgo: <strong>{selectedEvidence.riesgo}</strong></div>
-
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.")}>
                         <Eye size={16} />
@@ -1212,7 +1416,6 @@ export default function App() {
                         <span>Guardar nota</span>
                       </button>
                     </div>
-
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
                     <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe una observación" />
                   </>
@@ -1230,10 +1433,10 @@ export default function App() {
             <div className="summaryGrid">
               <div className="summaryBlock">
                 <div className="miniTitle">Operación del día</div>
-                <div className="summaryLine">Tiendas asignadas: <strong>{summary.assignedStores}</strong></div>
-                <div className="summaryLine">Visitas abiertas: <strong>{summary.openVisits}</strong></div>
-                <div className="summaryLine">Evidencias hoy: <strong>{summary.evidenciasHoy}</strong></div>
-                <div className="summaryLine">Alertas: <strong>{summary.alertas}</strong></div>
+                <div className="summaryLine">Tiendas asignadas: <strong>{stores.length}</strong></div>
+                <div className="summaryLine">Visitas abiertas: <strong>{openVisits.length}</strong></div>
+                <div className="summaryLine">Evidencias hoy: <strong>{operationalGallery.length}</strong></div>
+                <div className="summaryLine">Alertas: <strong>{operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length}</strong></div>
               </div>
               <div className="summaryBlock">
                 <div className="miniTitle">Registros de visitas</div>
@@ -1252,34 +1455,247 @@ export default function App() {
           </div>
         ) : null}
 
-        {role === "supervisor" ? (
+        {role === "supervisor" && supervisorModule === "resumen" ? (
           <div className="card">
-            <div className="sectionTitle">Supervisor</div>
+            <div className="sectionTitle">Resumen supervisor</div>
             <div className="summaryGrid">
-              <div className="summaryBlock">
-                <div className="miniTitle">Resumen operativo</div>
-                <div className="summaryLine">Promotores: <strong>{supervisorSummary.promotores}</strong></div>
-                <div className="summaryLine">Visitas hoy: <strong>{supervisorSummary.visitasHoy}</strong></div>
-                <div className="summaryLine">Abiertas: <strong>{supervisorSummary.abiertas}</strong></div>
-                <div className="summaryLine">Evidencias hoy: <strong>{supervisorSummary.evidenciasHoy}</strong></div>
-                <div className="summaryLine">Alertas: <strong>{supervisorSummary.alertas}</strong></div>
+              <div className="summaryBlock kpiBlock">
+                <Users size={16} />
+                <div className="kpiValue">{supervisorSummary.promotores}</div>
+                <div className="kpiLabel">Promotores</div>
               </div>
-              <div className="summaryBlock">
-                <div className="miniTitle">Accesos rápidos</div>
-                <div className="actionGrid actionGridButtons compactActionGrid">
-                  {supervisorCards.map((item) => {
-                    const Icon = item.Icon;
-                    return (
-                      <div className="actionCard actionCardCompact" key={item.key}>
-                        <div className="iconWrap grayWrap"><Icon size={16} /></div>
-                        <div>
-                          <div className="flowTitle">{item.title}</div>
-                          <div className="flowText">{item.text}</div>
-                        </div>
+              <div className="summaryBlock kpiBlock">
+                <ClipboardList size={16} />
+                <div className="kpiValue">{supervisorSummary.visitasHoy}</div>
+                <div className="kpiLabel">Visitas hoy</div>
+              </div>
+              <div className="summaryBlock kpiBlock">
+                <Store size={16} />
+                <div className="kpiValue">{supervisorSummary.abiertas}</div>
+                <div className="kpiLabel">Abiertas</div>
+              </div>
+              <div className="summaryBlock kpiBlock">
+                <ImageIcon size={16} />
+                <div className="kpiValue">{supervisorSummary.evidenciasHoy}</div>
+                <div className="kpiLabel">Evidencias</div>
+              </div>
+              <div className="summaryBlock kpiBlock">
+                <ShieldAlert size={16} />
+                <div className="kpiValue">{supervisorSummary.alertas}</div>
+                <div className="kpiLabel">Alertas</div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "supervisor" && supervisorModule === "equipo" ? (
+          <div className="card">
+            <div className="sectionTitle">Equipo</div>
+            <div className="twoCol">
+              <div className="panel">
+                <div className="miniTitle">Promotores</div>
+                <div className="stack compactStack">
+                  {supervisorTeam.map((item) => (
+                    <button key={item.promotor_id} onClick={() => setSelectedTeamPromotorId(item.promotor_id)} className={`listBtn ${selectedTeamPromotorId === item.promotor_id ? "listBtnGreen" : ""}`}>
+                      <div className="listTitle">{item.nombre}</div>
+                      <div className="listSub">Visitas: {item.visitas_hoy} · Abiertas: {item.visitas_abiertas} · Alertas: {item.alertas_abiertas}</div>
+                      <div className="geoRow">
+                        <span className={`riskBadge ${statusClass(item.status_general)}`}>{item.status_general}</span>
                       </div>
-                    );
-                  })}
+                    </button>
+                  ))}
+                  {!supervisorTeam.length ? <div className="emptyBox">No hay promotores ligados a este supervisor.</div> : null}
                 </div>
+              </div>
+              <div className="panel">
+                <div className="miniTitle">Detalle</div>
+                {selectedTeamMember ? (
+                  <>
+                    <div className="summaryLine"><strong>{selectedTeamMember.nombre}</strong></div>
+                    <div className="summaryLine">Región: {selectedTeamMember.region || "-"}</div>
+                    <div className="summaryLine">Visitas hoy: <strong>{selectedTeamMember.visitas_hoy}</strong></div>
+                    <div className="summaryLine">Abiertas: <strong>{selectedTeamMember.visitas_abiertas}</strong></div>
+                    <div className="summaryLine">Evidencias hoy: <strong>{selectedTeamMember.evidencias_hoy}</strong></div>
+                    <div className="summaryLine">Alertas abiertas: <strong>{selectedTeamMember.alertas_abiertas}</strong></div>
+                    <div className="summaryLine">Última tienda: {selectedTeamMember.ultima_tienda || "-"}</div>
+                    <div className="summaryLine">Última entrada: {formatHourFromIso(selectedTeamMember.ultima_entrada)}</div>
+                    <div className="summaryLine">Última salida: {selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</div>
+                    <div className="summaryLine">Estatus: <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span></div>
+                    <div className="actionGrid actionGridButtons">
+                      <button className="actionButton" onClick={() => setSupEvidencePromotorFilter(selectedTeamMember.promotor_id)}>
+                        <ImageIcon size={16} />
+                        <span>Ver evidencias</span>
+                      </button>
+                      <button className="actionButton" onClick={() => {
+                        if (selectedTeamMember.ultima_visita_id) void openVisitExpedient(selectedTeamMember.ultima_visita_id);
+                      }}>
+                        <Eye size={16} />
+                        <span>Expediente</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="emptyBox">Selecciona un promotor.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "supervisor" && supervisorModule === "alertas" ? (
+          <div className="card">
+            <div className="sectionTitle">Alertas</div>
+            <div className="filtersRow twoColsFilters">
+              <select className="inputLike" value={alertStatusFilter} onChange={(e) => setAlertStatusFilter(e.target.value)}>
+                <option value="">Todos los estatus</option>
+                <option value="ABIERTA">ABIERTA</option>
+                <option value="RESUELTA">RESUELTA</option>
+                <option value="DESCARTADA">DESCARTADA</option>
+              </select>
+              <select className="inputLike" value={alertSeverityFilter} onChange={(e) => setAlertSeverityFilter(e.target.value)}>
+                <option value="">Todas las severidades</option>
+                <option value="ALTA">ALTA</option>
+                <option value="MEDIA">MEDIA</option>
+                <option value="BAJA">BAJA</option>
+              </select>
+            </div>
+            <div className="twoCol">
+              <div className="panel">
+                <div className="miniTitle">Listado</div>
+                <div className="stack compactStack">
+                  {supervisorAlerts.map((item) => (
+                    <button key={item.alerta_id} onClick={() => setSelectedAlertId(item.alerta_id)} className={`listBtn ${selectedAlertId === item.alerta_id ? "listBtnGreen" : ""}`}>
+                      <div className="listTitle">{item.promotor_nombre || item.promotor_id}</div>
+                      <div className="listSub">{item.tienda_nombre || item.tienda_id || "Tienda"} · {item.tipo_alerta}</div>
+                      <div className="geoRow">
+                        <span className={`riskBadge ${severityClass(item.severidad)}`}>{item.severidad}</span>
+                        <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>
+                      </div>
+                    </button>
+                  ))}
+                  {!supervisorAlerts.length ? <div className="emptyBox">No hay alertas con esos filtros.</div> : null}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="miniTitle">Detalle</div>
+                {selectedAlert ? (
+                  <>
+                    <div className="summaryLine"><strong>{selectedAlert.promotor_nombre || selectedAlert.promotor_id}</strong></div>
+                    <div className="summaryLine">Tienda: {selectedAlert.tienda_nombre || selectedAlert.tienda_id || "-"}</div>
+                    <div className="summaryLine">Tipo: {selectedAlert.tipo_alerta}</div>
+                    <div className="summaryLine">Fecha: {selectedAlert.fecha_hora_fmt}</div>
+                    <div className="summaryLine">Canal: {selectedAlert.canal_notificacion || "-"}</div>
+                    <div className="summaryLine">Descripción: {selectedAlert.descripcion || "-"}</div>
+                    <div className="geoRow">
+                      <span className={`riskBadge ${severityClass(selectedAlert.severidad)}`}>{selectedAlert.severidad}</span>
+                      <span className={`riskBadge ${statusClass(selectedAlert.status)}`}>{selectedAlert.status}</span>
+                    </div>
+                    <label className="fieldLabel" style={{ marginTop: 10 }}>Comentario de cierre</label>
+                    <input className="inputLike" value={alertCloseNote} onChange={(e) => setAlertCloseNote(e.target.value)} placeholder="Validado con promotor / visita revisada" />
+                    <div className="actionGrid actionGridButtons">
+                      <button className="actionButton" onClick={() => void closeSelectedAlert()}>
+                        <Check size={16} />
+                        <span>Atender alerta</span>
+                      </button>
+                      <button className="actionButton" onClick={() => {
+                        if (selectedAlert.visita_id) void openVisitExpedient(selectedAlert.visita_id);
+                      }}>
+                        <Eye size={16} />
+                        <span>Ver visita</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="emptyBox">Selecciona una alerta.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "supervisor" && supervisorModule === "evidencias" ? (
+          <div className="card">
+            <div className="sectionTitle">Evidencias</div>
+            <div className="filtersRow">
+              <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => setSupEvidencePromotorFilter(e.target.value)}>
+                <option value="">Todos los promotores</option>
+                {supervisorPromotorOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.nombre}</option>)}
+              </select>
+              <select className="inputLike" value={supEvidenceStoreFilter} onChange={(e) => setSupEvidenceStoreFilter(e.target.value)}>
+                <option value="">Todas las tiendas</option>
+                {supervisorEvidenceFilterOptions.stores.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className="inputLike" value={supEvidenceBrandFilter} onChange={(e) => setSupEvidenceBrandFilter(e.target.value)}>
+                <option value="">Todas las marcas</option>
+                {supervisorEvidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className="inputLike" value={supEvidenceTypeFilter} onChange={(e) => setSupEvidenceTypeFilter(e.target.value)}>
+                <option value="">Todos los tipos</option>
+                {supervisorEvidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
+            <div className="filtersRow twoColsFilters" style={{ marginTop: 8 }}>
+              <select className="inputLike" value={supEvidenceRiskFilter} onChange={(e) => setSupEvidenceRiskFilter(e.target.value)}>
+                <option value="">Todos los riesgos</option>
+                {supervisorEvidenceFilterOptions.risks.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
+            <div className="twoCol">
+              <div className="panel">
+                <div className="miniTitle">Listado</div>
+                <div className="stack compactStack">
+                  {supervisorEvidences.map((item) => (
+                    <button key={item.evidencia_id} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)} className={`listBtn ${selectedSupEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
+                      <div className="listTitle">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                      <div className="listSub">{item.tienda_nombre || "Tienda"} · {item.tipo_evidencia}</div>
+                      <div className="geoRow">
+                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
+                        <span className={`riskBadge ${statusClass(item.status || item.decision_supervisor)}`}>{item.status || item.decision_supervisor || "RECIBIDA"}</span>
+                      </div>
+                    </button>
+                  ))}
+                  {!supervisorEvidences.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="miniTitle">Revisión</div>
+                {selectedSupervisorEvidence ? (
+                  <>
+                    <div className="previewFrame">
+                      <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" />
+                    </div>
+                    <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
+                    <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
+                    <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
+                    <div className="summaryLine">Riesgo: <span className={`riskBadge ${severityClass(selectedSupervisorEvidence.riesgo)}`}>{selectedSupervisorEvidence.riesgo}</span></div>
+                    <div className="summaryLine">Descripción: {cleanEvidenceDescription(selectedSupervisorEvidence.descripcion)}</div>
+                    <label className="fieldLabel" style={{ marginTop: 10 }}>Decisión</label>
+                    <select className="inputLike" value={reviewDecision} onChange={(e) => setReviewDecision(e.target.value as SupervisorDecision)}>
+                      <option value="APROBADA">APROBADA</option>
+                      <option value="OBSERVADA">OBSERVADA</option>
+                      <option value="RECHAZADA">RECHAZADA</option>
+                    </select>
+                    <label className="fieldLabel" style={{ marginTop: 10 }}>Motivo</label>
+                    <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario de revisión" />
+                    <div className="actionGrid actionGridButtons">
+                      <button className="actionButton" onClick={() => void reviewSelectedEvidence()}>
+                        <Check size={16} />
+                        <span>Guardar revisión</span>
+                      </button>
+                      <button className="actionButton" onClick={() => {
+                        if (selectedSupervisorEvidence.tienda_id && selectedSupervisorEvidence.promotor_id) {
+                          const teamRow = supervisorTeam.find((row) => row.promotor_id === selectedSupervisorEvidence.promotor_id);
+                          if (teamRow?.ultima_visita_id) void openVisitExpedient(teamRow.ultima_visita_id);
+                        }
+                      }}>
+                        <Eye size={16} />
+                        <span>Expediente</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="emptyBox">Selecciona una evidencia.</div>
+                )}
               </div>
             </div>
           </div>
@@ -1298,7 +1714,7 @@ export default function App() {
                     <div className="galleryBodyCompact">
                       <div className="galleryTop compactTop">
                         <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                        <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo}</span>
+                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
                       </div>
                       <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre, "Marca") })}</div>
                       <div className="galleryDate">{item.fecha_hora_fmt}</div>
@@ -1308,6 +1724,67 @@ export default function App() {
                 ))}
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {role === "supervisor" && expedient ? (
+          <div className="card">
+            <div className="sectionTitle">Expediente de visita</div>
+            {expedientLoading ? (
+              <div className="emptyBox">Cargando expediente...</div>
+            ) : (
+              <div className="twoCol">
+                <div className="panel">
+                  <div className="miniTitle">Visita</div>
+                  <div className="summaryLine"><strong>{expedient.visita?.promotor_nombre || "Promotor"}</strong></div>
+                  <div className="summaryLine">Tienda: {expedient.visita?.tienda_nombre || expedient.visita?.tienda_id || "-"}</div>
+                  <div className="summaryLine">Entrada: {formatHourFromIso(expedient.visita?.hora_inicio || "")}</div>
+                  <div className="summaryLine">Salida: {expedient.visita?.hora_fin ? formatHourFromIso(expedient.visita.hora_fin) : "Pendiente"}</div>
+                  <div className="geoRow">
+                    <span className={`geoBadge ${geofenceClass(expedient.visita?.resultado_geocerca_entrada)}`}>E: {geofenceShortLabel(expedient.visita?.resultado_geocerca_entrada)}</span>
+                    <span className={`geoBadge ${geofenceClass(expedient.visita?.resultado_geocerca_salida)}`}>S: {geofenceShortLabel(expedient.visita?.resultado_geocerca_salida)}</span>
+                  </div>
+                </div>
+                <div className="panel">
+                  <div className="miniTitle">Alertas ligadas</div>
+                  <div className="stack compactStack">
+                    {(expedient.alertas || []).map((item) => (
+                      <div className="listBtn" key={item.alerta_id}>
+                        <div className="listTitle">{item.tipo_alerta}</div>
+                        <div className="listSub">{item.descripcion}</div>
+                        <div className="geoRow">
+                          <span className={`riskBadge ${severityClass(item.severidad)}`}>{item.severidad}</span>
+                          <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {!(expedient.alertas || []).length ? <div className="emptyBox">Sin alertas ligadas.</div> : null}
+                  </div>
+                </div>
+                <div className="panel fullSpan">
+                  <div className="miniTitle">Evidencias de la visita</div>
+                  <div className="galleryGrid">
+                    {(expedient.evidencias || []).map((item) => (
+                      <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
+                        <div className="imageFrame imageFrameCompact">
+                          <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
+                        </div>
+                        <div className="galleryBodyCompact">
+                          <div className="galleryTop compactTop">
+                            <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                            <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
+                          </div>
+                          <div className="gallerySub compactMeta">{compactMetaLine(item)}</div>
+                          <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                          <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
+                        </div>
+                      </div>
+                    ))}
+                    {!(expedient.evidencias || []).length ? <div className="emptyBox">Sin evidencias ligadas.</div> : null}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -1321,11 +1798,14 @@ export default function App() {
                 try {
                   setSyncing(true);
                   if (role === "promotor") {
-                    await loadDashboard();
+                    await loadPromotorDashboard();
                     await loadEvidencesToday();
                   }
                   if (role === "supervisor") {
                     await loadSupervisorDashboard();
+                    await loadSupervisorTeam();
+                    await loadSupervisorAlerts();
+                    await loadSupervisorEvidences();
                   }
                   setStatusMsg("Información actualizada.");
                 } catch (err) {
@@ -1388,6 +1868,13 @@ input[type=file] { display: none; }
   align-items: center;
   min-width: 0;
 }
+.brandWord {
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: #43a047;
+}
 .heroTitleBlock {
   display: flex;
   flex-direction: column;
@@ -1400,18 +1887,6 @@ input[type=file] { display: none; }
   width: min(240px, 48%);
   min-width: 190px;
 }
-.brandPlate {
-  background: #ffffff;
-  border: 1px solid rgba(38,50,56,0.08);
-  border-radius: 12px;
-  padding: 5px 8px;
-  display: inline-flex;
-  align-items: center;
-  box-shadow: 0 4px 10px rgba(38,50,56,0.05);
-}
-.brandPlateHorizontal { min-height: 34px; }
-.brandPlateInline { padding: 4px 6px; }
-.brandLogoInline { width: 120px; height: auto; display: block; object-fit: contain; }
 .heroTitle {
   font-size: 14px;
   line-height: 1.05;
@@ -1481,7 +1956,7 @@ input[type=file] { display: none; }
 }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
-.compactStack { max-height: 260px; overflow: auto; }
+.compactStack { max-height: 320px; overflow: auto; }
 .listBtn {
   width: 100%;
   text-align: left;
@@ -1593,25 +2068,15 @@ input[type=file] { display: none; }
   gap: 12px;
 }
 .actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.compactActionGrid { margin-top: 0; }
-.actionCard {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  border-radius: 16px;
-  padding: 14px;
-  background: rgba(248,249,251,0.95);
-  border: 1px solid rgba(38,50,56,0.08);
-}
-.actionCardCompact { padding: 10px; }
-.flowTitle { font-weight: 800; color: #263238; }
-.flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
 .summaryBlock {
   border-radius: 16px;
   padding: 14px;
   background: rgba(248,249,251,0.95);
   border: 1px solid rgba(38,50,56,0.08);
 }
+.kpiBlock { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.kpiValue { font-size: 28px; font-weight: 900; color: #263238; }
+.kpiLabel { font-size: 12px; color: #607d8b; font-weight: 700; }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame {
@@ -1703,6 +2168,7 @@ input[type=file] { display: none; }
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
+.twoColsFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .statusBar {
   position: fixed;
   left: 50%;
@@ -1726,8 +2192,9 @@ input[type=file] { display: none; }
   justify-content: flex-end;
 }
 .footerBtn { width: auto; min-width: 160px; }
+.fullSpan { grid-column: 1 / -1; }
 @media (max-width: 900px) {
-  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow {
+  .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters {
     grid-template-columns: 1fr;
   }
 }
