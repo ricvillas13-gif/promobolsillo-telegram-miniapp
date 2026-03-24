@@ -63,6 +63,7 @@ type VisitItem = {
 
 type EvidenceItem = {
   evidencia_id: string;
+  visita_id?: string;
   tipo_evento: string;
   tipo_evidencia: string;
   marca_id?: string;
@@ -1495,7 +1496,18 @@ export default function App() {
                 <div className="miniTitle">Promotores</div>
                 <div className="stack compactStack">
                   {supervisorTeam.map((item) => (
-                    <button key={item.promotor_id} onClick={() => setSelectedTeamPromotorId(item.promotor_id)} className={`listBtn ${selectedTeamPromotorId === item.promotor_id ? "listBtnGreen" : ""}`}>
+                    <button
+                      key={item.promotor_id}
+                      onClick={() => {
+                        setSelectedTeamPromotorId(item.promotor_id);
+                        if (item.ultima_visita_id) {
+                          void openVisitExpedient(item.ultima_visita_id);
+                        } else {
+                          setExpedient(null);
+                        }
+                      }}
+                      className={`listBtn ${selectedTeamPromotorId === item.promotor_id ? "listBtnGreen" : ""}`}
+                    >
                       <div className="listTitle">{item.nombre}</div>
                       <div className="listSub">Visitas: {item.visitas_hoy} · Abiertas: {item.visitas_abiertas} · Alertas: {item.alertas_abiertas}</div>
                       <div className="geoRow">
@@ -1521,7 +1533,10 @@ export default function App() {
                     <div className="summaryLine">Última salida: {selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</div>
                     <div className="summaryLine">Estatus: <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span></div>
                     <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => setSupEvidencePromotorFilter(selectedTeamMember.promotor_id)}>
+                      <button className="actionButton" onClick={() => {
+                        setSupEvidencePromotorFilter(selectedTeamMember.promotor_id);
+                        setSupervisorModule("evidencias");
+                      }}>
                         <ImageIcon size={16} />
                         <span>Ver evidencias</span>
                       </button>
@@ -1633,6 +1648,7 @@ export default function App() {
                 {supervisorEvidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </div>
+            {!supervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas para poblar filtros. Las fotos de asistencia no aparecen en esta vista.</div> : null}
             <div className="filtersRow twoColsFilters" style={{ marginTop: 8 }}>
               <select className="inputLike" value={supEvidenceRiskFilter} onChange={(e) => setSupEvidenceRiskFilter(e.target.value)}>
                 <option value="">Todos los riesgos</option>
@@ -1682,9 +1698,8 @@ export default function App() {
                         <span>Guardar revisión</span>
                       </button>
                       <button className="actionButton" onClick={() => {
-                        if (selectedSupervisorEvidence.tienda_id && selectedSupervisorEvidence.promotor_id) {
-                          const teamRow = supervisorTeam.find((row) => row.promotor_id === selectedSupervisorEvidence.promotor_id);
-                          if (teamRow?.ultima_visita_id) void openVisitExpedient(teamRow.ultima_visita_id);
+                        if (selectedSupervisorEvidence.visita_id) {
+                          void openVisitExpedient(selectedSupervisorEvidence.visita_id);
                         }
                       }}>
                         <Eye size={16} />
