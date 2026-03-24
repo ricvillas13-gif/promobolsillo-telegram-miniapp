@@ -53,6 +53,9 @@ type VisitItem = {
   tienda_nombre: string;
   hora_inicio: string;
   hora_fin: string;
+  estado_visita?: string;
+  resultado_geocerca_entrada?: string;
+  resultado_geocerca_salida?: string;
 };
 
 type EvidenceItem = {
@@ -93,6 +96,12 @@ type StartEntryResponse = {
   tienda_nombre: string;
   started_at: string;
   warning?: string;
+  geofence?: {
+    result?: string;
+    distance_m?: number | string;
+    accuracy_m?: number | string;
+    radius_m?: number | string;
+  };
 };
 
 type CloseVisitResponse = {
@@ -100,6 +109,12 @@ type CloseVisitResponse = {
   visita_id: string;
   closed_at: string;
   warning?: string;
+  geofence?: {
+    result?: string;
+    distance_m?: number | string;
+    accuracy_m?: number | string;
+    radius_m?: number | string;
+  };
 };
 
 type EvidenceRegisterResponse = {
@@ -151,7 +166,7 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260323c";
+const ASSET_VERSION = "20260323d";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
 
 function getTelegramWebApp() {
@@ -180,7 +195,9 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
       signal: controller.signal,
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((json as { error?: string }).error || `Error ${res.status}`);
+    if (!res.ok) {
+      throw new Error((json as { error?: string }).error || `Error ${res.status}`);
+    }
     return json as T;
   } finally {
     clearTimeout(timeout);
@@ -241,6 +258,27 @@ function compactMetaLine(item: EvidenceItem) {
     item.fase ? `Fase: ${item.fase}` : "",
   ].filter(Boolean);
   return parts.join(" · ");
+}
+
+function cleanEvidenceDescription(value: string) {
+  return (value || "").replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
+function geofenceShortLabel(value?: string) {
+  const v = (value || "").trim().toUpperCase();
+  if (!v) return "Sin dato";
+  if (v === "OK_EN_GEOCERCA") return "En geocerca";
+  if (v === "OK_CON_TOLERANCIA_GPS") return "Con tolerancia";
+  if (v === "FUERA_DE_GEOCERCA") return "Fuera";
+  return v;
+}
+
+function geofenceClass(value?: string) {
+  const v = (value || "").trim().toUpperCase();
+  if (v === "FUERA_DE_GEOCERCA") return "geoRed";
+  if (v === "OK_CON_TOLERANCIA_GPS") return "geoAmber";
+  if (v === "OK_EN_GEOCERCA") return "geoGreen";
+  return "geoNeutral";
 }
 
 function fileToDataUrl(file: File) {
@@ -406,7 +444,10 @@ export default function App() {
   }, [statusMsg]);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
-  const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
+  const exitVisit = useMemo(
+    () => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null,
+    [openVisits, selectedVisitId]
+  );
   const hasOpenVisit = Boolean(exitVisit);
 
   const attendanceGallery = useMemo(() => allEvidenceRows.filter((item) => !isOperationalEvidence(item)), [allEvidenceRows]);
@@ -722,7 +763,7 @@ export default function App() {
         marca_nombre: evidenceBrandLabel,
         tipo_evidencia: evidenceType,
         fase: evidencePhase,
-        descripcion: `${selectedVisitStoreName ? `[${selectedVisitStoreName}] ` : ""}${evidenceDescription}`.trim(),
+        descripcion: evidenceDescription.trim(),
         fotos: evidencePhotos.map((photo) => ({
           name: photo.name,
           dataUrl: photo.dataUrl,
@@ -962,11 +1003,17 @@ export default function App() {
                     return (
                       <button
                         key={visit.visita_id}
-                        onClick={() => { if (isOpen) setSelectedVisitId(visit.visita_id); }}
+                        onClick={() => {
+                          if (isOpen) setSelectedVisitId(visit.visita_id);
+                        }}
                         className={`listBtn ${isOpen && selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}
                       >
                         <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
                         <div className="listSub">Entrada: {formatHourFromIso(visit.hora_inicio)} · {isOpen ? "Salida pendiente" : `Salida: ${formatHourFromIso(visit.hora_fin)}`}</div>
+                        <div className="geoRow">
+                          <span className={`geoBadge ${geofenceClass(visit.resultado_geocerca_entrada)}`}>E: {geofenceShortLabel(visit.resultado_geocerca_entrada)}</span>
+                          {!isOpen ? <span className={`geoBadge ${geofenceClass(visit.resultado_geocerca_salida)}`}>S: {geofenceShortLabel(visit.resultado_geocerca_salida)}</span> : null}
+                        </div>
                       </button>
                     );
                   })}
@@ -1176,9 +1223,10 @@ export default function App() {
                 <div className="miniTitle">Registros de visitas</div>
                 {visits.length ? (
                   visits.map((visit) => (
-                    <div className="summaryLine" key={visit.visita_id}>
-                      {getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}
-                    </div>
+                    <React.Fragment key={visit.visita_id}>
+                      <div className="summaryLine">{getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}</div>
+                      <div className="summaryLine summaryGeo">E: {geofenceShortLabel(visit.resultado_geocerca_entrada)}{visit.hora_fin ? ` · S: ${geofenceShortLabel(visit.resultado_geocerca_salida)}` : ""}</div>
+                    </React.Fragment>
                   ))
                 ) : (
                   <div className="summaryLine">No hay registros del día.</div>
@@ -1214,17 +1262,19 @@ export default function App() {
             <div className="galleryScroll">
               <div className="galleryGrid">
                 {filteredOperationalGallery.slice(0, 30).map((item) => (
-                  <div className="galleryCard" key={item.evidencia_id}>
-                    <div className="imageFrame">
+                  <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
+                    <div className="imageFrame imageFrameCompact">
                       <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
                     </div>
-                    <div className="galleryTop">
-                      <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                      <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo}</span>
+                    <div className="galleryBodyCompact">
+                      <div className="galleryTop compactTop">
+                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                        <span className={`riskBadge ${item.riesgo === "ALTO" ? "riskRed" : item.riesgo === "MEDIO" ? "riskAmber" : "riskGreen"}`}>{item.riesgo}</span>
+                      </div>
+                      <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre, "Marca") })}</div>
+                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                      <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
                     </div>
-                    <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre, "Marca") })}</div>
-                    <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                    <div className="galleryDesc">{item.descripcion}</div>
                   </div>
                 ))}
               </div>
@@ -1418,6 +1468,22 @@ input[type=file] { display: none; }
 .listBtnGreen { border-color: rgba(76,175,80,.45); background: rgba(232,245,233,0.95); }
 .listTitle { font-weight: 800; }
 .listSub { margin-top: 4px; color: #607d8b; font-size: 12px; }
+.geoRow {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.geoBadge {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+.geoGreen { background: rgba(76,175,80,.14); color: #2e7d32; }
+.geoAmber { background: rgba(245,158,11,.14); color: #ed6c02; }
+.geoRed { background: rgba(239,68,68,.14); color: #d32f2f; }
+.geoNeutral { background: rgba(96,125,139,.12); color: #546e7a; }
 .panel {
   border-radius: 16px;
   border: 1px solid rgba(38,50,56,0.08);
@@ -1518,6 +1584,7 @@ input[type=file] { display: none; }
   border: 1px solid rgba(38,50,56,0.08);
 }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
+.summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame {
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -1554,11 +1621,23 @@ input[type=file] { display: none; }
   background: rgba(255,255,255,0.96);
   padding: 12px;
 }
+.galleryCardCompact {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.galleryBodyCompact { min-width: 0; }
 .imageFrame {
   aspect-ratio: 4 / 3;
   overflow: hidden;
   border-radius: 14px;
   background: #dfe5e8;
+}
+.imageFrameCompact {
+  width: 72px;
+  height: 72px;
+  aspect-ratio: auto;
 }
 .img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .galleryTop {
@@ -1568,11 +1647,18 @@ input[type=file] { display: none; }
   gap: 8px;
   align-items: center;
 }
-.galleryTitle { font-weight: 800; color: #263238; }
+.compactTop { margin-top: 0; }
+.galleryTitle { font-weight: 800; color: #263238; font-size: 13px; }
 .gallerySub { margin-top: 4px; color: #607d8b; font-size: 13px; }
 .compactMeta { line-height: 1.2; }
 .galleryDate { margin-top: 4px; color: #78909c; font-size: 12px; }
 .galleryDesc { margin-top: 8px; color: #455a64; font-size: 13px; line-height: 1.45; }
+.compactDesc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .riskBadge {
   border-radius: 999px;
   padding: 6px 10px;
@@ -1614,6 +1700,9 @@ input[type=file] { display: none; }
 @media (max-width: 900px) {
   .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow {
     grid-template-columns: 1fr;
+  }
+  .galleryCardCompact {
+    grid-template-columns: 72px 1fr;
   }
 }
 @media (max-width: 760px) {
