@@ -32,13 +32,24 @@ type Role = "promotor" | "supervisor" | "cliente";
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
-type LogoMode = "primary" | "secondary" | "text";
 type CaptureKind = "entrada" | "salida";
 
 type BootstrapResponse = {
   ok: boolean;
   role: Role;
   profile?: { nombre?: string };
+};
+
+type SupervisorDashboardResponse = {
+  ok: boolean;
+  supervisor?: { nombre?: string };
+  summary?: {
+    promotores?: number;
+    visitasHoy?: number;
+    abiertas?: number;
+    evidenciasHoy?: number;
+    alertas?: number;
+  };
 };
 
 type StoreItem = {
@@ -96,12 +107,6 @@ type StartEntryResponse = {
   tienda_nombre: string;
   started_at: string;
   warning?: string;
-  geofence?: {
-    result?: string;
-    distance_m?: number | string;
-    accuracy_m?: number | string;
-    radius_m?: number | string;
-  };
 };
 
 type CloseVisitResponse = {
@@ -109,12 +114,6 @@ type CloseVisitResponse = {
   visita_id: string;
   closed_at: string;
   warning?: string;
-  geofence?: {
-    result?: string;
-    distance_m?: number | string;
-    accuracy_m?: number | string;
-    radius_m?: number | string;
-  };
 };
 
 type EvidenceRegisterResponse = {
@@ -166,7 +165,6 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const ASSET_VERSION = "20260323d";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
 
 function getTelegramWebApp() {
@@ -178,10 +176,18 @@ function getInitData() {
   return getTelegramWebApp()?.initData || "";
 }
 
-function getLogoUrl(mode: Exclude<LogoMode, "text">) {
-  const file = mode === "primary" ? "rezgo-horizontal.jpeg" : "rezgo-square.jpeg";
-  if (typeof window === "undefined") return `/${file}?v=${ASSET_VERSION}`;
-  return `${window.location.origin}/${file}?v=${ASSET_VERSION}`;
+function getInlineLogoSvg() {
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="220" height="64" viewBox="0 0 220 64" fill="none">
+    <rect x="2" y="8" width="48" height="48" rx="14" fill="#43A047"/>
+    <path d="M18 24h13c7 0 11 3.8 11 9.5S38 43 31 43H26v7h-8V24Zm8 6v7h5c2.2 0 3.5-1.2 3.5-3.5S33.2 30 31 30h-5Z" fill="white"/>
+    <path d="M62 23h18.5c8 0 12.7 4 12.7 10.2 0 4.4-2.5 7.7-6.8 9.1L95 50H84.8l-7.4-6.7h-5.1V50H62V23Zm10.3 6.8v7.2h7.4c2.3 0 3.8-1.4 3.8-3.6 0-2.1-1.5-3.6-3.8-3.6h-7.4Z" fill="#263238"/>
+    <path d="M101 23h36v7.6h-25.7v3.2h23.9v7.1h-23.9v3.5H137V50h-36V23Z" fill="#263238"/>
+    <path d="M144 23h10.8l7.9 15.1L170.6 23h10.8l-15.1 27H159L144 23Z" fill="#263238"/>
+    <path d="M185 23h10.3V50H185V23Z" fill="#263238"/>
+    <path d="M200 23h18v7.6h-7.1V50h-10.3V30.6H200V23Z" fill="#263238"/>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
@@ -393,7 +399,6 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
-  const [logoMode, setLogoMode] = useState<LogoMode>("primary");
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -401,6 +406,13 @@ export default function App() {
   const [selectedVisitId, setSelectedVisitId] = useState("");
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
+  const [supervisorSummary, setSupervisorSummary] = useState({
+    promotores: 0,
+    visitasHoy: 0,
+    abiertas: 0,
+    evidenciasHoy: 0,
+    alertas: 0,
+  });
 
   const [entryLocation, setEntryLocation] = useState<LocationCapture | null>(null);
   const [exitLocation, setExitLocation] = useState<LocationCapture | null>(null);
@@ -503,6 +515,19 @@ export default function App() {
     if (data.profile?.nombre) setActorLabel(data.profile.nombre);
   }
 
+  async function loadSupervisorDashboard() {
+    if (role !== "supervisor") return;
+    const data = await postJson<SupervisorDashboardResponse>("/miniapp/supervisor/dashboard", {});
+    if (data.supervisor?.nombre) setActorLabel(data.supervisor.nombre);
+    setSupervisorSummary({
+      promotores: data.summary?.promotores || 0,
+      visitasHoy: data.summary?.visitasHoy || 0,
+      abiertas: data.summary?.abiertas || 0,
+      evidenciasHoy: data.summary?.evidenciasHoy || 0,
+      alertas: data.summary?.alertas || 0,
+    });
+  }
+
   async function loadDashboard() {
     if (role !== "promotor") return;
     const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
@@ -581,8 +606,6 @@ export default function App() {
       setLoading(true);
       setError("");
       await loadBootstrap();
-      await loadDashboard();
-      await loadEvidencesToday();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar la operación.");
     } finally {
@@ -595,20 +618,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (role === "promotor") {
+      void loadDashboard();
+      void loadEvidencesToday();
+    }
+    if (role === "supervisor") {
+      void loadSupervisorDashboard();
+    }
+  }, [role]);
+
+  useEffect(() => {
     if (role === "promotor") void loadEvidenceContext(selectedVisitId);
   }, [selectedVisitId, role]);
 
   useEffect(() => {
     if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel);
   }, [evidenceBrandId, evidenceBrandLabel, role]);
-
-  function handleLogoError() {
-    setLogoMode((prev) => {
-      if (prev === "primary") return "secondary";
-      if (prev === "secondary") return "text";
-      return prev;
-    });
-  }
 
   async function captureLocation(kind: CaptureKind) {
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
@@ -876,21 +901,12 @@ export default function App() {
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
             <div className="heroLogoBlock">
-              {logoMode !== "text" ? (
-                <div className="brandPlate brandPlateHorizontal">
-                  <img
-                    src={getLogoUrl(logoMode)}
-                    alt="REZGO"
-                    className={logoMode === "primary" ? "brandLogoHorizontal" : "brandLogoSquare"}
-                    onError={handleLogoError}
-                  />
-                </div>
-              ) : (
-                <div className="brandWord">REZGO</div>
-              )}
+              <div className="brandPlate brandPlateHorizontal brandPlateInline">
+                <img src={getInlineLogoSvg()} alt="REZGO" className="brandLogoInline" />
+              </div>
             </div>
             <div className="heroTitleBlock heroTitleBlockWide">
-              <div className="heroTitle heroTitleTight">Operación<br />del promotor</div>
+              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : <>Operación<br />del promotor</>}</div>
               <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
             </div>
           </motion.div>
@@ -1239,19 +1255,32 @@ export default function App() {
         {role === "supervisor" ? (
           <div className="card">
             <div className="sectionTitle">Supervisor</div>
-            <div className="actionGrid">
-              {supervisorCards.map((item) => {
-                const Icon = item.Icon;
-                return (
-                  <div className="actionCard" key={item.key}>
-                    <div className="iconWrap grayWrap"><Icon size={16} /></div>
-                    <div>
-                      <div className="flowTitle">{item.title}</div>
-                      <div className="flowText">{item.text}</div>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="summaryGrid">
+              <div className="summaryBlock">
+                <div className="miniTitle">Resumen operativo</div>
+                <div className="summaryLine">Promotores: <strong>{supervisorSummary.promotores}</strong></div>
+                <div className="summaryLine">Visitas hoy: <strong>{supervisorSummary.visitasHoy}</strong></div>
+                <div className="summaryLine">Abiertas: <strong>{supervisorSummary.abiertas}</strong></div>
+                <div className="summaryLine">Evidencias hoy: <strong>{supervisorSummary.evidenciasHoy}</strong></div>
+                <div className="summaryLine">Alertas: <strong>{supervisorSummary.alertas}</strong></div>
+              </div>
+              <div className="summaryBlock">
+                <div className="miniTitle">Accesos rápidos</div>
+                <div className="actionGrid actionGridButtons compactActionGrid">
+                  {supervisorCards.map((item) => {
+                    const Icon = item.Icon;
+                    return (
+                      <div className="actionCard actionCardCompact" key={item.key}>
+                        <div className="iconWrap grayWrap"><Icon size={16} /></div>
+                        <div>
+                          <div className="flowTitle">{item.title}</div>
+                          <div className="flowText">{item.text}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         ) : null}
@@ -1291,8 +1320,13 @@ export default function App() {
               void (async () => {
                 try {
                   setSyncing(true);
-                  await loadDashboard();
-                  await loadEvidencesToday();
+                  if (role === "promotor") {
+                    await loadDashboard();
+                    await loadEvidencesToday();
+                  }
+                  if (role === "supervisor") {
+                    await loadSupervisorDashboard();
+                  }
                   setStatusMsg("Información actualizada.");
                 } catch (err) {
                   setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
@@ -1301,7 +1335,7 @@ export default function App() {
                 }
               })();
             }}
-            disabled={syncing || !!error || role !== "promotor"}
+            disabled={syncing || !!error}
           >
             <RefreshCw size={16} />
             {syncing ? "Sincronizando..." : "Recargar"}
@@ -1376,15 +1410,8 @@ input[type=file] { display: none; }
   box-shadow: 0 4px 10px rgba(38,50,56,0.05);
 }
 .brandPlateHorizontal { min-height: 34px; }
-.brandLogoHorizontal { width: 108px; height: auto; display: block; object-fit: contain; }
-.brandLogoSquare { width: 26px; height: 26px; display: block; object-fit: contain; }
-.brandWord {
-  font-size: 20px;
-  line-height: 1;
-  font-weight: 900;
-  letter-spacing: 0.02em;
-  color: #43a047;
-}
+.brandPlateInline { padding: 4px 6px; }
+.brandLogoInline { width: 120px; height: auto; display: block; object-fit: contain; }
 .heroTitle {
   font-size: 14px;
   line-height: 1.05;
@@ -1566,6 +1593,7 @@ input[type=file] { display: none; }
   gap: 12px;
 }
 .actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compactActionGrid { margin-top: 0; }
 .actionCard {
   display: flex;
   gap: 10px;
@@ -1575,6 +1603,7 @@ input[type=file] { display: none; }
   background: rgba(248,249,251,0.95);
   border: 1px solid rgba(38,50,56,0.08);
 }
+.actionCardCompact { padding: 10px; }
 .flowTitle { font-weight: 800; color: #263238; }
 .flowText { margin-top: 4px; color: #607d8b; font-size: 13px; line-height: 1.45; }
 .summaryBlock {
@@ -1700,9 +1729,6 @@ input[type=file] { display: none; }
 @media (max-width: 900px) {
   .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow {
     grid-template-columns: 1fr;
-  }
-  .galleryCardCompact {
-    grid-template-columns: 72px 1fr;
   }
 }
 @media (max-width: 760px) {
