@@ -529,9 +529,11 @@ export default function App() {
   const [selectedAlertId, setSelectedAlertId] = useState("");
   const [alertStatusFilter, setAlertStatusFilter] = useState("");
   const [alertSeverityFilter, setAlertSeverityFilter] = useState("");
+  const [alertPromotorFilter, setAlertPromotorFilter] = useState("");
   const [alertFinalStatus, setAlertFinalStatus] = useState<AlertFinalStatus>("RESUELTA");
   const [supervisorEvidences, setSupervisorEvidences] = useState<EvidenceItem[]>([]);
   const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
+  const [selectedSupEvidenceIds, setSelectedSupEvidenceIds] = useState<string[]>([]);
   const [supEvidencePromotorFilter, setSupEvidencePromotorFilter] = useState("");
   const [supEvidenceStoreFilter, setSupEvidenceStoreFilter] = useState("");
   const [supEvidenceBrandFilter, setSupEvidenceBrandFilter] = useState("");
@@ -695,7 +697,7 @@ export default function App() {
   }
 
   async function loadSupervisorAlerts() {
-    const data = await postJson<SupervisorAlertsResponse>("/miniapp/supervisor/alerts", { status: alertStatusFilter, severidad: alertSeverityFilter });
+    const data = await postJson<SupervisorAlertsResponse>("/miniapp/supervisor/alerts", { status: alertStatusFilter, severidad: alertSeverityFilter, promotor_id: alertPromotorFilter });
     const rows = data.alerts || [];
     setSupervisorAlerts(rows);
     if (rows.length && !rows.find((row) => row.alerta_id === selectedAlertId)) setSelectedAlertId(rows[0].alerta_id);
@@ -761,7 +763,7 @@ export default function App() {
 
   useEffect(() => { if (role === "promotor") void loadEvidenceContext(selectedVisitId); }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
-  useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter]);
+  useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => {
@@ -781,9 +783,15 @@ export default function App() {
     const hasVisibleEvidenceForPromotor = supervisorEvidences.some((item) => item.promotor_id === supEvidencePromotorFilter);
     if (!hasVisibleEvidenceForPromotor) {
       setSelectedSupEvidenceId("");
+      setSelectedSupEvidenceIds([]);
       setExpedient(null);
     }
   }, [supEvidencePromotorFilter, supervisorEvidences, role]);
+
+  useEffect(() => {
+    if (role !== "supervisor") return;
+    setSelectedSupEvidenceIds((prev) => prev.filter((id) => supervisorEvidences.some((item) => item.evidencia_id === id)));
+  }, [supervisorEvidences, role]);
 
   async function captureLocation(kind: CaptureKind) {
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
@@ -1016,6 +1024,47 @@ export default function App() {
       setStatusMsg(`Evidencia ${reviewDecision.toLowerCase()}.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo revisar la evidencia.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  function toggleSupervisorEvidenceSelection(evidenceId: string) {
+    setSelectedSupEvidenceId(evidenceId);
+    setSelectedSupEvidenceIds((prev) => prev.includes(evidenceId) ? prev.filter((id) => id !== evidenceId) : [...prev, evidenceId]);
+  }
+
+  function selectAllVisibleSupervisorEvidences() {
+    const ids = supervisorEvidences.map((item) => item.evidencia_id);
+    setSelectedSupEvidenceIds(ids);
+    if (ids[0]) setSelectedSupEvidenceId(ids[0]);
+  }
+
+  async function runBatchEvidenceReview(decision: SupervisorDecision) {
+    try {
+      if (!selectedSupEvidenceIds.length) return setStatusMsg("Selecciona al menos una evidencia.");
+      if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !reviewNote.trim()) {
+        return setStatusMsg("Agrega un comentario para la revisión masiva.");
+      }
+      setSyncing(true);
+      await Promise.all(
+        selectedSupEvidenceIds.map((evidenciaId) =>
+          postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
+            evidencia_id: evidenciaId,
+            decision_supervisor: decision,
+            motivo_revision: reviewNote.trim(),
+            requiere_revision_supervisor: decision !== "APROBADA",
+          })
+        )
+      );
+      const total = selectedSupEvidenceIds.length;
+      setSelectedSupEvidenceIds([]);
+      setReviewNote("");
+      await loadSupervisorDashboard();
+      await loadSupervisorEvidences();
+      setStatusMsg(`${total} evidencia(s) ${decision.toLowerCase()}s.`);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión masiva.");
     } finally {
       setSyncing(false);
     }
@@ -1405,6 +1454,7 @@ export default function App() {
                     <div className="summaryLine">Estatus: <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span></div>
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => { setSupEvidencePromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("evidencias"); }}><ImageIcon size={16} /><span>Ver evidencias</span></button>
+                      <button className="actionButton" onClick={() => { setAlertPromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("alertas"); }}><ShieldAlert size={16} /><span>Ver alertas</span></button>
                       <button className="actionButton" onClick={() => { if (selectedTeamMember.ultima_visita_id) void openVisitExpedient(selectedTeamMember.ultima_visita_id); }}><Eye size={16} /><span>Expediente</span></button>
                     </div>
                   </>
@@ -1419,7 +1469,11 @@ export default function App() {
         {role === "supervisor" && supervisorModule === "alertas" ? (
           <div className="card">
             <div className="sectionTitle">Alertas</div>
-            <div className="filtersRow twoColsFilters">
+            <div className="filtersRow">
+              <select className="inputLike" value={alertPromotorFilter} onChange={(e) => setAlertPromotorFilter(e.target.value)}>
+                <option value="">Todos los promotores</option>
+                {supervisorPromotorOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.nombre}</option>)}
+              </select>
               <select className="inputLike" value={alertStatusFilter} onChange={(e) => setAlertStatusFilter(e.target.value)}>
                 <option value="">Todos los estatus</option>
                 <option value="ABIERTA">ABIERTA</option>
@@ -1524,14 +1578,19 @@ export default function App() {
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Listado</div>
+                <div className="actionGrid actionGridButtons" style={{ marginTop: 0, marginBottom: 10 }}>
+                  <button className="actionButton" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={16} /><span>Seleccionar visibles</span></button>
+                  <button className="actionButton" onClick={() => setSelectedSupEvidenceIds([])}><Trash2 size={16} /><span>Limpiar selección</span></button>
+                </div>
                 <div className="stack compactStack">
                   {supervisorEvidences.map((item) => (
-                    <button key={item.evidencia_id} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)} className={`listBtn ${selectedSupEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
+                    <button key={item.evidencia_id} onClick={() => toggleSupervisorEvidenceSelection(item.evidencia_id)} className={`listBtn ${selectedSupEvidenceIds.includes(item.evidencia_id) ? "listBtnGreen" : ""}`}>
                       <div className="listTitle">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
                       <div className="listSub">{item.tienda_nombre || "Tienda"} · {item.tipo_evidencia}</div>
                       <div className="geoRow">
                         <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
                         <span className={`riskBadge ${statusClass(item.status || item.decision_supervisor)}`}>{item.status || item.decision_supervisor || "RECIBIDA"}</span>
+                        <span className={`riskBadge ${selectedSupEvidenceIds.includes(item.evidencia_id) ? "riskGreen" : "riskAmber"}`}>{selectedSupEvidenceIds.includes(item.evidencia_id) ? "Seleccionada" : "Tocar para seleccionar"}</span>
                       </div>
                     </button>
                   ))}
@@ -1540,6 +1599,19 @@ export default function App() {
               </div>
               <div className="panel">
                 <div className="miniTitle">Revisión</div>
+                {selectedSupEvidenceIds.length > 0 ? (
+                  <div className="traceBox">
+                    <div className="traceTitle">Revisión masiva</div>
+                    <div className="summaryLine">Seleccionadas: <strong>{selectedSupEvidenceIds.length}</strong></div>
+                    <label className="fieldLabel" style={{ marginTop: 10 }}>Comentario del lote</label>
+                    <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
+                    <div className="actionGrid actionGridButtons">
+                      <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
+                      <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Observar lote</span></button>
+                      <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
+                    </div>
+                  </div>
+                ) : null}
                 {selectedSupervisorEvidence ? (
                   <>
                     <div className="previewFrame"><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
