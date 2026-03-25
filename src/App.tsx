@@ -1568,58 +1568,85 @@ export default function App() {
                 {supervisorEvidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </div>
-            {!supervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas para poblar filtros. En la lista y filtros de esta vista solo se consideran evidencias operativas; las fotos de asistencia pueden aparecer dentro del expediente de la visita.</div> : null}
             <div className="filtersRow twoColsFilters" style={{ marginTop: 8 }}>
               <select className="inputLike" value={supEvidenceRiskFilter} onChange={(e) => setSupEvidenceRiskFilter(e.target.value)}>
                 <option value="">Todos los riesgos</option>
                 {supervisorEvidenceFilterOptions.risks.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </div>
-            <div className="twoCol">
-              <div className="panel">
-                <div className="miniTitle">Listado</div>
-                <div className="actionGrid actionGridButtons" style={{ marginTop: 0, marginBottom: 10 }}>
-                  <button className="actionButton" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={16} /><span>Seleccionar visibles</span></button>
-                  <button className="actionButton" onClick={() => setSelectedSupEvidenceIds([])}><Trash2 size={16} /><span>Limpiar selección</span></button>
-                </div>
-                <div className="stack compactStack">
-                  {supervisorEvidences.map((item) => (
-                    <button key={item.evidencia_id} onClick={() => toggleSupervisorEvidenceSelection(item.evidencia_id)} className={`listBtn ${selectedSupEvidenceIds.includes(item.evidencia_id) ? "listBtnGreen" : ""}`}>
-                      <div className="listTitle">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
-                      <div className="listSub">{item.tienda_nombre || "Tienda"} · {item.tipo_evidencia}</div>
-                      <div className="geoRow">
-                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
-                        <span className={`riskBadge ${statusClass(item.status || item.decision_supervisor)}`}>{item.status || item.decision_supervisor || "RECIBIDA"}</span>
-                        <span className={`riskBadge ${selectedSupEvidenceIds.includes(item.evidencia_id) ? "riskGreen" : "riskAmber"}`}>{selectedSupEvidenceIds.includes(item.evidencia_id) ? "Seleccionada" : "Tocar para seleccionar"}</span>
-                      </div>
-                    </button>
-                  ))}
-                  {!supervisorEvidences.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
+
+            {!supervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas para poblar filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
+
+            <div className="selectionToolbar">
+              <div className="selectionToolbarLeft">
+                <strong>{selectedSupEvidenceIds.length}</strong>
+                <span>seleccionada(s)</span>
+              </div>
+              <div className="selectionToolbarActions">
+                <button className="actionButton" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={16} /><span>Seleccionar visibles</span></button>
+                <button className="actionButton" onClick={() => setSelectedSupEvidenceIds([])}><Trash2 size={16} /><span>Limpiar</span></button>
+              </div>
+            </div>
+
+            {selectedSupEvidenceIds.length > 0 ? (
+              <div className="traceBox" style={{ marginTop: 10 }}>
+                <div className="traceTitle">Revisión masiva</div>
+                <label className="fieldLabel" style={{ marginTop: 8 }}>Comentario del lote</label>
+                <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
+                <div className="actionGrid actionGridButtons">
+                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
+                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Observar lote</span></button>
+                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
                 </div>
               </div>
-              <div className="panel">
-                <div className="miniTitle">Revisión</div>
-                {selectedSupEvidenceIds.length > 0 ? (
-                  <div className="traceBox">
-                    <div className="traceTitle">Revisión masiva</div>
-                    <div className="summaryLine">Seleccionadas: <strong>{selectedSupEvidenceIds.length}</strong></div>
-                    <label className="fieldLabel" style={{ marginTop: 10 }}>Comentario del lote</label>
-                    <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
-                    <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
-                      <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Observar lote</span></button>
-                      <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
+            ) : null}
+
+            <div className="galleryReviewGrid">
+              {supervisorEvidences.map((item) => {
+                const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
+                return (
+                  <div
+                    key={item.evidencia_id}
+                    className={`galleryReviewCard ${isSelected ? "galleryReviewCardSelected" : ""}`}
+                    onClick={() => toggleSupervisorEvidenceSelection(item.evidencia_id)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="galleryReviewMedia">
+                      <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
+                      <div className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`}>{isSelected ? "✓" : "○"}</div>
+                    </div>
+                    <div className="galleryReviewBody">
+                      <div className="galleryTop compactTop">
+                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
+                      </div>
+                      <div className="gallerySub compactMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                      <div className="gallerySub compactMeta">{compactMetaLine(item)}</div>
+                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                      <div className="geoRow">
+                        <span className={`riskBadge ${statusClass(item.status || item.decision_supervisor)}`}>{item.status || item.decision_supervisor || "RECIBIDA"}</span>
+                        {item.decision_supervisor ? <span className="riskBadge riskGreen">Rev: {item.decision_supervisor}</span> : null}
+                      </div>
                     </div>
                   </div>
-                ) : null}
-                {selectedSupervisorEvidence ? (
-                  <>
+                );
+              })}
+            </div>
+
+            {selectedSupervisorEvidence ? (
+              <div className="card detailSubcard">
+                <div className="sectionTitle">Detalle de evidencia</div>
+                <div className="twoCol">
+                  <div className="panel">
                     <div className="previewFrame"><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
                     <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
                     <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
                     <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
-                    <div className="summaryLine">Riesgo: <span className={`riskBadge ${severityClass(selectedSupervisorEvidence.riesgo)}`}>{selectedSupervisorEvidence.riesgo}</span></div>
                     <div className="summaryLine">Descripción: {cleanEvidenceDescription(selectedSupervisorEvidence.descripcion)}</div>
+                  </div>
+                  <div className="panel">
+                    <div className="miniTitle">Revisión individual</div>
                     <div className="summaryLine">Estatus actual: <span className={`riskBadge ${statusClass(selectedSupervisorEvidence.status || selectedSupervisorEvidence.decision_supervisor)}`}>{selectedSupervisorEvidence.status || selectedSupervisorEvidence.decision_supervisor || "RECIBIDA"}</span></div>
                     {(selectedSupervisorEvidence.decision_supervisor || selectedSupervisorEvidence.revisado_por || selectedSupervisorEvidence.fecha_revision || selectedSupervisorEvidence.motivo_revision) ? (
                       <div className="traceBox">
@@ -1642,12 +1669,10 @@ export default function App() {
                       <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar revisión</span></button>
                       <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
                     </div>
-                  </>
-                ) : (
-                  <div className="emptyBox">{supEvidencePromotorFilter ? "Este promotor no tiene evidencias operativas con los filtros actuales." : "Selecciona una evidencia."}</div>
-                )}
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -1898,7 +1923,19 @@ input[type=file] { display: none; }
 .footerBtn { width: auto; min-width: 160px; }
 .fullSpan { grid-column: 1 / -1; }
 .traceBox { margin-top: 10px; border-radius: 12px; padding: 10px 12px; background: rgba(96,125,139,0.08); border: 1px solid rgba(38,50,56,0.08); }
+.selectionToolbar { margin-top: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+.selectionToolbarLeft { display: inline-flex; gap: 6px; align-items: center; color: #455a64; }
+.selectionToolbarActions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.galleryReviewGrid { margin-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.galleryReviewCard { border-radius: 18px; border: 2px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); overflow: hidden; cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+.galleryReviewCard:hover { transform: translateY(-1px); box-shadow: 0 10px 18px rgba(38,50,56,0.10); }
+.galleryReviewCardSelected { border-color: rgba(76,175,80,.65); box-shadow: 0 12px 20px rgba(76,175,80,.12); }
+.galleryReviewMedia { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #dfe5e8; }
+.galleryReviewBody { padding: 10px 12px 12px; }
+.selectionPill { position: absolute; right: 10px; top: 10px; width: 28px; height: 28px; border-radius: 999px; background: rgba(255,255,255,0.92); color: #546e7a; display: grid; place-items: center; font-weight: 900; border: 1px solid rgba(38,50,56,0.14); }
+.selectionPillActive { background: #4caf50; color: white; border-color: rgba(76,175,80,.65); }
+.detailSubcard { margin-top: 16px; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
-@media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .galleryReviewGrid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } }
 `;
