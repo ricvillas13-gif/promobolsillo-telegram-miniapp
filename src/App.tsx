@@ -15,7 +15,6 @@ import {
   Check,
   ClipboardList,
   Store,
-  MessageSquare,
 } from "lucide-react";
 
 declare global {
