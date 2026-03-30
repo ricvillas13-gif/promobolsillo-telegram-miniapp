@@ -34,6 +34,7 @@ declare global {
 type Role = "promotor" | "supervisor" | "cliente";
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
+type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "entregables";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 type CaptureKind = "entrada" | "salida";
 type SupervisorDecision = "APROBADA" | "OBSERVADA" | "RECHAZADA";
@@ -221,6 +222,74 @@ type SupervisorAlert = {
 type SupervisorAlertsResponse = {
   ok: boolean;
   alerts?: SupervisorAlert[];
+};
+
+type ClientFilterOption = { id: string; label: string };
+
+type ClientBootstrapResponse = {
+  ok: boolean;
+  data?: {
+    role: "cliente";
+    cliente?: {
+      cliente_id: string;
+      cliente_nombre: string;
+      logo_url?: string;
+      color_primario?: string;
+    };
+    access?: {
+      nombre_contacto?: string;
+      rol_cliente?: string;
+    };
+  };
+};
+
+type ClientDashboardData = {
+  period?: { fecha_inicio: string; fecha_fin: string; label: string };
+  cliente?: { cliente_id: string; cliente_nombre: string; logo_url?: string; color_primario?: string };
+  kpis?: {
+    tiendas_visibles: number;
+    tiendas_visitadas: number;
+    visitas: number;
+    cumplimiento_pct: number;
+    evidencias: number;
+    aprobadas: number;
+    observadas: number;
+    rechazadas: number;
+    alertas: number;
+    geocerca_ok_pct: number;
+  };
+  top_alerts?: Array<{ tipo_alerta: string; total: number }>;
+};
+
+type ClientStoreRow = {
+  tienda_id: string;
+  tienda_nombre: string;
+  cadena: string;
+  region: string;
+  ciudad: string;
+  visitas: number;
+  ultima_visita: string;
+  ultima_visita_fmt: string;
+  evidencias: number;
+  aprobadas: number;
+  observadas: number;
+  alertas: number;
+  estatus: string;
+};
+
+type ClientStoreDetail = {
+  store?: { tienda_id: string; nombre_tienda: string; cadena?: string; region?: string; ciudad?: string; direccion?: string };
+  summary?: { visitas: number; evidencias: number; aprobadas: number; observadas: number; alertas: number };
+  visits?: VisitItem[];
+  evidences?: EvidenceItem[];
+  alerts?: SupervisorAlert[];
+};
+
+type ClientEnvelope<T> = {
+  ok: boolean;
+  data?: T;
+  meta?: { page?: number; page_size?: number; total_rows?: number; total_pages?: number };
+  error?: string | null;
 };
 
 type SupervisorAlertCloseResponse = {
@@ -479,6 +548,14 @@ const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
   { key: "resumen", label: "Resumen" },
 ];
 
+const clientTabs: Array<{ key: ClientModule; label: string }> = [
+  { key: "resumen", label: "Resumen" },
+  { key: "tiendas", label: "Tiendas" },
+  { key: "evidencias", label: "Evidencias" },
+  { key: "incidencias", label: "Incidencias" },
+  { key: "entregables", label: "Entregables" },
+];
+
 export default function App() {
   const tg = getTelegramWebApp();
 
@@ -544,6 +621,43 @@ export default function App() {
   const [alertCloseNote, setAlertCloseNote] = useState("");
   const [expedient, setExpedient] = useState<VisitExpedientResponse | null>(null);
   const [expedientLoading, setExpedientLoading] = useState(false);
+
+  const [clientModule, setClientModule] = useState<ClientModule>("resumen");
+  const [clientBranding, setClientBranding] = useState<{ cliente_nombre?: string; logo_url?: string; color_primario?: string }>({});
+  const [clientFilterOptions, setClientFilterOptions] = useState<{
+    cadenas: ClientFilterOption[];
+    regiones: ClientFilterOption[];
+    tiendas: ClientFilterOption[];
+    marcas: ClientFilterOption[];
+    tipos_evidencia: ClientFilterOption[];
+    riesgos: ClientFilterOption[];
+    decisiones: ClientFilterOption[];
+    severidades: ClientFilterOption[];
+    estatus_alerta: ClientFilterOption[];
+  }>({ cadenas: [], regiones: [], tiendas: [], marcas: [], tipos_evidencia: [], riesgos: [], decisiones: [], severidades: [], estatus_alerta: [] });
+  const [clientFilters, setClientFilters] = useState({
+    fecha_inicio: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`,
+    fecha_fin: new Date().toISOString().slice(0, 10),
+    cadena: "",
+    region: "",
+    tienda_id: "",
+    marca_id: "",
+    tipo_evidencia: "",
+    fase: "",
+    decision_supervisor: "",
+    riesgo: "",
+    tipo_alerta: "",
+    severidad: "",
+    status: "",
+  });
+  const [clientDashboard, setClientDashboard] = useState<ClientDashboardData>({});
+  const [clientStores, setClientStores] = useState<ClientStoreRow[]>([]);
+  const [selectedClientStoreId, setSelectedClientStoreId] = useState("");
+  const [clientStoreDetail, setClientStoreDetail] = useState<ClientStoreDetail | null>(null);
+  const [clientEvidences, setClientEvidences] = useState<EvidenceItem[]>([]);
+  const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
+  const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
+
 
   useEffect(() => {
     if (tg) {
@@ -734,6 +848,70 @@ export default function App() {
     }
   }
 
+  async function loadClientBootstrap() {
+    const data = await postJson<ClientEnvelope<ClientBootstrapResponse["data"]>>("/miniapp/cliente/bootstrap", {});
+    const payload = data.data;
+    if (!payload) return;
+    if (payload.cliente) setClientBranding(payload.cliente);
+    if (payload.access?.nombre_contacto) setActorLabel(payload.access.nombre_contacto);
+  }
+
+  async function loadClientFilterOptions() {
+    const data = await postJson<ClientEnvelope<any>>("/miniapp/cliente/filter-options", clientFilters);
+    setClientFilterOptions({
+      cadenas: data.data?.cadenas || [],
+      regiones: data.data?.regiones || [],
+      tiendas: data.data?.tiendas || [],
+      marcas: data.data?.marcas || [],
+      tipos_evidencia: data.data?.tipos_evidencia || [],
+      riesgos: data.data?.riesgos || [],
+      decisiones: data.data?.decisiones || [],
+      severidades: data.data?.severidades || [],
+      estatus_alerta: data.data?.estatus_alerta || [],
+    });
+  }
+
+  async function loadClientDashboard() {
+    const data = await postJson<ClientEnvelope<ClientDashboardData>>("/miniapp/cliente/dashboard", { filters: clientFilters });
+    setClientDashboard(data.data || {});
+    if (data.data?.cliente) setClientBranding(data.data.cliente);
+  }
+
+  async function loadClientStores() {
+    const data = await postJson<ClientEnvelope<{ rows: ClientStoreRow[] }>>("/miniapp/cliente/stores", { filters: clientFilters, pagination: { page: 1, page_size: 100 } });
+    const rows = data.data?.rows || [];
+    setClientStores(rows);
+    if (rows.length && !rows.some((row) => row.tienda_id === selectedClientStoreId)) setSelectedClientStoreId(rows[0].tienda_id);
+    if (!rows.length) {
+      setSelectedClientStoreId("");
+      setClientStoreDetail(null);
+    }
+  }
+
+  async function loadClientStoreDetail(storeId: string) {
+    if (!storeId) {
+      setClientStoreDetail(null);
+      return;
+    }
+    const data = await postJson<ClientEnvelope<ClientStoreDetail>>("/miniapp/cliente/store-detail", { tienda_id: storeId, filters: clientFilters });
+    setClientStoreDetail(data.data || null);
+  }
+
+  async function loadClientEvidences() {
+    const data = await postJson<ClientEnvelope<{ rows: EvidenceItem[] }>>("/miniapp/cliente/evidences", { filters: clientFilters, pagination: { page: 1, page_size: 80 } });
+    setClientEvidences(data.data?.rows || []);
+  }
+
+  async function loadClientIncidents() {
+    const data = await postJson<ClientEnvelope<{ rows: SupervisorAlert[] }>>("/miniapp/cliente/incidents", { filters: clientFilters, pagination: { page: 1, page_size: 80 } });
+    setClientIncidents(data.data?.rows || []);
+  }
+
+  async function loadClientDeliverables() {
+    const data = await postJson<ClientEnvelope<{ enabled: boolean; message: string }>>("/miniapp/cliente/deliverables", { filters: clientFilters });
+    setClientDeliverablesMessage(data.data?.message || "Entregables no disponibles por ahora.");
+  }
+
   async function initialize() {
     try {
       setLoading(true);
@@ -758,6 +936,15 @@ export default function App() {
       void loadSupervisorTeam();
       void loadSupervisorAlerts();
       void loadSupervisorEvidences();
+    }
+    if (role === "cliente") {
+      void loadClientBootstrap();
+      void loadClientFilterOptions();
+      void loadClientDashboard();
+      void loadClientStores();
+      void loadClientEvidences();
+      void loadClientIncidents();
+      void loadClientDeliverables();
     }
   }, [role]);
 
@@ -792,6 +979,25 @@ export default function App() {
     if (role !== "supervisor") return;
     setSelectedSupEvidenceIds((prev) => prev.filter((id) => supervisorEvidences.some((item) => item.evidencia_id === id)));
   }, [supervisorEvidences, role]);
+
+  useEffect(() => {
+    if (role !== "cliente") return;
+    void loadClientFilterOptions();
+    void loadClientDashboard();
+    void loadClientStores();
+    void loadClientEvidences();
+    void loadClientIncidents();
+    void loadClientDeliverables();
+  }, [role, clientFilters]);
+
+  useEffect(() => {
+    if (role !== "cliente") return;
+    if (!selectedClientStoreId) {
+      setClientStoreDetail(null);
+      return;
+    }
+    void loadClientStoreDetail(selectedClientStoreId);
+  }, [role, selectedClientStoreId]);
 
   async function captureLocation(kind: CaptureKind) {
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
@@ -1096,7 +1302,7 @@ export default function App() {
               <div className="brandWord">REZGO</div>
             </div>
             <div className="heroTitleBlock heroTitleBlockWide">
-              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : <>Operación<br />del promotor</>}</div>
+              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : role === "cliente" ? <>Consulta<br />cliente</> : <>Operación<br />del promotor</>}</div>
               <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
             </div>
           </motion.div>
@@ -1105,6 +1311,14 @@ export default function App() {
             <div className="tabsBar tabsInline">
               {supervisorTabs.map((tab) => (
                 <button key={tab.key} className={`tabBtn ${supervisorModule === tab.key ? "tabBtnActive" : ""}`} onClick={() => setSupervisorModule(tab.key)}>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          ) : role === "cliente" ? (
+            <div className="tabsBar tabsInline">
+              {clientTabs.map((tab) => (
+                <button key={tab.key} className={`tabBtn ${clientModule === tab.key ? "tabBtnActive" : ""}`} onClick={() => setClientModule(tab.key)}>
                   {tab.label}
                 </button>
               ))}
@@ -1125,6 +1339,187 @@ export default function App() {
             <div className="warningRow">
               <AlertTriangle size={18} />
               <span>{error}</span>
+            </div>
+          </div>
+        ) : null}
+
+
+        {role === "cliente" ? (
+          <div className="card">
+            <div className="sectionTitle">Filtros del cliente</div>
+            <div className="filtersRow twoColsFilters">
+              <input className="inputLike" type="date" value={clientFilters.fecha_inicio} onChange={(e) => setClientFilters((prev) => ({ ...prev, fecha_inicio: e.target.value }))} />
+              <input className="inputLike" type="date" value={clientFilters.fecha_fin} onChange={(e) => setClientFilters((prev) => ({ ...prev, fecha_fin: e.target.value }))} />
+              <select className="inputLike" value={clientFilters.cadena} onChange={(e) => setClientFilters((prev) => ({ ...prev, cadena: e.target.value, tienda_id: "" }))}>
+                <option value="">Todas las cadenas</option>
+                {clientFilterOptions.cadenas.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+              <select className="inputLike" value={clientFilters.region} onChange={(e) => setClientFilters((prev) => ({ ...prev, region: e.target.value, tienda_id: "" }))}>
+                <option value="">Todas las regiones</option>
+                {clientFilterOptions.regiones.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+              <select className="inputLike" value={clientFilters.tienda_id} onChange={(e) => setClientFilters((prev) => ({ ...prev, tienda_id: e.target.value }))}>
+                <option value="">Todas las tiendas</option>
+                {clientFilterOptions.tiendas.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+              <select className="inputLike" value={clientFilters.marca_id} onChange={(e) => setClientFilters((prev) => ({ ...prev, marca_id: e.target.value }))}>
+                <option value="">Todas las marcas</option>
+                {clientFilterOptions.marcas.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "cliente" && clientModule === "resumen" ? (
+          <div className="card">
+            <div className="sectionTitle">Resumen cliente</div>
+            <div className="summaryLine">Periodo: <strong>{clientDashboard.period?.label || `${clientFilters.fecha_inicio} a ${clientFilters.fecha_fin}`}</strong></div>
+            <div className="summaryGrid">
+              <div className="summaryBlock kpiBlock"><Store size={16} /><div className="kpiValue">{clientDashboard.kpis?.tiendas_visibles || 0}</div><div className="kpiLabel">Tiendas visibles</div></div>
+              <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{clientDashboard.kpis?.visitas || 0}</div><div className="kpiLabel">Visitas</div></div>
+              <div className="summaryBlock kpiBlock"><CheckCircle2 size={16} /><div className="kpiValue">{clientDashboard.kpis?.cumplimiento_pct || 0}%</div><div className="kpiLabel">Cumplimiento</div></div>
+              <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{clientDashboard.kpis?.evidencias || 0}</div><div className="kpiLabel">Evidencias</div></div>
+              <div className="summaryBlock kpiBlock"><Check size={16} /><div className="kpiValue">{clientDashboard.kpis?.aprobadas || 0}</div><div className="kpiLabel">Aprobadas</div></div>
+              <div className="summaryBlock kpiBlock"><AlertTriangle size={16} /><div className="kpiValue">{clientDashboard.kpis?.alertas || 0}</div><div className="kpiLabel">Alertas</div></div>
+            </div>
+            <div className="twoCol">
+              <div className="panel">
+                <div className="miniTitle">Marcas / cuenta</div>
+                <div className="summaryLine"><strong>{clientBranding.cliente_nombre || actorLabel}</strong></div>
+                <div className="summaryLine">Geocerca OK: <strong>{clientDashboard.kpis?.geocerca_ok_pct || 0}%</strong></div>
+                <div className="summaryLine">Observadas: <strong>{clientDashboard.kpis?.observadas || 0}</strong></div>
+                <div className="summaryLine">Rechazadas: <strong>{clientDashboard.kpis?.rechazadas || 0}</strong></div>
+              </div>
+              <div className="panel">
+                <div className="miniTitle">Top incidencias</div>
+                <div className="stack compactStack">
+                  {(clientDashboard.top_alerts || []).map((item) => (
+                    <div className="listBtn" key={item.tipo_alerta}>
+                      <div className="listTitle">{item.tipo_alerta}</div>
+                      <div className="listSub">{item.total} registro(s)</div>
+                    </div>
+                  ))}
+                  {!(clientDashboard.top_alerts || []).length ? <div className="emptyBox">Sin incidencias relevantes en el periodo.</div> : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "cliente" && clientModule === "tiendas" ? (
+          <div className="card">
+            <div className="sectionTitle">Tiendas</div>
+            <div className="twoCol">
+              <div className="panel">
+                <div className="miniTitle">Listado</div>
+                <div className="stack compactStack">
+                  {clientStores.map((item) => (
+                    <button key={item.tienda_id} className={`listBtn ${selectedClientStoreId === item.tienda_id ? "listBtnGreen" : ""}`} onClick={() => setSelectedClientStoreId(item.tienda_id)}>
+                      <div className="listTitle">{item.tienda_nombre}</div>
+                      <div className="listSub">{item.cadena || "Sin cadena"} · {item.region || "Sin región"}</div>
+                      <div className="geoRow">
+                        <span className={`riskBadge ${statusClass(item.estatus)}`}>{item.estatus}</span>
+                        <span className="riskBadge riskGreen">Visitas {item.visitas}</span>
+                      </div>
+                    </button>
+                  ))}
+                  {!clientStores.length ? <div className="emptyBox">No hay tiendas con actividad para los filtros seleccionados.</div> : null}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="miniTitle">Detalle</div>
+                {clientStoreDetail?.store ? (
+                  <>
+                    <div className="summaryLine"><strong>{clientStoreDetail.store.nombre_tienda || clientStoreDetail.store.tienda_id}</strong></div>
+                    <div className="summaryLine">Cadena: {clientStoreDetail.store.cadena || "-"}</div>
+                    <div className="summaryLine">Región: {clientStoreDetail.store.region || "-"}</div>
+                    <div className="summaryLine">Ciudad: {clientStoreDetail.store.ciudad || "-"}</div>
+                    <div className="summaryLine">Visitas: <strong>{clientStoreDetail.summary?.visitas || 0}</strong></div>
+                    <div className="summaryLine">Evidencias: <strong>{clientStoreDetail.summary?.evidencias || 0}</strong></div>
+                    <div className="summaryLine">Aprobadas: <strong>{clientStoreDetail.summary?.aprobadas || 0}</strong></div>
+                    <div className="summaryLine">Observadas: <strong>{clientStoreDetail.summary?.observadas || 0}</strong></div>
+                    <div className="summaryLine">Alertas: <strong>{clientStoreDetail.summary?.alertas || 0}</strong></div>
+                  </>
+                ) : <div className="emptyBox">Selecciona una tienda.</div>}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "cliente" && clientModule === "evidencias" ? (
+          <div className="card">
+            <div className="sectionTitle">Evidencias presentables</div>
+            <div className="filtersRow twoColsFilters">
+              <select className="inputLike" value={clientFilters.tipo_evidencia} onChange={(e) => setClientFilters((prev) => ({ ...prev, tipo_evidencia: e.target.value }))}>
+                <option value="">Todos los tipos</option>
+                {clientFilterOptions.tipos_evidencia.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+              <select className="inputLike" value={clientFilters.decision_supervisor} onChange={(e) => setClientFilters((prev) => ({ ...prev, decision_supervisor: e.target.value }))}>
+                <option value="">Aprobadas + observadas</option>
+                {clientFilterOptions.decisiones.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+              <select className="inputLike" value={clientFilters.riesgo} onChange={(e) => setClientFilters((prev) => ({ ...prev, riesgo: e.target.value }))}>
+                <option value="">Todos los riesgos</option>
+                {clientFilterOptions.riesgos.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div className="galleryScroll compactGalleryScroll">
+              <div className="galleryGrid">
+                {clientEvidences.map((item) => (
+                  <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
+                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" /></div>
+                    <div className="galleryBodyCompact">
+                      <div className="galleryTop compactTop">
+                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
+                      </div>
+                      <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre || "", "Marca") })}</div>
+                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
+                      <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
+                    </div>
+                  </div>
+                ))}
+                {!clientEvidences.length ? <div className="emptyBox">No hay evidencias para mostrar.</div> : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {role === "cliente" && clientModule === "incidencias" ? (
+          <div className="card">
+            <div className="sectionTitle">Incidencias</div>
+            <div className="filtersRow twoColsFilters">
+              <select className="inputLike" value={clientFilters.severidad} onChange={(e) => setClientFilters((prev) => ({ ...prev, severidad: e.target.value }))}>
+                <option value="">Todas las severidades</option>
+                {clientFilterOptions.severidades.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+              <select className="inputLike" value={clientFilters.status} onChange={(e) => setClientFilters((prev) => ({ ...prev, status: e.target.value }))}>
+                <option value="">Todos los estatus</option>
+                {clientFilterOptions.estatus_alerta.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div className="stack compactStack" style={{ marginTop: 12 }}>
+              {clientIncidents.map((item) => (
+                <div className="listBtn" key={item.alerta_id}>
+                  <div className="listTitle">{item.tienda_nombre || item.tienda_id || "Tienda"}</div>
+                  <div className="listSub">{item.tipo_alerta} · {item.fecha_hora_fmt}</div>
+                  <div className="summaryLine">{item.descripcion}</div>
+                  <div className="geoRow">
+                    <span className={`riskBadge ${severityClass(item.severidad)}`}>{item.severidad}</span>
+                    <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>
+                  </div>
+                </div>
+              ))}
+              {!clientIncidents.length ? <div className="emptyBox">Sin incidencias para los filtros seleccionados.</div> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {role === "cliente" && clientModule === "entregables" ? (
+          <div className="card">
+            <div className="sectionTitle">Entregables</div>
+            <div className="panel">
+              <div className="summaryLine">{clientDeliverablesMessage || "Los entregables automáticos estarán disponibles en la siguiente fase."}</div>
             </div>
           </div>
         ) : null}
@@ -1794,6 +2189,16 @@ export default function App() {
                   await loadSupervisorTeam();
                   await loadSupervisorAlerts();
                   await loadSupervisorEvidences();
+                }
+                if (role === "cliente") {
+                  await loadClientBootstrap();
+                  await loadClientFilterOptions();
+                  await loadClientDashboard();
+                  await loadClientStores();
+                  await loadClientEvidences();
+                  await loadClientIncidents();
+                  await loadClientDeliverables();
+                  if (selectedClientStoreId) await loadClientStoreDetail(selectedClientStoreId);
                 }
                 setStatusMsg("Información actualizada.");
               } catch (err) {
