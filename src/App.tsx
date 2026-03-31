@@ -92,6 +92,12 @@ type UiEvidence = EvidenceItem & {
   status?: "ACTIVA" | "ANULADA" | string;
 };
 
+type PromotorUsageSummary = {
+  today?: { bytes: number; mb: number; gb: number; fotos: number };
+  month?: { bytes: number; mb: number; gb: number; fotos: number };
+  reference?: { budget_mxn: number; reference_pct: number; estimated_mxn: number; note: string };
+};
+
 type DashboardResponse = {
   ok: boolean;
   promotor?: { nombre?: string };
@@ -104,6 +110,7 @@ type DashboardResponse = {
     closedVisits?: number;
     evidenciasHoy?: number;
   };
+  usage?: PromotorUsageSummary;
 };
 
 type EvidencesTodayResponse = {
@@ -591,6 +598,7 @@ export default function App() {
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
   const [allEvidenceRows, setAllEvidenceRows] = useState<UiEvidence[]>([]);
+  const [promotorUsage, setPromotorUsage] = useState<PromotorUsageSummary>({});
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [evidenceFilterStore, setEvidenceFilterStore] = useState("");
@@ -732,6 +740,7 @@ export default function App() {
     const dashboard = await postJson<DashboardResponse>("/miniapp/promotor/dashboard", {});
     if (dashboard.promotor?.nombre) setActorLabel(dashboard.promotor.nombre);
     setStores(dashboard.stores || []);
+    setPromotorUsage(dashboard.usage || {});
     const nextVisits = dashboard.visitsToday || [];
     const nextOpenVisits = nextVisits.filter((visit) => !visit.hora_fin);
     setVisits(nextVisits);
@@ -1778,6 +1787,15 @@ export default function App() {
                 <div className="summaryLine">Visitas abiertas: <strong>{openVisits.length}</strong></div>
                 <div className="summaryLine">Evidencias hoy: <strong>{operationalGallery.length}</strong></div>
                 <div className="summaryLine">Alertas: <strong>{operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length}</strong></div>
+              </div>
+              <div className="summaryBlock">
+                <div className="miniTitle">Consumo estimado</div>
+                <div className="summaryLine">Fotos hoy: <strong>{promotorUsage.today?.fotos || 0}</strong></div>
+                <div className="summaryLine">MB hoy: <strong>{promotorUsage.today?.mb?.toFixed ? promotorUsage.today.mb.toFixed(2) : (promotorUsage.today?.mb || 0)}</strong></div>
+                <div className="summaryLine">MB mes: <strong>{promotorUsage.month?.mb?.toFixed ? promotorUsage.month.mb.toFixed(2) : (promotorUsage.month?.mb || 0)}</strong></div>
+                <div className="summaryLine">GB mes: <strong>{promotorUsage.month?.gb?.toFixed ? promotorUsage.month.gb.toFixed(3) : (promotorUsage.month?.gb || 0)}</strong></div>
+                <div className="summaryLine">Referencia bolsa $200: <strong>{promotorUsage.reference?.reference_pct || 0}% · ~$ {promotorUsage.reference?.estimated_mxn || 0}</strong></div>
+                <div className="summaryLine summaryGeo">{promotorUsage.reference?.note || "Estimado de uso de la mini app. No es saldo real del operador."}</div>
               </div>
               <div className="summaryBlock">
                 <div className="miniTitle">Registros de visitas</div>
