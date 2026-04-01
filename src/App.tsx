@@ -1356,7 +1356,7 @@ export default function App() {
           <div className="card warning">
             <div className="warningRow">
               <AlertTriangle size={18} />
-              <span>{error}</span>
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{error}</span>
             </div>
           </div>
         ) : null}
