@@ -572,6 +572,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
+  const [detectedExternalId, setDetectedExternalId] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
 
   const [stores, setStores] = useState<StoreItem[]>([]);
@@ -728,11 +729,13 @@ export default function App() {
   async function loadBootstrap() {
     const initData = getInitData();
     if (!initData) {
+      setDetectedExternalId("");
       setError("Vista local de referencia. Abre la Mini App desde Telegram para usar la operación en línea.");
       setLoading(false);
       return;
     }
     const data = await postJson<BootstrapResponse>("/miniapp/bootstrap", {});
+    setDetectedExternalId("");
     if (data.role) setRole(data.role);
     if (data.profile?.nombre) setActorLabel(data.profile.nombre);
   }
@@ -926,10 +929,14 @@ export default function App() {
     try {
       setLoading(true);
       setError("");
+      setDetectedExternalId("");
       await loadBootstrap();
     } catch (err) {
       setRole(null);
-      setError(err instanceof Error ? err.message : "No se pudo cargar la operación.");
+      const nextError = err instanceof Error ? err.message : "No se pudo cargar la operación.";
+      setError(nextError);
+      const match = String(nextError).match(/external_id detectado:\s*([^\s.]+)/i);
+      setDetectedExternalId(match?.[1] || "");
     } finally {
       setLoading(false);
     }
@@ -1360,6 +1367,12 @@ export default function App() {
             <div className="helperText">
               Esta cuenta no fue reconocida con un rol válido en la plataforma. Si este acceso debe entrar como cliente, promotor o supervisor, valida el external_id correspondiente y vuelve a abrir la mini app desde Telegram.
             </div>
+            {detectedExternalId ? (
+              <div className="miniKpi" style={{ marginTop: 12 }}>
+                <div className="miniKpiLabel">external_id detectado</div>
+                <div className="miniKpiValue" style={{ fontSize: 14, wordBreak: "break-all" }}>{detectedExternalId}</div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
