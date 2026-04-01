@@ -32,6 +32,7 @@ declare global {
 }
 
 type Role = "promotor" | "supervisor" | "cliente";
+type AppRole = Role | null;
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "entregables";
@@ -566,7 +567,7 @@ const clientTabs: Array<{ key: ClientModule; label: string }> = [
 export default function App() {
   const tg = getTelegramWebApp();
 
-  const [role, setRole] = useState<Role>("promotor");
+  const [role, setRole] = useState<AppRole>(null);
   const [actorLabel, setActorLabel] = useState("Operador");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -927,6 +928,7 @@ export default function App() {
       setError("");
       await loadBootstrap();
     } catch (err) {
+      setRole(null);
       setError(err instanceof Error ? err.message : "No se pudo cargar la operación.");
     } finally {
       setLoading(false);
@@ -1311,7 +1313,7 @@ export default function App() {
               <div className="brandWord">REZGO</div>
             </div>
             <div className="heroTitleBlock heroTitleBlockWide">
-              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : role === "cliente" ? <>Consulta<br />cliente</> : <>Operación<br />del promotor</>}</div>
+              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : role === "cliente" ? <>Consulta<br />cliente</> : role === "promotor" ? <>Operación<br />del promotor</> : <>Acceso<br />no configurado</>}</div>
               <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
             </div>
           </motion.div>
@@ -1332,7 +1334,7 @@ export default function App() {
                 </button>
               ))}
             </div>
-          ) : (
+          ) : role === "promotor" ? (
             <div className="tabsBar tabsInline">
               {promotorTabs.map((tab) => (
                 <button key={tab.key} className={`tabBtn ${promotorModule === tab.key ? "tabBtnActive" : ""}`} onClick={() => setPromotorModule(tab.key)}>
@@ -1340,7 +1342,7 @@ export default function App() {
                 </button>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
 
         {error ? (
@@ -1352,6 +1354,14 @@ export default function App() {
           </div>
         ) : null}
 
+        {!role ? (
+          <div className="card">
+            <div className="sectionTitle">Acceso pendiente de configuración</div>
+            <div className="helperText">
+              Esta cuenta no fue reconocida con un rol válido en la plataforma. Si este acceso debe entrar como cliente, promotor o supervisor, valida el external_id correspondiente y vuelve a abrir la mini app desde Telegram.
+            </div>
+          </div>
+        ) : null}
 
         {role === "cliente" ? (
           <div className="card">
