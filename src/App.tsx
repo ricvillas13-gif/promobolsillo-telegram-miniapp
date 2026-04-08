@@ -87,6 +87,11 @@ type EvidenceItem = {
   motivo_revision?: string;
   revisado_por?: string;
   fecha_revision?: string;
+  resultado_ai?: string;
+  hallazgos_ai?: string;
+  reglas_disparadas?: string;
+  score_confianza?: string;
+  analizado_at?: string;
 };
 
 type UiEvidence = EvidenceItem & {
@@ -340,6 +345,8 @@ type PhotoCapture = {
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
+const MAX_EVIDENCE_FILES_PER_PICK = 12;
+const MAX_EVIDENCE_FILES_TOTAL = 24;
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -427,6 +434,19 @@ function compactMetaLine(item: EvidenceItem) {
 
 function cleanEvidenceDescription(value: string) {
   return (value || "").replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
+function splitRules(value?: string) {
+  return (value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function confidenceLabel(value?: string) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${Math.round(n * 100)}%`;
 }
 
 function geofenceShortLabel(value?: string) {
@@ -631,6 +651,8 @@ export default function App() {
   const [alertCloseNote, setAlertCloseNote] = useState("");
   const [expedient, setExpedient] = useState<VisitExpedientResponse | null>(null);
   const [expedientLoading, setExpedientLoading] = useState(false);
+  const [viewerImageUrl, setViewerImageUrl] = useState("");
+  const [viewerImageTitle, setViewerImageTitle] = useState("");
 
   const [clientModule, setClientModule] = useState<ClientModule>("resumen");
   const [clientBranding, setClientBranding] = useState<{ cliente_nombre?: string; logo_url?: string; color_primario?: string }>({});
@@ -1057,14 +1079,29 @@ export default function App() {
     }
   }
 
+  function clearEvidenceSelection() {
+    setEvidencePhotos([]);
+  }
+
+  function removeEvidencePhoto(index: number) {
+    setEvidencePhotos((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
   async function captureEvidencePhotos(fileList: FileList | null) {
-    const files = Array.from(fileList || []).slice(0, 10);
+    const remaining = Math.max(0, MAX_EVIDENCE_FILES_TOTAL - evidencePhotos.length);
+    if (!remaining) {
+      setStatusMsg(`Ya alcanzaste el máximo de ${MAX_EVIDENCE_FILES_TOTAL} fotos en esta evidencia.`);
+      return;
+    }
+    const selected = Array.from(fileList || []);
+    const files = selected.slice(0, Math.min(MAX_EVIDENCE_FILES_PER_PICK, remaining));
     if (!files.length) return;
     try {
       setCapturingPhoto("entrada");
       const processed = await Promise.all(files.map(async (file) => ({ name: file.name, dataUrl: await readPhotoForSheets(file), capturedAt: nowMxString() })));
-      setEvidencePhotos((prev) => [...prev, ...processed].slice(0, 12));
-      setStatusMsg(`${processed.length} foto(s) agregadas.`);
+      setEvidencePhotos((prev) => [...prev, ...processed].slice(0, MAX_EVIDENCE_FILES_TOTAL));
+      const extraSelected = Math.max(0, selected.length - files.length);
+      setStatusMsg(extraSelected ? `${processed.length} foto(s) agregadas. ${extraSelected} quedaron fuera por límite.` : `${processed.length} foto(s) agregadas.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudieron procesar las fotos.");
     } finally {
@@ -1139,7 +1176,7 @@ export default function App() {
       if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
       setSyncing(true);
-      const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", {
+      const result = await postJson<EvidenceRegisterResponse & { postprocess_warning?: string; analysis_status?: string }>("/miniapp/promotor/evidence-register", {
         visita_id: selectedVisitId,
         marca_id: evidenceBrandId,
         marca_nombre: evidenceBrandLabel,
@@ -1156,9 +1193,18 @@ export default function App() {
       setEvidenceDescription("");
       setEvidencePhotos([]);
       setBrandRules([]);
+      await loadPromotorDashboard();
       await loadEvidencesToday();
-      setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
+      if (result.postprocess_warning) {
+        setStatusMsg("Evidencia registrada. El análisis o las tareas quedaron pendientes por un ajuste secundario.");
+      } else if (result.warning === "evidence_photo_too_large_for_sheets") {
+        setStatusMsg("Evidencia registrada, pero al menos una foto no cupo completa en Sheets.");
+      } else {
+        setStatusMsg("Evidencia registrada correctamente.");
+      }
     } catch (err) {
+      await loadPromotorDashboard().catch(() => undefined);
+      await loadEvidencesToday().catch(() => undefined);
       setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
     } finally {
       setSyncing(false);
@@ -1292,6 +1338,12 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  function openImageViewer(url: string, title: string) {
+    if (!url) return;
+    setViewerImageUrl(url);
+    setViewerImageTitle(title || "Imagen");
   }
 
   if (loading) {
@@ -1730,7 +1782,21 @@ export default function App() {
                   {capturingPhoto ? "Procesando..." : evidencePhotos.length ? `${evidencePhotos.length} foto(s) listas` : "Agregar fotos de evidencia"}
                   <input type="file" accept="image/*" multiple onChange={(e) => void captureEvidencePhotos(e.target.files)} />
                 </label>
-                {evidencePhotos.length ? <div className="thumbGrid">{evidencePhotos.map((photo) => <img key={`${photo.name}-${photo.capturedAt}`} src={photo.dataUrl} className="thumb" alt={photo.name} />)}</div> : null}
+                <div className="summaryLine">Máximo por selección: <strong>{MAX_EVIDENCE_FILES_PER_PICK}</strong> · Máximo total: <strong>{MAX_EVIDENCE_FILES_TOTAL}</strong></div>
+                {evidencePhotos.length ? (
+                  <>
+                    <div className="thumbGrid">{evidencePhotos.map((photo, index) => (
+                      <div className="thumbWrap" key={`${photo.name}-${photo.capturedAt}`}>
+                        <img src={photo.dataUrl} className="thumb" alt={photo.name} />
+                        <button type="button" className="thumbRemoveBtn" onClick={() => removeEvidencePhoto(index)}>×</button>
+                      </div>
+                    ))}</div>
+                    <button type="button" className="secondaryBtn" onClick={clearEvidenceSelection} disabled={syncing}>
+                      <Trash2 size={16} />
+                      Limpiar selección
+                    </button>
+                  </>
+                ) : null}
                 <button className="primaryBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing}>
                   <Camera size={16} />
                   {syncing ? "Guardando..." : "Registrar evidencia"}
@@ -2075,7 +2141,13 @@ export default function App() {
                 <div className="sectionTitle">Detalle de evidencia</div>
                 <div className="twoCol">
                   <div className="panel">
-                    <div className="previewFrame"><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
+                    <div className="previewFrame previewFrameInteractive" onClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.tipo_evidencia || selectedSupervisorEvidence.tipo_evento)}>
+                      <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img imgContain" />
+                    </div>
+                    <button type="button" className="secondaryBtn" onClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.tipo_evidencia || selectedSupervisorEvidence.tipo_evento)}>
+                      <Eye size={16} />
+                      Ver foto completa
+                    </button>
                     <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
                     <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
                     <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
@@ -2084,6 +2156,26 @@ export default function App() {
                   <div className="panel">
                     <div className="miniTitle">Revisión individual</div>
                     <div className="summaryLine">Estatus actual: <span className={`riskBadge ${statusClass(selectedSupervisorEvidence.status || selectedSupervisorEvidence.decision_supervisor)}`}>{selectedSupervisorEvidence.status || selectedSupervisorEvidence.decision_supervisor || "RECIBIDA"}</span></div>
+                    <div className="summaryLine">Riesgo: <span className={`riskBadge ${severityClass(selectedSupervisorEvidence.riesgo)}`}>{selectedSupervisorEvidence.riesgo || "BAJO"}</span></div>
+                    <div className="summaryLine">Resultado AI: <strong>{selectedSupervisorEvidence.resultado_ai || "Análisis pendiente"}</strong></div>
+                    <div className="summaryLine">Confianza estimada: <strong>{confidenceLabel(selectedSupervisorEvidence.score_confianza)}</strong></div>
+                    {selectedSupervisorEvidence.hallazgos_ai ? (
+                      <div className="traceBox">
+                        <div className="traceTitle">Causa detectada</div>
+                        <div className="summaryLine">{selectedSupervisorEvidence.hallazgos_ai}</div>
+                      </div>
+                    ) : (
+                      <div className="traceBox">
+                        <div className="traceTitle">Causa detectada</div>
+                        <div className="summaryLine">Análisis pendiente o sin hallazgos relevantes.</div>
+                      </div>
+                    )}
+                    {splitRules(selectedSupervisorEvidence.reglas_disparadas).length ? (
+                      <div className="traceBox">
+                        <div className="traceTitle">Reglas activadas</div>
+                        <div className="ruleChips">{splitRules(selectedSupervisorEvidence.reglas_disparadas).map((rule) => <span key={rule} className="riskBadge riskAmber">{rule}</span>)}</div>
+                      </div>
+                    ) : null}
                     {(selectedSupervisorEvidence.decision_supervisor || selectedSupervisorEvidence.revisado_por || selectedSupervisorEvidence.fecha_revision || selectedSupervisorEvidence.motivo_revision) ? (
                       <div className="traceBox">
                         <div className="traceTitle">Última revisión</div>
@@ -2214,6 +2306,20 @@ export default function App() {
           </div>
         ) : null}
 
+        {viewerImageUrl ? (
+          <div className="lightboxOverlay" onClick={() => setViewerImageUrl("")}>
+            <div className="lightboxCard" onClick={(e) => e.stopPropagation()}>
+              <div className="lightboxHeader">
+                <div className="lightboxTitle">{viewerImageTitle || "Vista completa"}</div>
+                <button type="button" className="lightboxClose" onClick={() => setViewerImageUrl("")}>×</button>
+              </div>
+              <div className="lightboxBody">
+                <img src={viewerImageUrl} alt={viewerImageTitle || "Vista completa"} className="lightboxImg" />
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
@@ -2329,6 +2435,8 @@ input[type=file] { display: none; }
 .captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .thumbRow, .thumbGrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .thumb { width: 66px; height: 66px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(38,50,56,0.12); }
+.thumbWrap { position: relative; width: 66px; height: 66px; }
+.thumbRemoveBtn { position: absolute; right: -6px; top: -6px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: #d32f2f; color: white; font-weight: 900; cursor: pointer; box-shadow: 0 6px 12px rgba(38,50,56,0.18); }
 .actionGrid, .summaryGrid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .actionGridButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .summaryBlock { border-radius: 16px; padding: 14px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08); }
@@ -2338,6 +2446,7 @@ input[type=file] { display: none; }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; margin-bottom: 10px; }
+.previewFrameInteractive { cursor: zoom-in; }
 .actionButton { border: 0; border-radius: 12px; background: rgba(96,125,139,0.12); color: #37474f; font-weight: 700; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
 .compactGalleryScroll { max-height: 320px; }
@@ -2350,6 +2459,7 @@ input[type=file] { display: none; }
 .imageFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; }
 .imageFrameCompact { width: 72px; height: 72px; aspect-ratio: auto; }
 .img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.imgContain { object-fit: contain; background: #eef2f5; }
 .galleryTop { margin-top: 10px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .compactTop { margin-top: 0; }
 .galleryTitle { font-weight: 800; color: #263238; font-size: 13px; }
@@ -2382,6 +2492,14 @@ input[type=file] { display: none; }
 .selectionPillActive { background: #4caf50; color: white; border-color: rgba(76,175,80,.65); }
 .detailSubcard { margin-top: 16px; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
+.ruleChips { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+.lightboxOverlay { position: fixed; inset: 0; z-index: 90; background: rgba(15,23,42,0.72); display: grid; place-items: center; padding: 18px; }
+.lightboxCard { width: min(100%, 1080px); max-height: calc(100vh - 36px); background: rgba(255,255,255,0.98); border-radius: 20px; overflow: hidden; box-shadow: 0 20px 48px rgba(15,23,42,0.35); display: flex; flex-direction: column; }
+.lightboxHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid rgba(38,50,56,0.08); }
+.lightboxTitle { font-size: 14px; font-weight: 800; color: #263238; }
+.lightboxClose { width: 34px; height: 34px; border-radius: 999px; border: 0; background: rgba(96,125,139,0.12); color: #37474f; font-size: 24px; line-height: 1; cursor: pointer; }
+.lightboxBody { padding: 12px; overflow: auto; background: #eef2f5; }
+.lightboxImg { display: block; width: 100%; max-height: calc(100vh - 130px); object-fit: contain; margin: 0 auto; border-radius: 14px; background: white; }
 @media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .galleryReviewGrid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } }
 `;
