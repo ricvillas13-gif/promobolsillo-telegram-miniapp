@@ -2243,6 +2243,30 @@ export default function App() {
           </div>
         ) : null}
 
+        {fullscreenEvidence ? (
+          <div className="fullscreenOverlay" onClick={closeFullscreenEvidence}>
+            <div className="fullscreenCard" onClick={(e) => e.stopPropagation()}>
+              <div className="fullscreenToolbar">
+                <div className="fullscreenTitle">{fullscreenEvidence.alt || "Evidencia"}</div>
+                <div className="fullscreenToolbarActions">
+                  <button className="actionButton" onClick={() => zoomFullscreenEvidence("out")}><span>-</span><span>Alejar</span></button>
+                  <button className="actionButton" onClick={() => zoomFullscreenEvidence("in")}><span>+</span><span>Acercar</span></button>
+                  <button className="actionButton" onClick={() => zoomFullscreenEvidence("reset")}><span>1:1</span><span>Reset</span></button>
+                  <button className="actionButton" onClick={closeFullscreenEvidence}><span>✕</span><span>Cerrar</span></button>
+                </div>
+              </div>
+              <div className="fullscreenImageViewport">
+                <img
+                  src={fullscreenEvidence.src}
+                  alt={fullscreenEvidence.alt}
+                  className="fullscreenImage"
+                  style={{ transform: `scale(${fullscreenEvidenceZoom})` }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
