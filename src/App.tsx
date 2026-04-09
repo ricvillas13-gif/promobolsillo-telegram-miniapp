@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -542,7 +542,15 @@ function getCurrentLocation() {
   });
 }
 
+function getTouchDistance(touches: React.TouchList) {
+  if (touches.length < 2) return 0;
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
+
   { key: "asistencia", label: "Asistencia" },
   { key: "evidencias", label: "Evidencias" },
   { key: "mis_evidencias", label: "Mis evidencias" },
@@ -667,6 +675,12 @@ export default function App() {
   const [clientEvidences, setClientEvidences] = useState<EvidenceItem[]>([]);
   const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
+  const [fullscreenEvidence, setFullscreenEvidence] = useState<EvidenceItem | null>(null);
+  const [fullscreenEvidenceZoom, setFullscreenEvidenceZoom] = useState(1);
+  const [fullscreenEvidenceOffset, setFullscreenEvidenceOffset] = useState({ x: 0, y: 0 });
+  const fullscreenDragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const fullscreenPinchRef = useRef<{ distance: number; zoom: number } | null>(null);
+  const fullscreenLastTapRef = useRef(0);
 
 
   useEffect(() => {
@@ -722,8 +736,6 @@ export default function App() {
   const selectedTeamMember = useMemo(() => supervisorTeam.find((item) => item.promotor_id === selectedTeamPromotorId) || supervisorTeam[0] || null, [supervisorTeam, selectedTeamPromotorId]);
   const selectedAlert = useMemo(() => supervisorAlerts.find((item) => item.alerta_id === selectedAlertId) || supervisorAlerts[0] || null, [supervisorAlerts, selectedAlertId]);
   const selectedSupervisorEvidence = useMemo(() => supervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) || supervisorEvidences[0] || null, [supervisorEvidences, selectedSupEvidenceId]);
-  const [fullscreenEvidence, setFullscreenEvidence] = useState<{ src: string; alt: string } | null>(null);
-  const [fullscreenEvidenceZoom, setFullscreenEvidenceZoom] = useState(1);
 
   const expedientAttendance = useMemo(() => (expedient?.evidencias || []).filter(isAttendanceEvidence), [expedient]);
   const expedientOperational = useMemo(() => (expedient?.evidencias || []).filter(isOperationalEvidence), [expedient]);
@@ -1019,6 +1031,105 @@ export default function App() {
     void loadClientStoreDetail(selectedClientStoreId);
   }, [role, selectedClientStoreId]);
 
+  function resetFullscreenEvidenceView() {
+    setFullscreenEvidenceZoom(1);
+    setFullscreenEvidenceOffset({ x: 0, y: 0 });
+    fullscreenDragRef.current = null;
+    fullscreenPinchRef.current = null;
+  }
+
+  function openFullscreenEvidence(evidence: EvidenceItem) {
+    setFullscreenEvidence(evidence);
+    resetFullscreenEvidenceView();
+  }
+
+  function closeFullscreenEvidence() {
+    setFullscreenEvidence(null);
+    resetFullscreenEvidenceView();
+  }
+
+  function zoomFullscreenEvidence(delta: number) {
+    setFullscreenEvidenceZoom((prev) => {
+      const next = Math.max(1, Math.min(5, Number((prev + delta).toFixed(2))));
+      if (next === 1) setFullscreenEvidenceOffset({ x: 0, y: 0 });
+      return next;
+    });
+  }
+
+  function beginFullscreenDrag(clientX: number, clientY: number) {
+    if (fullscreenEvidenceZoom <= 1) return;
+    fullscreenDragRef.current = {
+      x: clientX,
+      y: clientY,
+      offsetX: fullscreenEvidenceOffset.x,
+      offsetY: fullscreenEvidenceOffset.y,
+    };
+  }
+
+  function updateFullscreenDrag(clientX: number, clientY: number) {
+    const drag = fullscreenDragRef.current;
+    if (!drag || fullscreenEvidenceZoom <= 1) return;
+    setFullscreenEvidenceOffset({
+      x: drag.offsetX + (clientX - drag.x),
+      y: drag.offsetY + (clientY - drag.y),
+    });
+  }
+
+  function endFullscreenDrag() {
+    fullscreenDragRef.current = null;
+    fullscreenPinchRef.current = null;
+  }
+
+  function handleFullscreenDoubleTap() {
+    if (!fullscreenEvidence) return;
+    if (fullscreenEvidenceZoom > 1) {
+      resetFullscreenEvidenceView();
+      return;
+    }
+    setFullscreenEvidenceZoom(2.2);
+  }
+
+  function handleFullscreenTouchStart(event: React.TouchEvent<HTMLDivElement>) {
+    if (event.touches.length === 2) {
+      fullscreenPinchRef.current = {
+        distance: getTouchDistance(event.touches),
+        zoom: fullscreenEvidenceZoom,
+      };
+      fullscreenDragRef.current = null;
+      return;
+    }
+    if (event.touches.length === 1) {
+      const now = Date.now();
+      if (now - fullscreenLastTapRef.current < 260) {
+        event.preventDefault();
+        handleFullscreenDoubleTap();
+      }
+      fullscreenLastTapRef.current = now;
+      beginFullscreenDrag(event.touches[0].clientX, event.touches[0].clientY);
+    }
+  }
+
+  function handleFullscreenTouchMove(event: React.TouchEvent<HTMLDivElement>) {
+    if (event.touches.length === 2 && fullscreenPinchRef.current) {
+      event.preventDefault();
+      const distance = getTouchDistance(event.touches);
+      const pinch = fullscreenPinchRef.current;
+      const next = Math.max(1, Math.min(5, Number((pinch.zoom * (distance / Math.max(1, pinch.distance))).toFixed(2))));
+      setFullscreenEvidenceZoom(next);
+      if (next === 1) setFullscreenEvidenceOffset({ x: 0, y: 0 });
+      return;
+    }
+    if (event.touches.length === 1 && fullscreenEvidenceZoom > 1) {
+      event.preventDefault();
+      updateFullscreenDrag(event.touches[0].clientX, event.touches[0].clientY);
+    }
+  }
+
+  function handleFullscreenTouchEnd() {
+    if (fullscreenPinchRef.current) fullscreenPinchRef.current = null;
+    if (!fullscreenEvidence || fullscreenEvidenceZoom <= 1) fullscreenDragRef.current = null;
+  }
+
   async function captureLocation(kind: CaptureKind) {
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
     try {
@@ -1294,28 +1405,6 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }
-
-  function openFullscreenEvidence(src: string, alt: string) {
-    if (!src) return;
-    setFullscreenEvidence({ src, alt });
-    setFullscreenEvidenceZoom(1);
-  }
-
-  function closeFullscreenEvidence() {
-    setFullscreenEvidence(null);
-    setFullscreenEvidenceZoom(1);
-  }
-
-  function zoomFullscreenEvidence(direction: "in" | "out" | "reset") {
-    if (direction === "reset") {
-      setFullscreenEvidenceZoom(1);
-      return;
-    }
-    setFullscreenEvidenceZoom((prev) => {
-      const next = direction === "in" ? prev + 0.25 : prev - 0.25;
-      return Math.min(4, Math.max(1, Number(next.toFixed(2))));
-    });
   }
 
   if (loading) {
@@ -2099,16 +2188,14 @@ export default function App() {
                 <div className="sectionTitle">Detalle de evidencia</div>
                 <div className="twoCol">
                   <div className="panel">
-                    <div className="previewFrame previewFrameSupervisor" onClick={() => openFullscreenEvidence(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.tipo_evidencia || "Evidencia")} role="button" tabIndex={0}>
-                      <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="previewImg" />
-                    </div>
-                    <div className="actionGrid actionGridButtons" style={{ marginTop: 0, marginBottom: 10 }}>
-                      <button className="actionButton" onClick={() => openFullscreenEvidence(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.tipo_evidencia || "Evidencia")}><Eye size={16} /><span>Ver completa</span></button>
-                    </div>
+                    <button className="previewFrame previewFrameButton" onClick={() => openFullscreenEvidence(selectedSupervisorEvidence)}>
+                      <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" />
+                    </button>
                     <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
                     <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
                     <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
                     <div className="summaryLine">Descripción: {cleanEvidenceDescription(selectedSupervisorEvidence.descripcion)}</div>
+                    <div className="summaryLine summaryGeo">Toca la imagen para verla completa. Doble toque para ampliar y pellizca con dos dedos para zoom.</div>
                   </div>
                   <div className="panel">
                     <div className="miniTitle">Revisión individual</div>
@@ -2133,6 +2220,7 @@ export default function App() {
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar revisión</span></button>
                       <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
+                      <button className="actionButton" onClick={() => openFullscreenEvidence(selectedSupervisorEvidence)}><ImageIcon size={16} /><span>Ver completa</span></button>
                     </div>
                   </div>
                 </div>
@@ -2240,30 +2328,6 @@ export default function App() {
                 </div>
               </div>
             )}
-          </div>
-        ) : null}
-
-        {fullscreenEvidence ? (
-          <div className="fullscreenOverlay" onClick={closeFullscreenEvidence}>
-            <div className="fullscreenCard" onClick={(e) => e.stopPropagation()}>
-              <div className="fullscreenToolbar">
-                <div className="fullscreenTitle">{fullscreenEvidence.alt || "Evidencia"}</div>
-                <div className="fullscreenToolbarActions">
-                  <button className="actionButton" onClick={() => zoomFullscreenEvidence("out")}><span>-</span><span>Alejar</span></button>
-                  <button className="actionButton" onClick={() => zoomFullscreenEvidence("in")}><span>+</span><span>Acercar</span></button>
-                  <button className="actionButton" onClick={() => zoomFullscreenEvidence("reset")}><span>1:1</span><span>Reset</span></button>
-                  <button className="actionButton" onClick={closeFullscreenEvidence}><span>✕</span><span>Cerrar</span></button>
-                </div>
-              </div>
-              <div className="fullscreenImageViewport">
-                <img
-                  src={fullscreenEvidence.src}
-                  alt={fullscreenEvidence.alt}
-                  className="fullscreenImage"
-                  style={{ transform: `scale(${fullscreenEvidenceZoom})` }}
-                />
-              </div>
-            </div>
           </div>
         ) : null}
 
@@ -2391,16 +2455,18 @@ input[type=file] { display: none; }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; margin-bottom: 10px; }
-.previewFrameSupervisor { cursor: zoom-in; border: 1px solid rgba(38,50,56,0.08); }
-.previewImg { width: 100%; height: 100%; object-fit: contain; display: block; background: #eef1f4; }
+.previewFrameButton { width: 100%; padding: 0; border: 0; cursor: zoom-in; }
+.fullscreenOverlay { position: fixed; inset: 0; background: rgba(9, 14, 19, 0.9); display: flex; align-items: center; justify-content: center; padding: 14px; z-index: 60; }
+.fullscreenViewer { width: min(100%, 1080px); height: min(92vh, 920px); background: rgba(16, 23, 28, 0.96); border-radius: 18px; border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 18px 40px rgba(0,0,0,0.35); }
+.fullscreenTopBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; color: #f3f6f8; background: rgba(255,255,255,0.04); }
+.fullscreenTitle { font-size: 14px; font-weight: 700; }
+.fullscreenActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fullscreenCtl { border: 0; border-radius: 10px; padding: 8px 12px; background: #ffffff; color: #162028; font-weight: 700; cursor: pointer; }
+.fullscreenClose { background: #dff5e9; }
+.fullscreenStage { position: relative; flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; background: #0b1217; }
+.fullscreenImage { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; transform-origin: center center; transition: transform 0.08s ease-out; }
+.fullscreenMeta { padding: 10px 14px 14px; color: #d5dde1; font-size: 12px; }
 .actionButton { border: 0; border-radius: 12px; background: rgba(96,125,139,0.12); color: #37474f; font-weight: 700; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
-.fullscreenOverlay { position: fixed; inset: 0; z-index: 120; background: rgba(15,23,42,0.86); backdrop-filter: blur(4px); padding: 16px; display: flex; align-items: center; justify-content: center; }
-.fullscreenCard { width: min(1200px, 100%); height: min(92vh, 100%); background: rgba(255,255,255,0.98); border-radius: 18px; border: 1px solid rgba(38,50,56,0.12); box-shadow: 0 18px 48px rgba(15,23,42,0.28); display: flex; flex-direction: column; overflow: hidden; }
-.fullscreenToolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid rgba(38,50,56,0.08); background: rgba(248,249,251,0.98); }
-.fullscreenTitle { font-size: 14px; font-weight: 800; color: #263238; }
-.fullscreenToolbarActions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.fullscreenImageViewport { flex: 1; overflow: auto; display: grid; place-items: center; background: #f4f7f8; padding: 18px; }
-.fullscreenImage { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; transform-origin: center center; transition: transform .18s ease; }
 .galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
 .compactGalleryScroll { max-height: 320px; }
 .galleryGrid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
