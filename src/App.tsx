@@ -426,9 +426,6 @@ function getStoreDisplayFromItem(item?: { tienda_display?: string; tienda_id?: s
   return item.tienda_display || formatStoreDisplay(item.tienda_id, item.tienda_nombre);
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, n));
-}
 
 function nowMxString() {
   return formatDateTimeMaybe(new Date().toISOString());
@@ -631,7 +628,7 @@ export default function App() {
   const [entryPhoto, setEntryPhoto] = useState<PhotoCapture | null>(null);
   const [exitPhoto, setExitPhoto] = useState<PhotoCapture | null>(null);
   const [capturingLocation, setCapturingLocation] = useState<CaptureKind | null>(null);
-  const [capturingPhoto, setCapturingPhoto] = useState<CaptureKind | null>(null);
+  const [, setCapturingPhoto] = useState<CameraTarget | null>(null);
 
   const [evidenceBrandId, setEvidenceBrandId] = useState("");
   const [evidenceBrandLabel, setEvidenceBrandLabel] = useState("");
