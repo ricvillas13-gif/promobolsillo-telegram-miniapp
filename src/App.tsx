@@ -38,6 +38,7 @@ type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "entregables";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 type CaptureKind = "entrada" | "salida";
+type CameraTarget = "entrada" | "salida" | "evidencia" | "reemplazo";
 type SupervisorDecision = "APROBADA" | "OBSERVADA" | "RECHAZADA";
 type AlertFinalStatus = "RESUELTA" | "DESCARTADA";
 
@@ -425,13 +426,17 @@ function getStoreDisplayFromItem(item?: { tienda_display?: string; tienda_id?: s
   return item.tienda_display || formatStoreDisplay(item.tienda_id, item.tienda_nombre);
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n));
+}
+
 function nowMxString() {
   return formatDateTimeMaybe(new Date().toISOString());
 }
 
 function getStoreNameById(storeId: string, stores: StoreItem[]) {
   const found = stores.find((store) => store.tienda_id === storeId || store.nombre_tienda === storeId);
-  return found ? formatStoreDisplay(found.tienda_id, found.nombre_tienda) : "";
+  return found ? (found.nombre_tienda || found.tienda_id || "") : "";
 }
 
 function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
@@ -626,7 +631,7 @@ export default function App() {
   const [entryPhoto, setEntryPhoto] = useState<PhotoCapture | null>(null);
   const [exitPhoto, setExitPhoto] = useState<PhotoCapture | null>(null);
   const [capturingLocation, setCapturingLocation] = useState<CaptureKind | null>(null);
-  const [, setCapturingPhoto] = useState<CaptureKind | null>(null);
+  const [capturingPhoto, setCapturingPhoto] = useState<CaptureKind | null>(null);
 
   const [evidenceBrandId, setEvidenceBrandId] = useState("");
   const [evidenceBrandLabel, setEvidenceBrandLabel] = useState("");
@@ -710,10 +715,13 @@ export default function App() {
   const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
   const [imageViewerSrc, setImageViewerSrc] = useState("");
-  const [cameraModal, setCameraModal] = useState<{ open: boolean; target: "entrada" | "salida" | "evidencia" | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
+  const [imageViewerScale, setImageViewerScale] = useState(1);
+  const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const lastImageTapRef = useRef<{ src: string; at: number }>({ src: "", at: 0 });
+  const imageViewerTouchRef = useRef<{ distance: number; startScale: number }>({ distance: 0, startScale: 1 });
+  const attendancePhotoRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
 
   useEffect(() => {
@@ -933,10 +941,6 @@ export default function App() {
   async function loadSupervisorEvidences() {
     const data = await postJson<SupervisorEvidencesResponse>("/miniapp/supervisor/evidences", {
       promotor_id: supEvidencePromotorFilter,
-      tienda_id: supEvidenceStoreFilter,
-      marca_id: supEvidenceBrandFilter,
-      tipo_evidencia: supEvidenceTypeFilter,
-      riesgo: supEvidenceRiskFilter,
     });
     const rows = data.evidences || [];
     setSupervisorEvidences(rows);
@@ -1066,7 +1070,7 @@ export default function App() {
   useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("NA"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
-  useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+  useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, role]);
 
   useEffect(() => {
     if (role !== "supervisor") return;
@@ -1096,6 +1100,14 @@ export default function App() {
   }, [supervisorEvidences, role]);
 
   useEffect(() => {
+    if (role !== "supervisor") return;
+    if (supEvidenceStoreFilter && !supervisorEvidenceFilterOptions.stores.includes(supEvidenceStoreFilter)) setSupEvidenceStoreFilter("");
+    if (supEvidenceBrandFilter && !supervisorEvidenceFilterOptions.brands.includes(supEvidenceBrandFilter)) setSupEvidenceBrandFilter("");
+    if (supEvidenceTypeFilter && !supervisorEvidenceFilterOptions.types.includes(supEvidenceTypeFilter)) setSupEvidenceTypeFilter("");
+    if (supEvidenceRiskFilter && !supervisorEvidenceFilterOptions.risks.includes(supEvidenceRiskFilter)) setSupEvidenceRiskFilter("");
+  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+
+  useEffect(() => {
     if (role !== "cliente") return;
     void loadClientFilterOptions();
     void loadClientDashboard();
@@ -1104,6 +1116,14 @@ export default function App() {
     void loadClientIncidents();
     void loadClientDeliverables();
   }, [role, clientFilters]);
+
+  useEffect(() => {
+    if (role !== "supervisor") return;
+    if (supEvidenceStoreFilter && !supervisorEvidenceFilterOptions.stores.includes(supEvidenceStoreFilter)) setSupEvidenceStoreFilter("");
+    if (supEvidenceBrandFilter && !supervisorEvidenceFilterOptions.brands.includes(supEvidenceBrandFilter)) setSupEvidenceBrandFilter("");
+    if (supEvidenceTypeFilter && !supervisorEvidenceFilterOptions.types.includes(supEvidenceTypeFilter)) setSupEvidenceTypeFilter("");
+    if (supEvidenceRiskFilter && !supervisorEvidenceFilterOptions.risks.includes(supEvidenceRiskFilter)) setSupEvidenceRiskFilter("");
+  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => {
     if (role !== "cliente") return;
@@ -1122,7 +1142,7 @@ export default function App() {
     }
   }
 
-  async function openCamera(target: "entrada" | "salida" | "evidencia", facing: "user" | "environment") {
+  async function openCamera(target: CameraTarget, facing: "user" | "environment") {
     try {
       setCapturingPhoto(target === "evidencia" ? "entrada" : target);
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false });
@@ -1161,6 +1181,10 @@ export default function App() {
     } else if (cameraModal.target === "salida") {
       setExitPhoto(payload);
       setStatusMsg("Foto de salida lista.");
+    } else if (cameraModal.target === "reemplazo") {
+      setStatusMsg("Reemplazando foto...");
+      setStatusMsgDuration(7000);
+      await replaceEvidencePhotoPayload(payload.name, payload.dataUrl);
     } else {
       setEvidencePhotos((prev) => [...prev, payload].slice(0, 24));
       setStatusMsg("Foto de evidencia agregada.");
@@ -1176,7 +1200,48 @@ export default function App() {
 
   function openImageViewer(src?: string) {
     if (!src) return;
+    setImageViewerScale(1);
+    imageViewerTouchRef.current = { distance: 0, startScale: 1 };
     setImageViewerSrc(src);
+  }
+
+  function closeImageViewer() {
+    setImageViewerSrc("");
+    setImageViewerScale(1);
+    imageViewerTouchRef.current = { distance: 0, startScale: 1 };
+  }
+
+  function zoomImageViewer(nextScale: number) {
+    setImageViewerScale(Math.min(4, Math.max(1, Number(nextScale.toFixed(2)))));
+  }
+
+  function handleImageViewerWheel(event: React.WheelEvent<HTMLImageElement>) {
+    event.preventDefault();
+    const delta = event.deltaY < 0 ? 0.18 : -0.18;
+    zoomImageViewer(imageViewerScale + delta);
+  }
+
+  function handleImageViewerTouchStart(event: React.TouchEvent<HTMLImageElement>) {
+    if (event.touches.length !== 2) return;
+    const a = event.touches[0];
+    const b = event.touches[1];
+    const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    imageViewerTouchRef.current = { distance, startScale: imageViewerScale };
+  }
+
+  function handleImageViewerTouchMove(event: React.TouchEvent<HTMLImageElement>) {
+    if (event.touches.length !== 2) return;
+    event.preventDefault();
+    const a = event.touches[0];
+    const b = event.touches[1];
+    const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    const base = imageViewerTouchRef.current.distance || distance;
+    const ratio = distance / Math.max(base, 1);
+    zoomImageViewer(imageViewerTouchRef.current.startScale * ratio);
+  }
+
+  function handleImageViewerTouchEnd() {
+    if (imageViewerScale < 1.02) setImageViewerScale(1);
   }
 
   function handleImageTap(src?: string) {
@@ -1188,6 +1253,14 @@ export default function App() {
       return;
     }
     lastImageTapRef.current = { src, at: now };
+  }
+
+  function focusAttendanceForVisit(visitaId: string) {
+    const targetEvidence = attendanceGallery.find((item) => item.visita_id === visitaId);
+    if (!targetEvidence) return;
+    window.setTimeout(() => {
+      attendancePhotoRefs.current[targetEvidence.evidencia_id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
   }
 
   function removeEvidencePhotoAt(index: number) {
@@ -1356,6 +1429,19 @@ export default function App() {
     }
   }
 
+  async function replaceEvidencePhotoPayload(fileName: string, dataUrl: string) {
+    if (!selectedEvidence) return;
+    setSyncing(true);
+    try {
+      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", { evidencia_id: selectedEvidence.evidencia_id, foto_nombre: fileName, foto_data_url: dataUrl });
+      await loadEvidencesToday();
+      setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "La evidencia se reemplazó, pero la foto no cupo completa en Sheets." : "Evidencia reemplazada.");
+      setStatusMsgDuration(6800);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function markEvidenceAsCancelled() {
     try {
       if (!selectedEvidence) return setStatusMsg("Selecciona una evidencia.");
@@ -1366,6 +1452,8 @@ ${normalizeBrandLabel(selectedEvidence.marca_nombre || "", "Marca")}
 ${selectedEvidence.tipo_evidencia}
 ${selectedEvidence.fecha_hora_fmt}`);
       if (!confirmed) return;
+      setStatusMsg("Anulando evidencia...");
+      setStatusMsgDuration(7000);
       setSyncing(true);
       await postJson("/miniapp/promotor/cancel-evidence", { evidencia_id: selectedEvidence.evidencia_id, note: noteDraft || "" });
       setNoteDraft("");
@@ -1390,15 +1478,12 @@ ${selectedEvidence.tipo_evidencia}
 ${selectedEvidence.fecha_hora_fmt}`);
     if (!confirmed) return;
     try {
-      setSyncing(true);
+      setStatusMsg("Reemplazando foto...");
+      setStatusMsgDuration(7000);
       const dataUrl = await readPhotoForSheets(file);
-      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", { evidencia_id: selectedEvidence.evidencia_id, foto_nombre: file.name, foto_data_url: dataUrl });
-      await loadEvidencesToday();
-      setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "La evidencia se reemplazó, pero la foto no cupo completa en Sheets." : "Evidencia reemplazada.");
+      await replaceEvidencePhotoPayload(file.name, dataUrl);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo reemplazar la evidencia.");
-    } finally {
-      setSyncing(false);
     }
   }
 
@@ -1838,7 +1923,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   {visits.map((visit) => {
                     const isOpen = !visit.hora_fin;
                     return (
-                      <button key={visit.visita_id} onClick={() => { if (isOpen) setSelectedVisitId(visit.visita_id); }} className={`listBtn ${isOpen && selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}>
+                      <button key={visit.visita_id} onClick={() => { if (isOpen) setSelectedVisitId(visit.visita_id); focusAttendanceForVisit(visit.visita_id); }} className={`listBtn ${isOpen && selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}>
                         <div className="listTitle">{getVisitDisplayName(visit, stores)}</div>
                         <div className="listSub">Entrada: {formatHourFromIso(visit.hora_inicio)} · {isOpen ? "Salida pendiente" : `Salida: ${formatHourFromIso(visit.hora_fin)}`}</div>
                         <div className="geoRow">
@@ -1857,7 +1942,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <div className="galleryScroll compactGalleryScroll">
                       <div className="galleryGrid attendanceGalleryGrid">
                         {attendanceGallery.map((item) => (
-                          <div className="galleryCard" key={item.evidencia_id}>
+                          <div className="galleryCard" key={item.evidencia_id} ref={(el) => { attendancePhotoRefs.current[item.evidencia_id] = el; }}>
                             <div className="imageFrame"><img src={item.url_foto} alt={item.tipo_evento} className="img" /></div>
                             <div className="galleryTop">
                               <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
@@ -2012,7 +2097,8 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => openImageViewer(selectedEvidence.url_foto)}><Eye size={16} /><span>Ver foto</span></button>
                       <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}><Trash2 size={16} /><span>Anular</span></button>
-                      <label className="actionButton"><Camera size={16} /><span>Reemplazar</span><input type="file" accept="image/*" onChange={(e) => void replaceEvidencePhoto(e.target.files)} /></label>
+                      <label className="actionButton"><ImageIcon size={16} /><span>Reemplazar galería</span><input type="file" accept="image/*" onChange={(e) => void replaceEvidencePhoto(e.target.files)} /></label>
+                      <button className="actionButton" onClick={() => void openCamera("reemplazo", "environment")}><Camera size={16} /><span>Reemplazar cámara</span></button>
                       <button className="actionButton" onClick={() => void saveNote()}><Pencil size={16} /><span>Guardar nota</span></button>
                     </div>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
@@ -2482,8 +2568,8 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {imageViewerSrc ? (
-          <div className="overlayBackdrop" onClick={() => setImageViewerSrc("")}>
-            <img src={imageViewerSrc} alt="Vista ampliada" className="overlayImage" />
+          <div className="overlayBackdrop" onClick={() => closeImageViewer()}>
+            <img src={imageViewerSrc} alt="Vista ampliada" className="overlayImage" style={{ transform: `scale(${imageViewerScale})` }} onClick={(e) => e.stopPropagation()} onWheel={handleImageViewerWheel} onTouchStart={handleImageViewerTouchStart} onTouchMove={handleImageViewerTouchMove} onTouchEnd={handleImageViewerTouchEnd} onDoubleClick={(e) => { e.stopPropagation(); zoomImageViewer(imageViewerScale > 1 ? 1 : 2); }} />
           </div>
         ) : null}
 
@@ -2657,7 +2743,7 @@ input[type=file] { display: none; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
 .overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 18px; }
-.overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; }
+.overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
 .cameraModal { width: min(92vw, 520px); background: #111; border-radius: 18px; padding: 14px; }
 .cameraVideo { width: 100%; border-radius: 14px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; }
 @media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .galleryReviewGrid { grid-template-columns: 1fr; } }
