@@ -50,6 +50,7 @@ type BootstrapResponse = {
 type StoreItem = {
   tienda_id: string;
   nombre_tienda: string;
+  tienda_display?: string;
   cadena?: string;
 };
 
@@ -57,6 +58,7 @@ type VisitItem = {
   visita_id: string;
   tienda_id: string;
   tienda_nombre: string;
+  tienda_display?: string;
   hora_inicio: string;
   hora_fin: string;
   estado_visita?: string;
@@ -78,6 +80,7 @@ type EvidenceItem = {
   url_foto: string;
   descripcion: string;
   tienda_nombre?: string;
+  tienda_display?: string;
   tienda_id?: string;
   promotor_id?: string;
   promotor_nombre?: string;
@@ -87,6 +90,10 @@ type EvidenceItem = {
   motivo_revision?: string;
   revisado_por?: string;
   fecha_revision?: string;
+  hallazgos_ai?: string;
+  reglas_disparadas?: string;
+  resultado_ai?: string;
+  score_confianza?: string;
 };
 
 type UiEvidence = EvidenceItem & {
@@ -124,6 +131,7 @@ type StartEntryResponse = {
   visita_id: string;
   tienda_id: string;
   tienda_nombre: string;
+  tienda_display?: string;
   started_at: string;
   warning?: string;
 };
@@ -156,6 +164,7 @@ type EvidenceContextResponse = {
     visita_id: string;
     tienda_id: string;
     tienda_nombre: string;
+    tienda_display?: string;
   };
   marcas?: Array<{ marca_id: string; marca_nombre: string }>;
 };
@@ -178,10 +187,16 @@ type SupervisorSummary = {
   alertas: number;
 };
 
+type SupervisorUsageSummary = {
+  today?: { bytes: number; mb: number; gb: number; fotos: number };
+  month?: { bytes: number; mb: number; gb: number; fotos: number };
+};
+
 type SupervisorDashboardResponse = {
   ok: boolean;
   supervisor?: { nombre?: string };
   summary?: Partial<SupervisorSummary>;
+  usage?: SupervisorUsageSummary;
 };
 
 type SupervisorTeamRow = {
@@ -194,6 +209,7 @@ type SupervisorTeamRow = {
   evidencias_hoy: number;
   alertas_abiertas: number;
   ultima_tienda: string;
+  ultima_tienda_display?: string;
   ultima_entrada: string;
   ultima_salida: string;
   ultima_visita_id: string;
@@ -225,6 +241,10 @@ type SupervisorAlert = {
   canal_notificacion?: string;
   comentario_cierre?: string;
   origen_cierre?: string;
+  url_foto?: string;
+  hallazgos_ai?: string;
+  reglas_disparadas?: string;
+  tienda_display?: string;
 };
 
 type SupervisorAlertsResponse = {
@@ -320,9 +340,10 @@ type SupervisorEvidencesResponse = {
 
 type VisitExpedientResponse = {
   ok: boolean;
-  visita?: VisitItem;
+  visita?: VisitItem & { duracion_minutos?: number; duracion_fmt?: string };
   evidencias?: EvidenceItem[];
   alertas?: SupervisorAlert[];
+  resumen?: { total_evidencias?: number; total_alertas?: number; por_marca_tipo_fase?: Record<string, Record<string, Record<string, number>>> };
 };
 
 type LocationCapture = {
@@ -388,16 +409,38 @@ function formatDateTimeMaybe(iso?: string) {
   });
 }
 
+function extractStoreDeterminant(value?: string) {
+  const match = String(value || "").trim().match(/(\d+)\s*$/);
+  return match ? match[1] : "";
+}
+
+function formatStoreDisplay(storeId?: string, storeName?: string) {
+  const determinante = extractStoreDeterminant(storeId);
+  const nombre = (storeName || storeId || "").trim();
+  return determinante ? `${determinante} - ${nombre}` : nombre;
+}
+
+function getStoreDisplayFromItem(item?: { tienda_display?: string; tienda_id?: string; tienda_nombre?: string }) {
+  if (!item) return "";
+  return item.tienda_display || formatStoreDisplay(item.tienda_id, item.tienda_nombre);
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n));
+}
+
 function nowMxString() {
   return formatDateTimeMaybe(new Date().toISOString());
 }
 
 function getStoreNameById(storeId: string, stores: StoreItem[]) {
-  return stores.find((store) => store.tienda_id === storeId || store.nombre_tienda === storeId)?.nombre_tienda || "";
+  const found = stores.find((store) => store.tienda_id === storeId || store.nombre_tienda === storeId);
+  return found ? formatStoreDisplay(found.tienda_id, found.nombre_tienda) : "";
 }
 
 function getVisitDisplayName(visit: VisitItem, stores: StoreItem[]) {
-  return getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || "Visita activa";
+  const storeName = getStoreNameById(visit.tienda_id, stores) || visit.tienda_nombre || "Visita activa";
+  return visit.tienda_display || formatStoreDisplay(visit.tienda_id, storeName);
 }
 
 function normalizeBrandLabel(rawLabel: string, fallbackId: string) {
@@ -421,7 +464,7 @@ function isValidRuleType(value: string) {
 }
 
 function compactMetaLine(item: EvidenceItem) {
-  const parts = [item.tienda_nombre || "", normalizeBrandLabel(item.marca_nombre || "", "Marca"), item.fase ? `Fase: ${item.fase}` : ""].filter(Boolean);
+  const parts = [getStoreDisplayFromItem(item), normalizeBrandLabel(item.marca_nombre || "", "Marca"), item.fase ? `Fase: ${item.fase}` : ""].filter(Boolean);
   return parts.join(" · ");
 }
 
@@ -542,15 +585,7 @@ function getCurrentLocation() {
   });
 }
 
-function getTouchDistance(touches: React.TouchList) {
-  if (touches.length < 2) return 0;
-  const dx = touches[0].clientX - touches[1].clientX;
-  const dy = touches[0].clientY - touches[1].clientY;
-  return Math.hypot(dx, dy);
-}
-
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
-
   { key: "asistencia", label: "Asistencia" },
   { key: "evidencias", label: "Evidencias" },
   { key: "mis_evidencias", label: "Mis evidencias" },
@@ -582,6 +617,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [detectedExternalId, setDetectedExternalId] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
+  const [statusMsgDuration, setStatusMsgDuration] = useState(6800);
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -605,6 +641,7 @@ export default function App() {
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
   const [availableBrands, setAvailableBrands] = useState<Array<{ marca_id: string; marca_nombre: string }>>([]);
   const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean }>>([]);
+  const [catalogRules, setCatalogRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean }>>([]);
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
   const [allEvidenceRows, setAllEvidenceRows] = useState<UiEvidence[]>([]);
@@ -618,6 +655,7 @@ export default function App() {
 
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
   const [supervisorSummary, setSupervisorSummary] = useState<SupervisorSummary>({ promotores: 0, visitasHoy: 0, abiertas: 0, evidenciasHoy: 0, alertas: 0 });
+  const [supervisorUsage, setSupervisorUsage] = useState<SupervisorUsageSummary>({});
   const [supervisorTeam, setSupervisorTeam] = useState<SupervisorTeamRow[]>([]);
   const [selectedTeamPromotorId, setSelectedTeamPromotorId] = useState("");
   const [supervisorAlerts, setSupervisorAlerts] = useState<SupervisorAlert[]>([]);
@@ -675,12 +713,11 @@ export default function App() {
   const [clientEvidences, setClientEvidences] = useState<EvidenceItem[]>([]);
   const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
-  const [fullscreenEvidence, setFullscreenEvidence] = useState<EvidenceItem | null>(null);
-  const [fullscreenEvidenceZoom, setFullscreenEvidenceZoom] = useState(1);
-  const [fullscreenEvidenceOffset, setFullscreenEvidenceOffset] = useState({ x: 0, y: 0 });
-  const fullscreenDragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
-  const fullscreenPinchRef = useRef<{ distance: number; zoom: number } | null>(null);
-  const fullscreenLastTapRef = useRef(0);
+  const [imageViewerSrc, setImageViewerSrc] = useState("");
+  const [cameraModal, setCameraModal] = useState<{ open: boolean; target: "entrada" | "salida" | "evidencia" | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const lastImageTapRef = useRef<{ src: string; at: number }>({ src: "", at: 0 });
 
 
   useEffect(() => {
@@ -694,20 +731,58 @@ export default function App() {
 
   useEffect(() => {
     if (!statusMsg) return;
-    const t = setTimeout(() => setStatusMsg(""), 3200);
+    const t = setTimeout(() => setStatusMsg(""), statusMsgDuration);
     return () => clearTimeout(t);
-  }, [statusMsg]);
+  }, [statusMsg, statusMsgDuration]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (role === "supervisor") {
+        void loadSupervisorDashboard();
+        void loadSupervisorTeam();
+        void loadSupervisorAlerts();
+        void loadSupervisorEvidences();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [role, alertStatusFilter, alertSeverityFilter, alertPromotorFilter, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+
+  useEffect(() => () => { void stopCameraStream(); }, []);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
+  const evidenceTypeOptions = useMemo(() => {
+    const source = brandRules.length ? brandRules : catalogRules;
+    return source.filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index);
+  }, [brandRules, catalogRules]);
+  const evidencePhaseOptions = useMemo(() => {
+    const selectedRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === evidenceType);
+    if (!selectedRule) return ["NA", "ANTES", "DESPUES"] as EvidencePhase[];
+    return selectedRule.requiere_antes_despues ? (["ANTES", "DESPUES"] as EvidencePhase[]) : (["NA"] as EvidencePhase[]);
+  }, [evidenceTypeOptions, evidenceType]);
 
   const attendanceGallery = useMemo(() => allEvidenceRows.filter((item) => !isOperationalEvidence(item)), [allEvidenceRows]);
-  const operationalGallery = useMemo(() => allEvidenceRows.filter((item) => isOperationalEvidence(item)), [allEvidenceRows]);
+  const operationalGallery = useMemo(() => allEvidenceRows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [allEvidenceRows]);
+
+  const evidenceFilterOptions = useMemo(() => {
+    const storeRows = operationalGallery;
+    const brandRows = evidenceFilterStore ? storeRows.filter((item) => getStoreDisplayFromItem(item) === evidenceFilterStore) : storeRows;
+    const typeRows = evidenceFilterBrand ? brandRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === evidenceFilterBrand) : brandRows;
+    const phaseRows = evidenceFilterType ? typeRows.filter((item) => (item.tipo_evidencia || "") === evidenceFilterType) : typeRows;
+    return {
+      stores: Array.from(new Set(storeRows.map((item) => getStoreDisplayFromItem(item)).filter(Boolean))).sort(),
+      brands: Array.from(new Set(brandRows.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
+      types: Array.from(new Set(typeRows.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
+      phases: Array.from(new Set(phaseRows.map((item) => item.fase || "").filter(Boolean))).sort(),
+    };
+  }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType]);
 
   const filteredOperationalGallery = useMemo(() => {
     return operationalGallery.filter((item) => {
-      const byStore = !evidenceFilterStore || (item.tienda_nombre || "") === evidenceFilterStore;
+      const byStore = !evidenceFilterStore || getStoreDisplayFromItem(item) === evidenceFilterStore;
       const byBrand = !evidenceFilterBrand || normalizeBrandLabel(item.marca_nombre || "", "Marca") === evidenceFilterBrand;
       const byType = !evidenceFilterType || (item.tipo_evidencia || "") === evidenceFilterType;
       const byPhase = !evidenceFilterPhase || (item.fase || "") === evidenceFilterPhase;
@@ -715,30 +790,37 @@ export default function App() {
     });
   }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
 
-  const selectedEvidence = useMemo(() => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || operationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || operationalGallery[0] || null, [filteredOperationalGallery, operationalGallery, selectedEvidenceId]);
-
-  const evidenceFilterOptions = useMemo(() => ({
-    stores: Array.from(new Set(operationalGallery.map((item) => item.tienda_nombre || "").filter(Boolean))).sort(),
-    brands: Array.from(new Set(operationalGallery.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
-    types: Array.from(new Set(operationalGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
-    phases: Array.from(new Set(operationalGallery.map((item) => item.fase || "").filter(Boolean))).sort(),
-  }), [operationalGallery]);
+  const selectedEvidence = useMemo(() => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || null, [filteredOperationalGallery, selectedEvidenceId]);
 
   const supervisorPromotorOptions = useMemo(() => supervisorTeam.map((item) => ({ id: item.promotor_id, nombre: item.nombre })), [supervisorTeam]);
 
-  const supervisorEvidenceFilterOptions = useMemo(() => ({
-    stores: Array.from(new Set(supervisorEvidences.map((item) => item.tienda_nombre || "").filter(Boolean))).sort(),
-    brands: Array.from(new Set(supervisorEvidences.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
-    types: Array.from(new Set(supervisorEvidences.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
-    risks: Array.from(new Set(supervisorEvidences.map((item) => item.riesgo || "").filter(Boolean))).sort(),
-  }), [supervisorEvidences]);
+  const filteredSupervisorEvidences = useMemo(() => supervisorEvidences.filter((item) => {
+    const byPromotor = !supEvidencePromotorFilter || item.promotor_id === supEvidencePromotorFilter;
+    const byStore = !supEvidenceStoreFilter || getStoreDisplayFromItem(item) === supEvidenceStoreFilter;
+    const byBrand = !supEvidenceBrandFilter || normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter;
+    const byType = !supEvidenceTypeFilter || (item.tipo_evidencia || "") === supEvidenceTypeFilter;
+    const byRisk = !supEvidenceRiskFilter || (item.riesgo || "") === supEvidenceRiskFilter;
+    return byPromotor && byStore && byBrand && byType && byRisk;
+  }), [supervisorEvidences, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+
+  const supervisorEvidenceFilterOptions = useMemo(() => {
+    const storeRows = supEvidencePromotorFilter ? supervisorEvidences.filter((item) => item.promotor_id === supEvidencePromotorFilter) : supervisorEvidences;
+    const brandRows = supEvidenceStoreFilter ? storeRows.filter((item) => getStoreDisplayFromItem(item) === supEvidenceStoreFilter) : storeRows;
+    const typeRows = supEvidenceBrandFilter ? brandRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter) : brandRows;
+    return {
+      stores: Array.from(new Set(storeRows.map((item) => getStoreDisplayFromItem(item)).filter(Boolean))).sort(),
+      brands: Array.from(new Set(brandRows.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
+      types: Array.from(new Set(typeRows.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
+      risks: Array.from(new Set(typeRows.map((item) => item.riesgo || "").filter(Boolean))).sort(),
+    };
+  }, [supervisorEvidences, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter]);
 
   const selectedTeamMember = useMemo(() => supervisorTeam.find((item) => item.promotor_id === selectedTeamPromotorId) || supervisorTeam[0] || null, [supervisorTeam, selectedTeamPromotorId]);
   const selectedAlert = useMemo(() => supervisorAlerts.find((item) => item.alerta_id === selectedAlertId) || supervisorAlerts[0] || null, [supervisorAlerts, selectedAlertId]);
-  const selectedSupervisorEvidence = useMemo(() => supervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) || supervisorEvidences[0] || null, [supervisorEvidences, selectedSupEvidenceId]);
+  const selectedSupervisorEvidence = useMemo(() => filteredSupervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) || filteredSupervisorEvidences[0] || null, [filteredSupervisorEvidences, selectedSupEvidenceId]);
 
   const expedientAttendance = useMemo(() => (expedient?.evidencias || []).filter(isAttendanceEvidence), [expedient]);
-  const expedientOperational = useMemo(() => (expedient?.evidencias || []).filter(isOperationalEvidence), [expedient]);
+  const expedientOperational = useMemo(() => (expedient?.evidencias || []).filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [expedient]);
 
   async function loadBootstrap() {
     const initData = getInitData();
@@ -775,7 +857,7 @@ export default function App() {
   async function loadEvidencesToday() {
     const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
     const rows = (data.evidencias || []).map((item) => ({ ...item, status: item.status || ("ACTIVA" as const) }));
-    const operationalRows = rows.filter(isOperationalEvidence);
+    const operationalRows = rows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA");
     setAllEvidenceRows(rows);
     if (operationalRows.length && !operationalRows.find((r) => r.evidencia_id === selectedEvidenceId)) setSelectedEvidenceId(operationalRows[0].evidencia_id);
     if (!operationalRows.length) setSelectedEvidenceId("");
@@ -791,7 +873,7 @@ export default function App() {
     try {
       const ctx = await postJson<EvidenceContextResponse>("/miniapp/promotor/evidence-context", { visita_id: visitaId });
       setAvailableBrands(ctx.marcas || []);
-      setSelectedVisitStoreName(ctx.visita?.tienda_nombre || "");
+      setSelectedVisitStoreName(ctx.visita?.tienda_display || ctx.visita?.tienda_nombre || "");
     } catch {
       setAvailableBrands([]);
       setSelectedVisitStoreName("");
@@ -799,22 +881,25 @@ export default function App() {
   }
 
   async function loadRulesForBrand(brandId: string, brandLabel: string) {
-    if (!brandId && !brandLabel) {
-      setBrandRules([]);
-      return;
-    }
     try {
       const rules = await postJson<EvidenceRulesResponse>("/miniapp/promotor/evidence-rules", { marca_id: brandId, marca_nombre: brandLabel });
       const usableRules = (rules.reglas || []).filter((rule) => isValidRuleType(rule.tipo_evidencia));
-      setBrandRules(usableRules);
-      if (usableRules.length) {
-        const first = usableRules[0];
-        if (!evidenceType || !isValidRuleType(evidenceType)) setEvidenceType(first.tipo_evidencia);
-        setEvidenceQty(first.fotos_requeridas || 1);
-        if (first.requiere_antes_despues && evidencePhase === "NA") setEvidencePhase("ANTES");
+      if (!brandId && !brandLabel) { setCatalogRules(usableRules); setBrandRules([]); }
+      else setBrandRules(usableRules);
+      const source = usableRules.length ? usableRules : catalogRules;
+      if (source.length) {
+        const selectedRule = source.find((item) => item.tipo_evidencia === evidenceType) || source[0];
+        if (!evidenceType || !source.find((item) => item.tipo_evidencia === evidenceType)) setEvidenceType(selectedRule.tipo_evidencia);
+        setEvidenceQty(selectedRule.fotos_requeridas || 1);
+        if (selectedRule.requiere_antes_despues) {
+          if (evidencePhase === "NA") setEvidencePhase("ANTES");
+        } else if (evidencePhase !== "NA") {
+          setEvidencePhase("NA");
+        }
       }
     } catch {
-      setBrandRules([]);
+      if (!brandId && !brandLabel) { setCatalogRules([]); setBrandRules([]); }
+      else setBrandRules([]);
     }
   }
 
@@ -828,6 +913,7 @@ export default function App() {
       evidenciasHoy: data.summary?.evidenciasHoy || 0,
       alertas: data.summary?.alertas || 0,
     });
+    setSupervisorUsage(data.usage || {});
   }
 
   async function loadSupervisorTeam() {
@@ -962,6 +1048,7 @@ export default function App() {
     if (role === "promotor") {
       void loadPromotorDashboard();
       void loadEvidencesToday();
+      void loadRulesForBrand("", "");
     }
     if (role === "supervisor") {
       void loadSupervisorDashboard();
@@ -980,7 +1067,7 @@ export default function App() {
     }
   }, [role]);
 
-  useEffect(() => { if (role === "promotor") void loadEvidenceContext(selectedVisitId); }, [selectedVisitId, role]);
+  useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("NA"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
@@ -1031,103 +1118,88 @@ export default function App() {
     void loadClientStoreDetail(selectedClientStoreId);
   }, [role, selectedClientStoreId]);
 
-  function resetFullscreenEvidenceView() {
-    setFullscreenEvidenceZoom(1);
-    setFullscreenEvidenceOffset({ x: 0, y: 0 });
-    fullscreenDragRef.current = null;
-    fullscreenPinchRef.current = null;
+  async function stopCameraStream() {
+    try {
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    } finally {
+      cameraStreamRef.current = null;
+    }
   }
 
-  function openFullscreenEvidence(evidence: EvidenceItem) {
-    setFullscreenEvidence(evidence);
-    resetFullscreenEvidenceView();
+  async function openCamera(target: "entrada" | "salida" | "evidencia", facing: "user" | "environment") {
+    try {
+      setCapturingPhoto(target === "evidencia" ? "entrada" : target);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false });
+      cameraStreamRef.current = stream;
+      setCameraModal({ open: true, target, facing });
+      window.setTimeout(() => {
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          void cameraVideoRef.current.play().catch(() => undefined);
+        }
+      }, 10);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo abrir la cámara.");
+    } finally {
+      setCapturingPhoto(null);
+    }
   }
 
-  function closeFullscreenEvidence() {
-    setFullscreenEvidence(null);
-    resetFullscreenEvidenceView();
+  async function captureFromCameraModal() {
+    const video = cameraVideoRef.current;
+    if (!video || !cameraModal.target) return;
+    const canvas = document.createElement("canvas");
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, width, height);
+    const raw = canvas.toDataURL("image/jpeg", 0.85);
+    const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
+    const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
+    if (cameraModal.target === "entrada") {
+      setEntryPhoto(payload);
+      setStatusMsg("Foto de entrada lista.");
+    } else if (cameraModal.target === "salida") {
+      setExitPhoto(payload);
+      setStatusMsg("Foto de salida lista.");
+    } else {
+      setEvidencePhotos((prev) => [...prev, payload].slice(0, 24));
+      setStatusMsg("Foto de evidencia agregada.");
+    }
+    setCameraModal({ open: false, target: null, facing: "environment" });
+    await stopCameraStream();
   }
 
-  function zoomFullscreenEvidence(delta: number) {
-    setFullscreenEvidenceZoom((prev) => {
-      const next = Math.max(1, Math.min(5, Number((prev + delta).toFixed(2))));
-      if (next === 1) setFullscreenEvidenceOffset({ x: 0, y: 0 });
-      return next;
-    });
+  async function closeCameraModal() {
+    setCameraModal({ open: false, target: null, facing: "environment" });
+    await stopCameraStream();
   }
 
-  function beginFullscreenDrag(clientX: number, clientY: number) {
-    if (fullscreenEvidenceZoom <= 1) return;
-    fullscreenDragRef.current = {
-      x: clientX,
-      y: clientY,
-      offsetX: fullscreenEvidenceOffset.x,
-      offsetY: fullscreenEvidenceOffset.y,
-    };
+  function openImageViewer(src?: string) {
+    if (!src) return;
+    setImageViewerSrc(src);
   }
 
-  function updateFullscreenDrag(clientX: number, clientY: number) {
-    const drag = fullscreenDragRef.current;
-    if (!drag || fullscreenEvidenceZoom <= 1) return;
-    setFullscreenEvidenceOffset({
-      x: drag.offsetX + (clientX - drag.x),
-      y: drag.offsetY + (clientY - drag.y),
-    });
-  }
-
-  function endFullscreenDrag() {
-    fullscreenDragRef.current = null;
-    fullscreenPinchRef.current = null;
-  }
-
-  function handleFullscreenDoubleTap() {
-    if (!fullscreenEvidence) return;
-    if (fullscreenEvidenceZoom > 1) {
-      resetFullscreenEvidenceView();
+  function handleImageTap(src?: string) {
+    if (!src) return;
+    const now = Date.now();
+    if (lastImageTapRef.current.src === src && now - lastImageTapRef.current.at < 280) {
+      openImageViewer(src);
+      lastImageTapRef.current = { src: "", at: 0 };
       return;
     }
-    setFullscreenEvidenceZoom(2.2);
+    lastImageTapRef.current = { src, at: now };
   }
 
-  function handleFullscreenTouchStart(event: React.TouchEvent<HTMLDivElement>) {
-    if (event.touches.length === 2) {
-      fullscreenPinchRef.current = {
-        distance: getTouchDistance(event.touches),
-        zoom: fullscreenEvidenceZoom,
-      };
-      fullscreenDragRef.current = null;
-      return;
-    }
-    if (event.touches.length === 1) {
-      const now = Date.now();
-      if (now - fullscreenLastTapRef.current < 260) {
-        event.preventDefault();
-        handleFullscreenDoubleTap();
-      }
-      fullscreenLastTapRef.current = now;
-      beginFullscreenDrag(event.touches[0].clientX, event.touches[0].clientY);
-    }
+  function removeEvidencePhotoAt(index: number) {
+    setEvidencePhotos((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function handleFullscreenTouchMove(event: React.TouchEvent<HTMLDivElement>) {
-    if (event.touches.length === 2 && fullscreenPinchRef.current) {
-      event.preventDefault();
-      const distance = getTouchDistance(event.touches);
-      const pinch = fullscreenPinchRef.current;
-      const next = Math.max(1, Math.min(5, Number((pinch.zoom * (distance / Math.max(1, pinch.distance))).toFixed(2))));
-      setFullscreenEvidenceZoom(next);
-      if (next === 1) setFullscreenEvidenceOffset({ x: 0, y: 0 });
-      return;
-    }
-    if (event.touches.length === 1 && fullscreenEvidenceZoom > 1) {
-      event.preventDefault();
-      updateFullscreenDrag(event.touches[0].clientX, event.touches[0].clientY);
-    }
-  }
-
-  function handleFullscreenTouchEnd() {
-    if (fullscreenPinchRef.current) fullscreenPinchRef.current = null;
-    if (!fullscreenEvidence || fullscreenEvidenceZoom <= 1) fullscreenDragRef.current = null;
+  function clearEvidencePhotos() {
+    setEvidencePhotos([]);
   }
 
   async function captureLocation(kind: CaptureKind) {
@@ -1171,12 +1243,12 @@ export default function App() {
   }
 
   async function captureEvidencePhotos(fileList: FileList | null) {
-    const files = Array.from(fileList || []).slice(0, 10);
+    const files = Array.from(fileList || []).slice(0, 12);
     if (!files.length) return;
     try {
       setCapturingPhoto("entrada");
       const processed = await Promise.all(files.map(async (file) => ({ name: file.name, dataUrl: await readPhotoForSheets(file), capturedAt: nowMxString() })));
-      setEvidencePhotos((prev) => [...prev, ...processed].slice(0, 12));
+      setEvidencePhotos((prev) => [...prev, ...processed].slice(0, 24));
       setStatusMsg(`${processed.length} foto(s) agregadas.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudieron procesar las fotos.");
@@ -1202,7 +1274,8 @@ export default function App() {
         foto_nombre: entryPhoto.name,
         foto_data_url: entryPhoto.dataUrl,
       });
-      setStatusMsg(response.warning === "attendance_photo_too_large_for_sheets" ? "Entrada registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets." : `Entrada registrada en ${response.tienda_nombre}`);
+      setStatusMsgDuration(6800);
+      setStatusMsg(response.warning === "attendance_photo_too_large_for_sheets" ? "Entrada registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets." : `Entrada registrada en ${response.tienda_display || response.tienda_nombre}`);
       setEntryLocation(null);
       setEntryPhoto(null);
       setExitLocation(null);
@@ -1210,7 +1283,12 @@ export default function App() {
       await loadPromotorDashboard();
       await loadEvidencesToday();
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la entrada real.");
+      const message = err instanceof Error ? err.message : "No se pudo registrar la entrada real.";
+      if (message.includes("Ya tienes una visita abierta")) {
+        setEntryPhoto(null);
+        setStatusMsgDuration(7000);
+      }
+      setStatusMsg(message);
     } finally {
       setSyncing(false);
     }
@@ -1270,7 +1348,11 @@ export default function App() {
       setEvidencePhotos([]);
       setBrandRules([]);
       await loadEvidencesToday();
-      setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
+      if ((result as any).postprocess_warning) {
+        setStatusMsg("Evidencia registrada. El análisis quedó programado y puede tardar unos segundos.");
+      } else {
+        setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
+      }
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
     } finally {
@@ -1281,10 +1363,18 @@ export default function App() {
   async function markEvidenceAsCancelled() {
     try {
       if (!selectedEvidence) return setStatusMsg("Selecciona una evidencia.");
+      const confirmed = typeof window === "undefined" ? true : window.confirm(`¿Realmente deseas anular esta foto?
+
+${getStoreDisplayFromItem(selectedEvidence)}
+${normalizeBrandLabel(selectedEvidence.marca_nombre || "", "Marca")}
+${selectedEvidence.tipo_evidencia}
+${selectedEvidence.fecha_hora_fmt}`);
+      if (!confirmed) return;
       setSyncing(true);
       await postJson("/miniapp/promotor/cancel-evidence", { evidencia_id: selectedEvidence.evidencia_id, note: noteDraft || "" });
       setNoteDraft("");
       await loadEvidencesToday();
+      setSelectedEvidenceId("");
       setStatusMsg("Evidencia anulada.");
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo anular la evidencia.");
@@ -1296,6 +1386,13 @@ export default function App() {
   async function replaceEvidencePhoto(fileList: FileList | null) {
     const file = fileList?.[0];
     if (!file || !selectedEvidence) return;
+    const confirmed = typeof window === "undefined" ? true : window.confirm(`¿Deseas reemplazar esta foto?
+
+${getStoreDisplayFromItem(selectedEvidence)}
+${normalizeBrandLabel(selectedEvidence.marca_nombre || "", "Marca")}
+${selectedEvidence.tipo_evidencia}
+${selectedEvidence.fecha_hora_fmt}`);
+    if (!confirmed) return;
     try {
       setSyncing(true);
       const dataUrl = await readPhotoForSheets(file);
@@ -1372,7 +1469,7 @@ export default function App() {
   }
 
   function selectAllVisibleSupervisorEvidences() {
-    const ids = supervisorEvidences.map((item) => item.evidencia_id);
+    const ids = filteredSupervisorEvidences.map((item) => item.evidencia_id);
     setSelectedSupEvidenceIds(ids);
     if (ids[0]) setSelectedSupEvidenceId(ids[0]);
   }
@@ -1612,7 +1709,7 @@ export default function App() {
               <div className="galleryGrid">
                 {clientEvidences.map((item) => (
                   <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" /></div>
+                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
                     <div className="galleryBodyCompact">
                       <div className="galleryTop compactTop">
                         <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
@@ -1678,7 +1775,7 @@ export default function App() {
                 <select className="inputLike" value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)}>
                   <option value="">Selecciona una tienda</option>
                   {stores.map((store) => (
-                    <option key={store.tienda_id} value={store.tienda_id}>{store.nombre_tienda}</option>
+                    <option key={store.tienda_id} value={store.tienda_id}>{formatStoreDisplay(store.tienda_id, store.nombre_tienda)}</option>
                   ))}
                 </select>
 
@@ -1689,11 +1786,10 @@ export default function App() {
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
                     </button>
-                    <label className="fileBtn compactBtn">
+                    <button className="secondaryBtn compactBtn" onClick={() => void openCamera("entrada", "user")}>
                       <Camera size={16} />
-                      {capturingPhoto === "entrada" ? "Procesando..." : entryPhoto ? "Selfie lista" : "Tomar selfie"}
-                      <input type="file" accept="image/*" capture="user" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
-                    </label>
+                      {entryPhoto ? "Selfie lista" : "Tomar selfie"}
+                    </button>
                     <label className="fileBtn compactBtn">
                       <ImageIcon size={16} />
                       {entryPhoto ? "Reemplazar con galería" : "Elegir de galería"}
@@ -1718,11 +1814,10 @@ export default function App() {
                           <MapPin size={16} />
                           {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
                         </button>
-                        <label className="fileBtn compactBtn">
+                        <button className="secondaryBtn compactBtn" onClick={() => void openCamera("salida", "user")}>
                           <Camera size={16} />
-                          {capturingPhoto === "salida" ? "Procesando..." : exitPhoto ? "Selfie lista" : "Tomar selfie"}
-                          <input type="file" accept="image/*" capture="user" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
-                        </label>
+                          {exitPhoto ? "Selfie lista" : "Tomar selfie"}
+                        </button>
                         <label className="fileBtn compactBtn">
                           <ImageIcon size={16} />
                           {exitPhoto ? "Reemplazar con galería" : "Elegir de galería"}
@@ -1733,7 +1828,7 @@ export default function App() {
                       {exitPhoto ? <div className="thumbRow"><img src={exitPhoto.dataUrl} className="thumb" alt="Salida" /></div> : null}
                     </div>
 
-                    <button className="secondaryBtn" onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
+                    <button className="secondaryBtn" style={{ background: "#d32f2f", color: "white" }} onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
                       <CheckCircle2 size={16} />
                       {syncing ? "Procesando..." : "Registrar salida"}
                     </button>
@@ -1772,7 +1867,7 @@ export default function App() {
                               <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
                               <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo || "BAJO"}</span>
                             </div>
-                            {item.tienda_nombre ? <div className="gallerySub compactMeta">{item.tienda_nombre}</div> : null}
+                            {getStoreDisplayFromItem(item) ? <div className="gallerySub compactMeta">{getStoreDisplayFromItem(item)}</div> : null}
                             <div className="galleryDate">{item.fecha_hora_fmt}</div>
                           </div>
                         ))}
@@ -1805,6 +1900,7 @@ export default function App() {
                   setEvidenceBrandId(e.target.value);
                   setEvidenceBrandLabel(normalizeBrandLabel(brand?.marca_nombre || "", brand?.marca_id || ""));
                   setEvidenceType("");
+                  setEvidencePhase("NA");
                 }}>
                   <option value="">Selecciona una marca</option>
                   {availableBrands.map((brand) => (
@@ -1813,37 +1909,58 @@ export default function App() {
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                {brandRules.length ? (
-                  <select className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
-                    <option value="">Selecciona un tipo</option>
-                    {brandRules.filter((rule) => isValidRuleType(rule.tipo_evidencia)).map((rule) => (
-                      <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>{rule.tipo_evidencia}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input className="inputLike" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)} placeholder="Tipo de evidencia" />
-                )}
+                <select className="inputLike" value={evidenceType} onChange={(e) => {
+                  const nextType = e.target.value;
+                  setEvidenceType(nextType);
+                  const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
+                  if (nextRule) {
+                    setEvidenceQty(nextRule.fotos_requeridas || 1);
+                    setEvidencePhase(nextRule.requiere_antes_despues ? "ANTES" : "NA");
+                  }
+                }} disabled={!evidenceTypeOptions.length}>
+                  <option value="">{evidenceTypeOptions.length ? "Selecciona un tipo" : "Selecciona primero tienda y marca"}</option>
+                  {evidenceTypeOptions.map((rule) => (
+                    <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>{rule.tipo_evidencia}</option>
+                  ))}
+                </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
-                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)}>
-                  <option value="NA">No aplica</option>
-                  <option value="ANTES">Antes</option>
-                  <option value="DESPUES">Después</option>
+                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={!evidenceType}>
+                  {evidencePhaseOptions.map((value) => <option key={value} value={value}>{value === "NA" ? "No aplica" : value === "ANTES" ? "Antes" : "Después"}</option>)}
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
-                <input className="inputLike" type="number" min={1} max={10} value={evidenceQty} readOnly disabled />
+                <input className="inputLike" type="number" min={1} max={24} value={evidenceQty} readOnly disabled />
               </div>
 
               <div className="panel">
                 <label className="fieldLabel">Observación</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
-                <label className="fileBtn wideFileBtn" style={{ marginTop: 12 }}>
-                  <Camera size={16} />
-                  {capturingPhoto ? "Procesando..." : evidencePhotos.length ? `${evidencePhotos.length} foto(s) listas` : "Agregar fotos de evidencia"}
-                  <input type="file" accept="image/*" multiple onChange={(e) => void captureEvidencePhotos(e.target.files)} />
-                </label>
-                {evidencePhotos.length ? <div className="thumbGrid">{evidencePhotos.map((photo) => <img key={`${photo.name}-${photo.capturedAt}`} src={photo.dataUrl} className="thumb" alt={photo.name} />)}</div> : null}
+                <div className="captureGrid" style={{ marginTop: 12 }}>
+                  <button className="secondaryBtn compactBtn" onClick={() => void openCamera("evidencia", "environment") }>
+                    <Camera size={16} />
+                    Tomar foto
+                  </button>
+                  <label className="fileBtn compactBtn">
+                    <ImageIcon size={16} />
+                    Elegir de galería
+                    <input type="file" accept="image/*" multiple onChange={(e) => void captureEvidencePhotos(e.target.files)} />
+                  </label>
+                </div>
+                <div className="contextHint">Máximo 24 fotos en la selección actual.</div>
+                {evidencePhotos.length ? (
+                  <>
+                    <div className="thumbGrid">{evidencePhotos.map((photo, index) => (
+                      <div key={`${photo.name}-${photo.capturedAt}`} style={{ position: "relative" }}>
+                        <img src={photo.dataUrl} className="thumb" alt={photo.name} />
+                        <button className="removeThumbBtn" onClick={() => removeEvidencePhotoAt(index)} aria-label="Quitar foto">×</button>
+                      </div>
+                    ))}</div>
+                    <div className="actionGrid actionGridButtons">
+                      <button className="actionButton" onClick={() => clearEvidencePhotos()}><Trash2 size={16} /><span>Limpiar selección</span></button>
+                    </div>
+                  </>
+                ) : null}
                 <button className="primaryBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing}>
                   <Camera size={16} />
                   {syncing ? "Guardando..." : "Registrar evidencia"}
@@ -1857,15 +1974,15 @@ export default function App() {
           <div className="card">
             <div className="sectionTitle">Mis evidencias</div>
             <div className="filtersRow">
-              <select className="inputLike" value={evidenceFilterStore} onChange={(e) => setEvidenceFilterStore(e.target.value)}>
+              <select className="inputLike" value={evidenceFilterStore} onChange={(e) => { setEvidenceFilterStore(e.target.value); setEvidenceFilterBrand(""); setEvidenceFilterType(""); setEvidenceFilterPhase(""); }}>
                 <option value="">Todas las tiendas</option>
                 {evidenceFilterOptions.stores.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
-              <select className="inputLike" value={evidenceFilterBrand} onChange={(e) => setEvidenceFilterBrand(e.target.value)}>
+              <select className="inputLike" value={evidenceFilterBrand} onChange={(e) => { setEvidenceFilterBrand(e.target.value); setEvidenceFilterType(""); setEvidenceFilterPhase(""); }}>
                 <option value="">Todas las marcas</option>
                 {evidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{normalizeBrandLabel(value, "Marca")}</option>)}
               </select>
-              <select className="inputLike" value={evidenceFilterType} onChange={(e) => setEvidenceFilterType(e.target.value)}>
+              <select className="inputLike" value={evidenceFilterType} onChange={(e) => { setEvidenceFilterType(e.target.value); setEvidenceFilterPhase(""); }}>
                 <option value="">Todos los tipos</option>
                 {evidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
@@ -1880,7 +1997,7 @@ export default function App() {
                 <div className="stack compactStack">
                   {filteredOperationalGallery.map((item) => (
                     <button key={item.evidencia_id} onClick={() => setSelectedEvidenceId(item.evidencia_id)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
-                      <div className="listTitle">{item.tienda_nombre || "Visita activa"}</div>
+                      <div className="listTitle">{getStoreDisplayFromItem(item) || "Visita activa"}</div>
                       <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
                     </button>
                   ))}
@@ -1891,13 +2008,13 @@ export default function App() {
                 <div className="miniTitle">Acciones</div>
                 {selectedEvidence ? (
                   <>
-                    <div className="previewFrame"><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
-                    {selectedEvidence.tienda_nombre ? <div className="summaryLine">{selectedEvidence.tienda_nombre}</div> : null}
+                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
+                    {getStoreDisplayFromItem(selectedEvidence) ? <div className="summaryLine">{getStoreDisplayFromItem(selectedEvidence)}</div> : null}
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
                     <div className="summaryLine">Riesgo: <strong>{selectedEvidence.riesgo}</strong></div>
                     <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => setStatusMsg("Vista previa lista.")}><Eye size={16} /><span>Ver</span></button>
+                      <button className="actionButton" onClick={() => openImageViewer(selectedEvidence.url_foto)}><Eye size={16} /><span>Ver foto</span></button>
                       <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}><Trash2 size={16} /><span>Anular</span></button>
                       <label className="actionButton"><Camera size={16} /><span>Reemplazar</span><input type="file" accept="image/*" onChange={(e) => void replaceEvidencePhoto(e.target.files)} /></label>
                       <button className="actionButton" onClick={() => void saveNote()}><Pencil size={16} /><span>Guardar nota</span></button>
@@ -1956,6 +2073,14 @@ export default function App() {
               <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{supervisorSummary.evidenciasHoy}</div><div className="kpiLabel">Evidencias</div></div>
               <div className="summaryBlock kpiBlock"><ShieldAlert size={16} /><div className="kpiValue">{supervisorSummary.alertas}</div><div className="kpiLabel">Alertas</div></div>
             </div>
+            <div className="twoCol" style={{ marginTop: 12 }}>
+              <div className="panel">
+                <div className="miniTitle">Consumo aproximado</div>
+                <div className="summaryLine">Fotos hoy: <strong>{supervisorUsage.today?.fotos || 0}</strong></div>
+                <div className="summaryLine">MB hoy: <strong>{supervisorUsage.today?.mb?.toFixed ? supervisorUsage.today.mb.toFixed(2) : (supervisorUsage.today?.mb || 0)}</strong></div>
+                <div className="summaryLine">MB mes: <strong>{supervisorUsage.month?.mb?.toFixed ? supervisorUsage.month.mb.toFixed(2) : (supervisorUsage.month?.mb || 0)}</strong></div>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -1997,7 +2122,7 @@ export default function App() {
                     <div className="summaryLine">Abiertas: <strong>{selectedTeamMember.visitas_abiertas}</strong></div>
                     <div className="summaryLine">Evidencias hoy: <strong>{selectedTeamMember.evidencias_hoy}</strong></div>
                     <div className="summaryLine">Alertas abiertas: <strong>{selectedTeamMember.alertas_abiertas}</strong></div>
-                    <div className="summaryLine">Última tienda: {selectedTeamMember.ultima_tienda || "-"}</div>
+                    <div className="summaryLine">Última tienda: {selectedTeamMember.ultima_tienda_display || selectedTeamMember.ultima_tienda || "-"}</div>
                     <div className="summaryLine">Última entrada: {formatHourFromIso(selectedTeamMember.ultima_entrada)}</div>
                     <div className="summaryLine">Última salida: {selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</div>
                     <div className="summaryLine">Estatus: <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span></div>
@@ -2043,7 +2168,7 @@ export default function App() {
                   {supervisorAlerts.map((item) => (
                     <button key={item.alerta_id} onClick={() => setSelectedAlertId(item.alerta_id)} className={`listBtn ${selectedAlertId === item.alerta_id ? "listBtnGreen" : ""}`}>
                       <div className="listTitle">{item.promotor_nombre || item.promotor_id}</div>
-                      <div className="listSub">{item.tienda_nombre || item.tienda_id || "Tienda"} · {item.tipo_alerta}</div>
+                      <div className="listSub">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {item.tipo_alerta}</div>
                       <div className="geoRow">
                         <span className={`riskBadge ${severityClass(item.severidad)}`}>{item.severidad}</span>
                         <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>
@@ -2058,11 +2183,13 @@ export default function App() {
                 {selectedAlert ? (
                   <>
                     <div className="summaryLine"><strong>{selectedAlert.promotor_nombre || selectedAlert.promotor_id}</strong></div>
-                    <div className="summaryLine">Tienda: {selectedAlert.tienda_nombre || selectedAlert.tienda_id || "-"}</div>
+                    <div className="summaryLine">Tienda: {selectedAlert.tienda_display || selectedAlert.tienda_nombre || selectedAlert.tienda_id || "-"}</div>
                     <div className="summaryLine">Tipo: {selectedAlert.tipo_alerta}</div>
                     <div className="summaryLine">Fecha: {selectedAlert.fecha_hora_fmt}</div>
                     <div className="summaryLine">Canal: {selectedAlert.canal_notificacion || "-"}</div>
                     <div className="summaryLine">Descripción: {selectedAlert.descripcion || "-"}</div>
+                    {selectedAlert.url_foto ? <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedAlert.url_foto)} onClick={() => handleImageTap(selectedAlert.url_foto)}><img src={selectedAlert.url_foto} alt={selectedAlert.tipo_alerta} className="img" /></div> : null}
+                    {selectedAlert.hallazgos_ai ? <div className="summaryLine">Causa detectada: {selectedAlert.hallazgos_ai}</div> : null}
                     <div className="geoRow">
                       <span className={`riskBadge ${severityClass(selectedAlert.severidad)}`}>{selectedAlert.severidad}</span>
                       <span className={`riskBadge ${statusClass(selectedAlert.status)}`}>{selectedAlert.status}</span>
@@ -2076,7 +2203,7 @@ export default function App() {
                         {selectedAlert.comentario_cierre ? <div className="summaryLine">Comentario: {selectedAlert.comentario_cierre}</div> : null}
                       </div>
                     ) : null}
-                    <label className="fieldLabel" style={{ marginTop: 10 }}>Estatus final</label>
+                    <div className="traceBox" style={{ marginBottom: 10 }}><div className="traceTitle">¿Qué significa?</div><div className="summaryLine"><strong>RESUELTA</strong>: la alerta sí aplicaba y ya fue atendida.</div><div className="summaryLine"><strong>DESCARTADA</strong>: la alerta no aplicaba o fue falso positivo.</div></div><label className="fieldLabel" style={{ marginTop: 10 }}>Estatus final</label>
                     <select className="inputLike" value={alertFinalStatus} onChange={(e) => setAlertFinalStatus(e.target.value as AlertFinalStatus)}>
                       <option value="RESUELTA">RESUELTA</option>
                       <option value="DESCARTADA">DESCARTADA</option>
@@ -2100,15 +2227,15 @@ export default function App() {
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
             <div className="filtersRow">
-              <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => setSupEvidencePromotorFilter(e.target.value)}>
+              <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => { setSupEvidencePromotorFilter(e.target.value); setSupEvidenceStoreFilter(""); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); }}>
                 <option value="">Todos los promotores</option>
                 {supervisorPromotorOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.nombre}</option>)}
               </select>
-              <select className="inputLike" value={supEvidenceStoreFilter} onChange={(e) => setSupEvidenceStoreFilter(e.target.value)}>
+              <select className="inputLike" value={supEvidenceStoreFilter} onChange={(e) => { setSupEvidenceStoreFilter(e.target.value); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); }}>
                 <option value="">Todas las tiendas</option>
                 {supervisorEvidenceFilterOptions.stores.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
-              <select className="inputLike" value={supEvidenceBrandFilter} onChange={(e) => setSupEvidenceBrandFilter(e.target.value)}>
+              <select className="inputLike" value={supEvidenceBrandFilter} onChange={(e) => { setSupEvidenceBrandFilter(e.target.value); setSupEvidenceTypeFilter(""); }}>
                 <option value="">Todas las marcas</option>
                 {supervisorEvidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
@@ -2124,7 +2251,7 @@ export default function App() {
               </select>
             </div>
 
-            {!supervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas para poblar filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
+            {!filteredSupervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas para poblar filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
 
             <div className="selectionToolbar">
               <div className="selectionToolbarLeft">
@@ -2151,7 +2278,7 @@ export default function App() {
             ) : null}
 
             <div className="galleryReviewGrid">
-              {supervisorEvidences.map((item) => {
+              {filteredSupervisorEvidences.map((item) => {
                 const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
                 return (
                   <div
@@ -2188,14 +2315,15 @@ export default function App() {
                 <div className="sectionTitle">Detalle de evidencia</div>
                 <div className="twoCol">
                   <div className="panel">
-                    <button className="previewFrame previewFrameButton" onClick={() => openFullscreenEvidence(selectedSupervisorEvidence)}>
-                      <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" />
-                    </button>
+                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
                     <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
                     <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
                     <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
                     <div className="summaryLine">Descripción: {cleanEvidenceDescription(selectedSupervisorEvidence.descripcion)}</div>
-                    <div className="summaryLine summaryGeo">Toca la imagen para verla completa. Doble toque para ampliar y pellizca con dos dedos para zoom.</div>
+                    {selectedSupervisorEvidence.resultado_ai ? <div className="summaryLine">Resultado AI: <strong>{selectedSupervisorEvidence.resultado_ai}</strong></div> : null}
+                    {selectedSupervisorEvidence.hallazgos_ai ? <div className="summaryLine">Causa detectada: {selectedSupervisorEvidence.hallazgos_ai}</div> : null}
+                    {selectedSupervisorEvidence.reglas_disparadas ? <div className="summaryLine">Reglas activadas: {selectedSupervisorEvidence.reglas_disparadas}</div> : null}
+                    {selectedSupervisorEvidence.score_confianza ? <div className="summaryLine">Confianza estimada: {selectedSupervisorEvidence.score_confianza}</div> : null}
                   </div>
                   <div className="panel">
                     <div className="miniTitle">Revisión individual</div>
@@ -2220,7 +2348,6 @@ export default function App() {
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar revisión</span></button>
                       <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
-                      <button className="actionButton" onClick={() => openFullscreenEvidence(selectedSupervisorEvidence)}><ImageIcon size={16} /><span>Ver completa</span></button>
                     </div>
                   </div>
                 </div>
@@ -2263,13 +2390,27 @@ export default function App() {
                 <div className="panel">
                   <div className="miniTitle">Visita</div>
                   <div className="summaryLine"><strong>{expedient.visita?.promotor_nombre || "Promotor"}</strong></div>
-                  <div className="summaryLine">Tienda: {expedient.visita?.tienda_nombre || expedient.visita?.tienda_id || "-"}</div>
+                  <div className="summaryLine">Tienda: {expedient.visita?.tienda_display || expedient.visita?.tienda_nombre || expedient.visita?.tienda_id || "-"}</div>
                   <div className="summaryLine">Entrada: {formatHourFromIso(expedient.visita?.hora_inicio || "")}</div>
                   <div className="summaryLine">Salida: {expedient.visita?.hora_fin ? formatHourFromIso(expedient.visita.hora_fin) : "Pendiente"}</div>
+                  <div className="summaryLine">Tiempo de estancia: {expedient.visita?.duracion_fmt || "-"}</div>
                   <div className="geoRow">
                     <span className={`geoBadge ${geofenceClass(expedient.visita?.resultado_geocerca_entrada)}`}>E: {geofenceShortLabel(expedient.visita?.resultado_geocerca_entrada)}</span>
                     <span className={`geoBadge ${geofenceClass(expedient.visita?.resultado_geocerca_salida)}`}>S: {geofenceShortLabel(expedient.visita?.resultado_geocerca_salida)}</span>
                   </div>
+                </div>
+                <div className="panel">
+                  <div className="miniTitle">Resumen de la visita</div>
+                  <div className="summaryLine">Evidencias operativas: <strong>{expedient.resumen?.total_evidencias || 0}</strong></div>
+                  <div className="summaryLine">Alertas: <strong>{expedient.resumen?.total_alertas || 0}</strong></div>
+                  {expedient.resumen?.por_marca_tipo_fase ? Object.entries(expedient.resumen.por_marca_tipo_fase).map(([marca, tipos]) => (
+                    <div key={marca} className="traceBox">
+                      <div className="traceTitle">{marca}</div>
+                      {Object.entries(tipos).map(([tipo, fases]) => (
+                        <div key={tipo} className="summaryLine"><strong>{tipo}</strong>: {Object.entries(fases).map(([fase, total]) => `${fase} ${total}`).join(" · ")}</div>
+                      ))}
+                    </div>
+                  )) : null}
                 </div>
                 <div className="panel">
                   <div className="miniTitle">Alertas ligadas</div>
@@ -2331,58 +2472,22 @@ export default function App() {
           </div>
         ) : null}
 
-        {fullscreenEvidence ? (
-          <div
-            className="fullscreenOverlay"
-            onClick={(event) => {
-              if (event.target === event.currentTarget) closeFullscreenEvidence();
-            }}
-          >
-            <div className="fullscreenViewer" onClick={(event) => event.stopPropagation()}>
-              <div className="fullscreenTopBar">
-                <div>
-                  <div className="fullscreenTitle">{fullscreenEvidence.tipo_evidencia || fullscreenEvidence.tipo_evento || "Evidencia"}</div>
-                  <div className="fullscreenMeta">{compactMetaLine(fullscreenEvidence)} · {fullscreenEvidence.fecha_hora_fmt}</div>
-                </div>
-                <div className="fullscreenActions">
-                  <button type="button" className="fullscreenCtl" onClick={() => zoomFullscreenEvidence(-0.2)}>−</button>
-                  <button type="button" className="fullscreenCtl" onClick={() => zoomFullscreenEvidence(0.2)}>+</button>
-                  <button type="button" className="fullscreenCtl" onClick={resetFullscreenEvidenceView}>Reset</button>
-                  <button type="button" className="fullscreenCtl fullscreenClose" onClick={closeFullscreenEvidence}>Cerrar</button>
-                </div>
-              </div>
-              <div
-                className="fullscreenStage"
-                onDoubleClick={handleFullscreenDoubleTap}
-                onMouseDown={(event) => beginFullscreenDrag(event.clientX, event.clientY)}
-                onMouseMove={(event) => updateFullscreenDrag(event.clientX, event.clientY)}
-                onMouseUp={endFullscreenDrag}
-                onMouseLeave={endFullscreenDrag}
-                onTouchStart={handleFullscreenTouchStart}
-                onTouchMove={handleFullscreenTouchMove}
-                onTouchEnd={handleFullscreenTouchEnd}
-                onWheel={(event) => {
-                  event.preventDefault();
-                  zoomFullscreenEvidence(event.deltaY > 0 ? -0.12 : 0.12);
-                }}
-              >
-                <img
-                  src={fullscreenEvidence.url_foto}
-                  alt={fullscreenEvidence.tipo_evidencia || "Evidencia"}
-                  className="fullscreenImage"
-                  draggable={false}
-                  style={{
-                    transform: `translate(${fullscreenEvidenceOffset.x}px, ${fullscreenEvidenceOffset.y}px) scale(${fullscreenEvidenceZoom})`,
-                    cursor: fullscreenEvidenceZoom > 1 ? 'grab' : 'zoom-in',
-                  }}
-                />
-              </div>
-              <div className="fullscreenMeta">
-                Riesgo: <strong>{fullscreenEvidence.riesgo || 'N/D'}</strong>
-                {fullscreenEvidence.promotor_nombre ? ` · Promotor: ${fullscreenEvidence.promotor_nombre}` : ''}
-                {fullscreenEvidence.tienda_nombre ? ` · Tienda: ${fullscreenEvidence.tienda_nombre}` : ''}
+        {cameraModal.open ? (
+          <div className="overlayBackdrop" onClick={() => void closeCameraModal()}>
+            <div className="cameraModal" onClick={(e) => e.stopPropagation()}>
+              <div className="miniTitle">Captura de foto</div>
+              <video ref={cameraVideoRef} className="cameraVideo" playsInline muted autoPlay />
+              <div className="actionGrid actionGridButtons">
+                <button className="primaryBtn" onClick={() => void captureFromCameraModal()}><Camera size={16} />Capturar</button>
+                <button className="secondaryBtn" onClick={() => void closeCameraModal()}><Trash2 size={16} />Cancelar</button>
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {imageViewerSrc ? (
+          <div className="overlayBackdrop" onClick={() => setImageViewerSrc("")}>
+            <img src={imageViewerSrc} alt="Vista ampliada" className="overlayImage" />
           </div>
         ) : null}
 
@@ -2510,17 +2615,6 @@ input[type=file] { display: none; }
 .summaryLine { color: #455a64; font-size: 13px; margin-top: 8px; }
 .summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; margin-bottom: 10px; }
-.previewFrameButton { width: 100%; padding: 0; border: 0; cursor: zoom-in; }
-.fullscreenOverlay { position: fixed; inset: 0; background: rgba(9, 14, 19, 0.9); display: flex; align-items: center; justify-content: center; padding: 14px; z-index: 60; }
-.fullscreenViewer { width: min(100%, 1080px); height: min(92vh, 920px); background: rgba(16, 23, 28, 0.96); border-radius: 18px; border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 18px 40px rgba(0,0,0,0.35); }
-.fullscreenTopBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; color: #f3f6f8; background: rgba(255,255,255,0.04); }
-.fullscreenTitle { font-size: 14px; font-weight: 700; }
-.fullscreenActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.fullscreenCtl { border: 0; border-radius: 10px; padding: 8px 12px; background: #ffffff; color: #162028; font-weight: 700; cursor: pointer; }
-.fullscreenClose { background: #dff5e9; }
-.fullscreenStage { position: relative; flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; background: #0b1217; }
-.fullscreenImage { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; transform-origin: center center; transition: transform 0.08s ease-out; }
-.fullscreenMeta { padding: 10px 14px 14px; color: #d5dde1; font-size: 12px; }
 .actionButton { border: 0; border-radius: 12px; background: rgba(96,125,139,0.12); color: #37474f; font-weight: 700; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
 .compactGalleryScroll { max-height: 320px; }
@@ -2565,6 +2659,11 @@ input[type=file] { display: none; }
 .selectionPillActive { background: #4caf50; color: white; border-color: rgba(76,175,80,.65); }
 .detailSubcard { margin-top: 16px; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
+.removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
+.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 18px; }
+.overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; }
+.cameraModal { width: min(92vw, 520px); background: #111; border-radius: 18px; padding: 14px; }
+.cameraVideo { width: 100%; border-radius: 14px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; }
 @media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .galleryReviewGrid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } }
 `;
