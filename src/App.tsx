@@ -2331,6 +2331,61 @@ export default function App() {
           </div>
         ) : null}
 
+        {fullscreenEvidence ? (
+          <div
+            className="fullscreenOverlay"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) closeFullscreenEvidence();
+            }}
+          >
+            <div className="fullscreenViewer" onClick={(event) => event.stopPropagation()}>
+              <div className="fullscreenTopBar">
+                <div>
+                  <div className="fullscreenTitle">{fullscreenEvidence.tipo_evidencia || fullscreenEvidence.tipo_evento || "Evidencia"}</div>
+                  <div className="fullscreenMeta">{compactMetaLine(fullscreenEvidence)} · {fullscreenEvidence.fecha_hora_fmt}</div>
+                </div>
+                <div className="fullscreenActions">
+                  <button type="button" className="fullscreenCtl" onClick={() => zoomFullscreenEvidence(-0.2)}>−</button>
+                  <button type="button" className="fullscreenCtl" onClick={() => zoomFullscreenEvidence(0.2)}>+</button>
+                  <button type="button" className="fullscreenCtl" onClick={resetFullscreenEvidenceView}>Reset</button>
+                  <button type="button" className="fullscreenCtl fullscreenClose" onClick={closeFullscreenEvidence}>Cerrar</button>
+                </div>
+              </div>
+              <div
+                className="fullscreenStage"
+                onDoubleClick={handleFullscreenDoubleTap}
+                onMouseDown={(event) => beginFullscreenDrag(event.clientX, event.clientY)}
+                onMouseMove={(event) => updateFullscreenDrag(event.clientX, event.clientY)}
+                onMouseUp={endFullscreenDrag}
+                onMouseLeave={endFullscreenDrag}
+                onTouchStart={handleFullscreenTouchStart}
+                onTouchMove={handleFullscreenTouchMove}
+                onTouchEnd={handleFullscreenTouchEnd}
+                onWheel={(event) => {
+                  event.preventDefault();
+                  zoomFullscreenEvidence(event.deltaY > 0 ? -0.12 : 0.12);
+                }}
+              >
+                <img
+                  src={fullscreenEvidence.url_foto}
+                  alt={fullscreenEvidence.tipo_evidencia || "Evidencia"}
+                  className="fullscreenImage"
+                  draggable={false}
+                  style={{
+                    transform: `translate(${fullscreenEvidenceOffset.x}px, ${fullscreenEvidenceOffset.y}px) scale(${fullscreenEvidenceZoom})`,
+                    cursor: fullscreenEvidenceZoom > 1 ? 'grab' : 'zoom-in',
+                  }}
+                />
+              </div>
+              <div className="fullscreenMeta">
+                Riesgo: <strong>{fullscreenEvidence.riesgo || 'N/D'}</strong>
+                {fullscreenEvidence.promotor_nombre ? ` · Promotor: ${fullscreenEvidence.promotor_nombre}` : ''}
+                {fullscreenEvidence.tienda_nombre ? ` · Tienda: ${fullscreenEvidence.tienda_nombre}` : ''}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
