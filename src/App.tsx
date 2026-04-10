@@ -493,8 +493,11 @@ function extractStoreDeterminant(value?: string) {
 
 function formatStoreDisplay(storeId?: string, storeName?: string) {
   const determinante = extractStoreDeterminant(storeId);
-  const nombre = (storeName || storeId || "").trim();
-  return determinante ? `${determinante} - ${nombre}` : nombre;
+  const nombre = (storeName || "").trim();
+  if (!determinante) return nombre;
+  const prefixed = `${determinante} - `;
+  if (nombre.startsWith(prefixed)) return nombre;
+  return nombre ? `${prefixed}${nombre}` : determinante;
 }
 
 function getStoreDisplayFromItem(item?: { tienda_display?: string; tienda_id?: string; tienda_nombre?: string }) {
@@ -1421,7 +1424,7 @@ export default function App() {
     endImageViewerDrag();
   }
 
-  function handleImageViewerTouchStart(event: React.TouchEvent<HTMLImageElement>) {
+  function handleImageViewerTouchStart(event: React.TouchEvent<HTMLElement>) {
     if (event.touches.length === 2) {
       const a = event.touches[0];
       const b = event.touches[1];
@@ -1435,7 +1438,7 @@ export default function App() {
     }
   }
 
-  function handleImageViewerTouchMove(event: React.TouchEvent<HTMLImageElement>) {
+  function handleImageViewerTouchMove(event: React.TouchEvent<HTMLElement>) {
     if (event.touches.length === 2) {
       event.preventDefault();
       const a = event.touches[0];
@@ -1449,6 +1452,9 @@ export default function App() {
     if (event.touches.length === 1 && imageViewerScale > 1) {
       event.preventDefault();
       const touch = event.touches[0];
+      if (!imageViewerTouchRef.current.dragging) {
+        startImageViewerDrag(touch.clientX, touch.clientY);
+      }
       moveImageViewerDrag(touch.clientX, touch.clientY);
     }
   }
@@ -2839,8 +2845,33 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {imageViewerSrc ? (
-          <div className="overlayBackdrop" onClick={() => closeImageViewer()}>
-            <img src={imageViewerSrc} alt="Vista ampliada" className="overlayImage" style={{ transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in" }} onClick={(e) => e.stopPropagation()} onWheel={handleImageViewerWheel} onMouseDown={handleImageViewerMouseDown} onMouseMove={handleImageViewerMouseMove} onMouseUp={handleImageViewerMouseUp} onMouseLeave={handleImageViewerMouseUp} onTouchStart={handleImageViewerTouchStart} onTouchMove={handleImageViewerTouchMove} onTouchEnd={handleImageViewerTouchEnd} onDoubleClick={(e) => { e.stopPropagation(); if (imageViewerScale > 1) { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); } else { zoomImageViewer(2); } }} />
+          <div
+            className="overlayBackdrop"
+            onClick={(e) => { if (e.target === e.currentTarget) closeImageViewer(); }}
+            onMouseMove={handleImageViewerMouseMove as any}
+            onMouseUp={handleImageViewerMouseUp}
+            onMouseLeave={handleImageViewerMouseUp}
+            onTouchStart={handleImageViewerTouchStart as any}
+            onTouchMove={handleImageViewerTouchMove as any}
+            onTouchEnd={handleImageViewerTouchEnd}
+          >
+            <img
+              src={imageViewerSrc}
+              alt="Vista ampliada"
+              className="overlayImage"
+              draggable={false}
+              style={{ transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in", transition: imageViewerDragging ? "none" : "transform .12s ease", userSelect: "none", WebkitUserDrag: "none" as any }}
+              onClick={(e) => e.stopPropagation()}
+              onWheel={handleImageViewerWheel}
+              onMouseDown={handleImageViewerMouseDown}
+              onMouseMove={handleImageViewerMouseMove}
+              onMouseUp={handleImageViewerMouseUp}
+              onMouseLeave={handleImageViewerMouseUp}
+              onTouchStart={handleImageViewerTouchStart}
+              onTouchMove={handleImageViewerTouchMove}
+              onTouchEnd={handleImageViewerTouchEnd}
+              onDoubleClick={(e) => { e.stopPropagation(); if (imageViewerScale > 1) { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); } else { zoomImageViewer(2); } }}
+            />
           </div>
         ) : null}
 
@@ -3013,7 +3044,7 @@ input[type=file] { display: none; }
 .detailSubcard { margin-top: 16px; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
-.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 18px; }
+.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 18px; touch-action: none; overflow: hidden; }
 .overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
 .cameraModal { width: min(92vw, 520px); background: #111; border-radius: 18px; padding: 14px; }
 .cameraVideo { width: 100%; border-radius: 14px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; }
