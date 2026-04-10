@@ -193,11 +193,18 @@ type SupervisorUsageSummary = {
   month?: { bytes: number; mb: number; gb: number; fotos: number };
 };
 
+type SupervisorPendingClose = {
+  open_visits?: number;
+  open_alerts?: number;
+  pending_reviews?: number;
+};
+
 type SupervisorDashboardResponse = {
   ok: boolean;
   supervisor?: { nombre?: string };
   summary?: Partial<SupervisorSummary>;
   usage?: SupervisorUsageSummary;
+  pending_close?: SupervisorPendingClose;
 };
 
 type SupervisorTeamRow = {
@@ -265,6 +272,7 @@ type SupervisorAlert = {
   comentario_cierre?: string;
   origen_cierre?: string;
   url_foto?: string;
+  photo_url?: string;
   hallazgos_ai?: string;
   reglas_disparadas?: string;
   tienda_display?: string;
@@ -273,6 +281,22 @@ type SupervisorAlert = {
 type SupervisorAlertsResponse = {
   ok: boolean;
   alerts?: SupervisorAlert[];
+};
+
+type PromotorRecentAlert = {
+  alerta_id: string;
+  tipo_alerta: string;
+  status: string;
+  fecha_hora?: string;
+  fecha_hora_fmt?: string;
+  tienda_id?: string;
+  tienda_nombre?: string;
+  resolved_classification?: string;
+};
+
+type PromotorRecentAlertsResponse = {
+  ok: boolean;
+  rows?: PromotorRecentAlert[];
 };
 
 type ClientFilterOption = { id: string; label: string };
@@ -361,12 +385,39 @@ type SupervisorEvidencesResponse = {
   evidences?: EvidenceItem[];
 };
 
+type EvidenceAuditRow = {
+  audit_id?: string;
+  fecha_hora?: string;
+  accion?: string;
+  evidencia_id?: string;
+  actor_role?: string;
+  actor_id?: string;
+  estado_previo?: string;
+  estado_nuevo?: string;
+  comentario?: string;
+};
+
+type EvidenceAuditResponse = {
+  ok: boolean;
+  rows?: EvidenceAuditRow[];
+};
+
 type VisitExpedientResponse = {
   ok: boolean;
-  visita?: VisitItem & { duracion_minutos?: number; duracion_fmt?: string };
+  visita?: VisitItem & { stay_minutes?: number; entry_fmt?: string; exit_fmt?: string };
   evidencias?: EvidenceItem[];
   alertas?: SupervisorAlert[];
-  resumen?: { total_evidencias?: number; total_alertas?: number; por_marca_tipo_fase?: Record<string, Record<string, Record<string, number>>> };
+  summary?: { total_evidencias?: number; total_alertas?: number };
+  summary_by_brand?: Array<{
+    marca_id?: string;
+    marca_nombre?: string;
+    total?: number;
+    types?: Array<{
+      tipo_evidencia?: string;
+      total?: number;
+      phases?: Array<{ fase?: string; total?: number }>;
+    }>;
+  }>;
 };
 
 type LocationCapture = {
@@ -384,19 +435,6 @@ type PhotoCapture = {
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
-const FOREGROUND_REFRESH_COOLDOWN_MS = 30000;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isQuotaLikeMessage(message: string) {
-  return /quota exceeded|read requests per minute per user|temporalmente saturado|google sheets/i.test(message || "");
-}
-
-function isTransientServiceMessage(message: string) {
-  return /service_temporarily_unavailable|servicio temporalmente saturado|quota exceeded|demasiadas solicitudes|error 503|error 429/i.test(message || "");
-}
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -411,47 +449,15 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const attempt = async () => {
-      const res = await fetch(`${API_BASE}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData: getInitData(), ...payload }),
-        signal: controller.signal,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const rawMessage = String((json as { error?: string }).error || `Error ${res.status}`);
-        if (res.status === 503 || res.status === 429 || isQuotaLikeMessage(rawMessage)) {
-          throw new Error("SERVICE_TEMPORARILY_UNAVAILABLE::Servicio temporalmente saturado por límite temporal de Google Sheets. Espera 30 a 60 segundos y vuelve a intentar.");
-        }
-        throw new Error(rawMessage);
-      }
-      return json as T;
-    };
-
-    try {
-      return await attempt();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err || "");
-      if (msg.startsWith("SERVICE_TEMPORARILY_UNAVAILABLE::")) {
-        await sleep(1200);
-        try {
-          return await attempt();
-        } catch (retryErr) {
-          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr || "");
-          if (retryMsg.startsWith("SERVICE_TEMPORARILY_UNAVAILABLE::")) {
-            throw new Error(retryMsg.replace("SERVICE_TEMPORARILY_UNAVAILABLE::", ""));
-          }
-          throw retryErr;
-        }
-      }
-      throw err;
-    }
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("La solicitud tardó demasiado. Vuelve a intentar.");
-    }
-    throw err;
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData: getInitData(), ...payload }),
+      signal: controller.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((json as { error?: string }).error || `Error ${res.status}`);
+    return json as T;
   } finally {
     clearTimeout(timeout);
   }
@@ -683,7 +689,6 @@ export default function App() {
   const [detectedExternalId, setDetectedExternalId] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
   const [statusMsgDuration, setStatusMsgDuration] = useState(6800);
-  const foregroundRefreshAtRef = useRef(0);
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -714,6 +719,7 @@ export default function App() {
   const [promotorUsage, setPromotorUsage] = useState<PromotorUsageSummary>({});
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
+  const [promotorRecentAlerts, setPromotorRecentAlerts] = useState<PromotorRecentAlert[]>([]);
   const [evidenceFilterStore, setEvidenceFilterStore] = useState("");
   const [evidenceFilterBrand, setEvidenceFilterBrand] = useState("");
   const [evidenceFilterType, setEvidenceFilterType] = useState("");
@@ -722,6 +728,7 @@ export default function App() {
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
   const [supervisorSummary, setSupervisorSummary] = useState<SupervisorSummary>({ promotores: 0, visitasHoy: 0, abiertas: 0, evidenciasHoy: 0, alertas: 0 });
   const [supervisorUsage, setSupervisorUsage] = useState<SupervisorUsageSummary>({});
+  const [supervisorPendingClose, setSupervisorPendingClose] = useState<SupervisorPendingClose>({});
   const [supervisorTeam, setSupervisorTeam] = useState<SupervisorTeamRow[]>([]);
   const [selectedTeamPromotorId, setSelectedTeamPromotorId] = useState("");
   const [supervisorDayRoute, setSupervisorDayRoute] = useState<SupervisorDayRouteRow[]>([]);
@@ -736,6 +743,7 @@ export default function App() {
   const [supervisorEvidences, setSupervisorEvidences] = useState<EvidenceItem[]>([]);
   const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
   const [selectedSupEvidenceIds, setSelectedSupEvidenceIds] = useState<string[]>([]);
+  const [supervisorEvidenceAudit, setSupervisorEvidenceAudit] = useState<EvidenceAuditRow[]>([]);
   const [supEvidencePromotorFilter, setSupEvidencePromotorFilter] = useState("");
   const [supEvidenceStoreFilter, setSupEvidenceStoreFilter] = useState("");
   const [supEvidenceBrandFilter, setSupEvidenceBrandFilter] = useState("");
@@ -810,18 +818,11 @@ export default function App() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
-      const now = Date.now();
-      if (now - foregroundRefreshAtRef.current < FOREGROUND_REFRESH_COOLDOWN_MS) return;
-      foregroundRefreshAtRef.current = now;
       if (role === "supervisor") {
         void loadSupervisorDashboard();
         void loadSupervisorTeam();
         void loadSupervisorAlerts();
         void loadSupervisorEvidences();
-      }
-      if (role === "promotor") {
-        void loadPromotorDashboard();
-        void loadEvidencesToday();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -829,8 +830,6 @@ export default function App() {
   }, [role, alertStatusFilter, alertSeverityFilter, alertPromotorFilter, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => () => { void stopCameraStream(); }, []);
-
-  const isTransientBootstrapError = useMemo(() => isTransientServiceMessage(error), [error]);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
@@ -995,6 +994,7 @@ export default function App() {
       alertas: data.summary?.alertas || 0,
     });
     setSupervisorUsage(data.usage || {});
+    setSupervisorPendingClose(data.pending_close || {});
   }
 
   async function loadSupervisorTeam() {
@@ -1012,7 +1012,7 @@ export default function App() {
     }
     try {
       setDayRouteLoading(true);
-      const data = await postJson<SupervisorDayRouteResponse>("/miniapp/supervisor/promotor-visits-today", { promotor_id: promotorId });
+      const data = await postJson<SupervisorDayRouteResponse>("/miniapp/supervisor/day-route", { promotor_id: promotorId });
       const rows = data.rows || [];
       setSupervisorDayRoute(rows);
       setSelectedRouteVisitId((current) => (rows.some((item) => item.visita_id === current) ? current : ""));
@@ -1056,6 +1056,28 @@ export default function App() {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo abrir el expediente.");
     } finally {
       setExpedientLoading(false);
+    }
+  }
+
+  async function loadPromotorRecentAlerts() {
+    try {
+      const data = await postJson<PromotorRecentAlertsResponse>("/miniapp/promotor/alerts-recent", {});
+      setPromotorRecentAlerts(data.rows || []);
+    } catch {
+      setPromotorRecentAlerts([]);
+    }
+  }
+
+  async function loadSupervisorEvidenceAudit(evidenciaId: string) {
+    if (!evidenciaId) {
+      setSupervisorEvidenceAudit([]);
+      return;
+    }
+    try {
+      const data = await postJson<EvidenceAuditResponse>("/miniapp/supervisor/evidence-audit", { evidencia_id: evidenciaId });
+      setSupervisorEvidenceAudit(data.rows || []);
+    } catch {
+      setSupervisorEvidenceAudit([]);
     }
   }
 
@@ -1174,6 +1196,11 @@ export default function App() {
     void loadSupervisorDayRoute(selectedTeamPromotorId);
     setExpedient(null);
   }, [role, selectedTeamPromotorId]);
+
+  useEffect(() => {
+    if (role !== "supervisor") return;
+    void loadSupervisorEvidenceAudit(selectedSupEvidenceId);
+  }, [selectedSupEvidenceId, role]);
 
   useEffect(() => {
     if (role !== "supervisor") return;
@@ -1755,7 +1782,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
           </div>
         ) : null}
 
-        {!role && !isTransientBootstrapError ? (
+        {!role ? (
           <div className="card">
             <div className="sectionTitle">Acceso pendiente de configuración</div>
             <div className="helperText">
@@ -2244,6 +2271,16 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   </React.Fragment>
                 )) : <div className="summaryLine">No hay registros del día.</div>}
               </div>
+
+              <div className="summaryBlock">
+                <div className="miniTitle">Alertas recientes</div>
+                {promotorRecentAlerts.length ? promotorRecentAlerts.map((item) => (
+                  <React.Fragment key={item.alerta_id}>
+                    <div className="summaryLine"><strong>{item.tipo_alerta}</strong> · {item.tienda_nombre || item.tienda_id || "Tienda"}</div>
+                    <div className="summaryLine summaryGeo">{item.fecha_hora_fmt || ""} · <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>{item.resolved_classification ? ` · ${item.resolved_classification}` : ""}</div>
+                  </React.Fragment>
+                )) : <div className="summaryLine">Sin alertas recientes.</div>}
+              </div>
             </div>
           </div>
         ) : null}
@@ -2264,6 +2301,12 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 <div className="summaryLine">Fotos hoy: <strong>{supervisorUsage.today?.fotos || 0}</strong></div>
                 <div className="summaryLine">MB hoy: <strong>{supervisorUsage.today?.mb?.toFixed ? supervisorUsage.today.mb.toFixed(2) : (supervisorUsage.today?.mb || 0)}</strong></div>
                 <div className="summaryLine">MB mes: <strong>{supervisorUsage.month?.mb?.toFixed ? supervisorUsage.month.mb.toFixed(2) : (supervisorUsage.month?.mb || 0)}</strong></div>
+              </div>
+              <div className="panel">
+                <div className="miniTitle">Pendientes de cierre</div>
+                <div className="summaryLine">Visitas abiertas: <strong>{supervisorPendingClose.open_visits || 0}</strong></div>
+                <div className="summaryLine">Alertas abiertas: <strong>{supervisorPendingClose.open_alerts || 0}</strong></div>
+                <div className="summaryLine">Revisiones pendientes: <strong>{supervisorPendingClose.pending_reviews || 0}</strong></div>
               </div>
             </div>
           </div>
@@ -2334,7 +2377,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                               <span className={`geoBadge ${geofenceClass(row.geofence_exit)}`}>S: {geofenceShortLabel(row.geofence_exit)}</span>
                             </div>
                             <div className="geoRow" style={{ marginTop: 8 }}>
-                              <span className="riskBadge riskGreen">Expediente</span>
+                              <span className="riskBadge riskGreen">Abrir expediente</span>
                             </div>
                           </button>
                         ))}
@@ -2398,7 +2441,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <div className="summaryLine">Fecha: {selectedAlert.fecha_hora_fmt}</div>
                     <div className="summaryLine">Canal: {selectedAlert.canal_notificacion || "-"}</div>
                     <div className="summaryLine">Descripción: {selectedAlert.descripcion || "-"}</div>
-                    {selectedAlert.url_foto ? <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedAlert.url_foto)} onClick={() => handleImageTap(selectedAlert.url_foto)}><img src={selectedAlert.url_foto} alt={selectedAlert.tipo_alerta} className="img" /></div> : null}
+                    {(selectedAlert.photo_url || selectedAlert.url_foto) ? <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedAlert.photo_url || selectedAlert.url_foto || "")} onClick={() => handleImageTap(selectedAlert.photo_url || selectedAlert.url_foto || "")}><img src={selectedAlert.photo_url || selectedAlert.url_foto} alt={selectedAlert.tipo_alerta} className="img" /></div> : null}
                     {selectedAlert.hallazgos_ai ? <div className="summaryLine">Causa detectada: {selectedAlert.hallazgos_ai}</div> : null}
                     <div className="geoRow">
                       <span className={`riskBadge ${severityClass(selectedAlert.severidad)}`}>{selectedAlert.severidad}</span>
@@ -2559,6 +2602,12 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar revisión</span></button>
                       <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
                     </div>
+                    <div className="traceBox" style={{ marginTop: 12 }}>
+                      <div className="traceTitle">Historial</div>
+                      {supervisorEvidenceAudit.length ? supervisorEvidenceAudit.map((row, idx) => (
+                        <div key={`${row.audit_id || row.fecha_hora || idx}`} className="summaryLine"><strong>{row.accion || "ACCION"}</strong> · {formatDateTimeMaybe(row.fecha_hora)} · {row.actor_role || ""}{row.actor_id ? ` (${row.actor_id})` : ""}{row.comentario ? ` · ${row.comentario}` : ""}</div>
+                      )) : <div className="summaryLine">Sin historial visible.</div>}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2601,9 +2650,9 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   <div className="miniTitle">Visita</div>
                   <div className="summaryLine"><strong>{expedient.visita?.promotor_nombre || "Promotor"}</strong></div>
                   <div className="summaryLine">Tienda: {expedient.visita?.tienda_display || expedient.visita?.tienda_nombre || expedient.visita?.tienda_id || "-"}</div>
-                  <div className="summaryLine">Entrada: {formatHourFromIso(expedient.visita?.hora_inicio || "")}</div>
-                  <div className="summaryLine">Salida: {expedient.visita?.hora_fin ? formatHourFromIso(expedient.visita.hora_fin) : "Pendiente"}</div>
-                  <div className="summaryLine">Tiempo de estancia: {expedient.visita?.duracion_fmt || "-"}</div>
+                  <div className="summaryLine">Entrada: {expedient.visita?.entry_fmt || formatHourFromIso(expedient.visita?.hora_inicio || "")}</div>
+                  <div className="summaryLine">Salida: {expedient.visita?.exit_fmt || (expedient.visita?.hora_fin ? formatHourFromIso(expedient.visita.hora_fin) : "Pendiente")}</div>
+                  <div className="summaryLine">Tiempo de estancia: {typeof expedient.visita?.stay_minutes === "number" ? `${expedient.visita.stay_minutes} min` : "-"}</div>
                   <div className="geoRow">
                     <span className={`geoBadge ${geofenceClass(expedient.visita?.resultado_geocerca_entrada)}`}>E: {geofenceShortLabel(expedient.visita?.resultado_geocerca_entrada)}</span>
                     <span className={`geoBadge ${geofenceClass(expedient.visita?.resultado_geocerca_salida)}`}>S: {geofenceShortLabel(expedient.visita?.resultado_geocerca_salida)}</span>
@@ -2611,13 +2660,13 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 </div>
                 <div className="panel">
                   <div className="miniTitle">Resumen de la visita</div>
-                  <div className="summaryLine">Evidencias operativas: <strong>{expedient.resumen?.total_evidencias || 0}</strong></div>
-                  <div className="summaryLine">Alertas: <strong>{expedient.resumen?.total_alertas || 0}</strong></div>
-                  {expedient.resumen?.por_marca_tipo_fase ? Object.entries(expedient.resumen.por_marca_tipo_fase).map(([marca, tipos]) => (
-                    <div key={marca} className="traceBox">
-                      <div className="traceTitle">{marca}</div>
-                      {Object.entries(tipos).map(([tipo, fases]) => (
-                        <div key={tipo} className="summaryLine"><strong>{tipo}</strong>: {Object.entries(fases).map(([fase, total]) => `${fase} ${total}`).join(" · ")}</div>
+                  <div className="summaryLine">Evidencias operativas: <strong>{expedient.summary?.total_evidencias || 0}</strong></div>
+                  <div className="summaryLine">Alertas: <strong>{expedient.summary?.total_alertas || 0}</strong></div>
+                  {expedient.summary_by_brand?.length ? expedient.summary_by_brand.map((brand) => (
+                    <div key={`${brand.marca_id || brand.marca_nombre}`} className="traceBox">
+                      <div className="traceTitle">{brand.marca_nombre || brand.marca_id || "Marca"} · {brand.total || 0}</div>
+                      {(brand.types || []).map((tipo) => (
+                        <div key={`${brand.marca_id}-${tipo.tipo_evidencia}`} className="summaryLine"><strong>{tipo.tipo_evidencia}</strong>: {(tipo.phases || []).map((phase) => `${phase.fase || "NA"} ${phase.total || 0}`).join(" · ")}</div>
                       ))}
                     </div>
                   )) : null}
