@@ -1556,7 +1556,8 @@ export default function App() {
       if (!entryPhoto) return setStatusMsg("Captura la foto de entrada.");
       if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
       const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
-      if (typeof window !== "undefined" && !window.confirm(`¿Deseas registrar entrada en ${selectedStore?.nombre_tienda || "la tienda seleccionada"}?`)) return;
+      const selectedStoreLabel = selectedStore ? formatStoreDisplay(selectedStore.tienda_id, selectedStore.nombre_tienda) : "la tienda seleccionada";
+      if (typeof window !== "undefined" && !window.confirm(`¿Deseas registrar entrada en ${selectedStoreLabel}?`)) return;
       setSyncing(true);
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
         tienda_id: selectedStoreId,
@@ -1589,18 +1590,11 @@ export default function App() {
   async function closeVisit() {
     try {
       if (!exitVisit) return setStatusMsg("No hay visita abierta para registrar salida.");
-      if (!exitLocation) return setStatusMsg("Captura la ubicación de salida.");
-      if (!exitPhoto) return setStatusMsg("Captura la foto de salida.");
-      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
+            if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
       if (typeof window !== "undefined" && !window.confirm(`¿Deseas registrar salida en ${getVisitDisplayName(exitVisit, stores)}?`)) return;
       setSyncing(true);
       const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
         visita_id: exitVisit.visita_id,
-        lat: exitLocation.lat,
-        lon: exitLocation.lon,
-        accuracy: exitLocation.accuracy,
-        foto_nombre: exitPhoto.name,
-        foto_data_url: exitPhoto.dataUrl,
       });
       setStatusMsg(response.warning === "attendance_photo_too_large_for_sheets" ? "Salida registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets." : "Salida registrada correctamente.");
       setExitLocation(null);
@@ -1636,14 +1630,11 @@ export default function App() {
         descripcion: evidenceDescription.trim(),
         fotos: evidencePhotos.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
       });
-      setEvidenceBrandId("");
-      setEvidenceBrandLabel("");
       setEvidenceType("");
       setEvidencePhase("NA");
       setEvidenceQty(1);
       setEvidenceDescription("");
       setEvidencePhotos([]);
-      setBrandRules([]);
       await loadEvidencesToday();
       if ((result as any).postprocess_warning) {
         setStatusMsg("Evidencia registrada. El análisis quedó programado y puede tardar unos segundos.");
@@ -2115,33 +2106,10 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 </button>
 
                 {hasOpenVisit && exitVisit ? (
-                  <>
-                    <div className="captureBlock">
-                      <div className="captureTitle">Salida · {getVisitDisplayName(exitVisit, stores)}</div>
-                      <div className="captureGrid threeCols">
-                        <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("salida")} disabled={capturingLocation === "salida"}>
-                          <MapPin size={16} />
-                          {capturingLocation === "salida" ? "Ubicando..." : exitLocation ? "Ubicación lista" : "Capturar ubicación"}
-                        </button>
-                        <button className="secondaryBtn compactBtn" onClick={() => void openCamera("salida", "user")}>
-                          <Camera size={16} />
-                          {exitPhoto ? "Selfie lista" : "Tomar selfie"}
-                        </button>
-                        <label className="fileBtn compactBtn">
-                          <ImageIcon size={16} />
-                          {exitPhoto ? "Reemplazar con galería" : "Elegir de galería"}
-                          <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("salida", e.target.files)} />
-                        </label>
-                      </div>
-                      {exitLocation ? <div className="captureMeta">Lat {exitLocation.lat.toFixed(5)} · Lon {exitLocation.lon.toFixed(5)}</div> : null}
-                      {exitPhoto ? <div className="thumbRow"><img src={exitPhoto.dataUrl} className="thumb" alt="Salida" /></div> : null}
-                    </div>
-
-                    <button className="secondaryBtn" style={{ background: "#d32f2f", color: "white" }} onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
-                      <CheckCircle2 size={16} />
-                      {syncing ? "Procesando..." : "Registrar salida"}
-                    </button>
-                  </>
+                  <button className="secondaryBtn" style={{ background: "#d32f2f", color: "white" }} onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
+                    <CheckCircle2 size={16} />
+                    {syncing ? "Procesando..." : `Registrar salida · ${getVisitDisplayName(exitVisit, stores)}`}
+                  </button>
                 ) : null}
               </div>
 
