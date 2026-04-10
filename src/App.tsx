@@ -2860,7 +2860,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               alt="Vista ampliada"
               className="overlayImage"
               draggable={false}
-              style={{ transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in", transition: imageViewerDragging ? "none" : "transform .12s ease", userSelect: "none", WebkitUserDrag: "none" as any }}
+              style={{ transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in", transition: imageViewerDragging ? "none" : "transform .12s ease", userSelect: "none" }}
               onClick={(e) => e.stopPropagation()}
               onWheel={handleImageViewerWheel}
               onMouseDown={handleImageViewerMouseDown}
