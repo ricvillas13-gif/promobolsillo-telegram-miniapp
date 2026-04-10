@@ -957,7 +957,7 @@ export default function App() {
     }
     try {
       setDayRouteLoading(true);
-      const data = await postJson<SupervisorDayRouteResponse>("/miniapp/supervisor/day-route", { promotor_id: promotorId });
+      const data = await postJson<SupervisorDayRouteResponse>("/miniapp/supervisor/promotor-visits-today", { promotor_id: promotorId });
       const rows = data.rows || [];
       setSupervisorDayRoute(rows);
       setSelectedRouteVisitId((current) => (rows.some((item) => item.visita_id === current) ? current : ""));
@@ -2278,9 +2278,12 @@ ${selectedEvidence.fecha_hora_fmt}`);
                               <span className={`geoBadge ${geofenceClass(row.geofence_entry)}`}>E: {geofenceShortLabel(row.geofence_entry)}</span>
                               <span className={`geoBadge ${geofenceClass(row.geofence_exit)}`}>S: {geofenceShortLabel(row.geofence_exit)}</span>
                             </div>
+                            <div className="geoRow" style={{ marginTop: 8 }}>
+                              <span className="riskBadge riskGreen">Expediente</span>
+                            </div>
                           </button>
                         ))}
-                        {!supervisorDayRoute.length ? <div className="emptyBox">Este promotor no tiene visitas registradas hoy.</div> : null}
+                        {!supervisorDayRoute.length ? <div className="emptyBox">{selectedTeamMember?.visitas_hoy ? "No se pudieron cargar las visitas registradas del día." : "Este promotor no tiene visitas registradas hoy."}</div> : null}
                       </div>
                     ) : null}
                   </>
