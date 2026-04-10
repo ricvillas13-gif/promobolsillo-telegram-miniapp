@@ -2240,10 +2240,6 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
                 <input className="inputLike" type="number" min={1} max={24} value={evidenceQty} readOnly disabled />
-                {evidenceType ? (() => {
-                  const activeRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === evidenceType);
-                  return activeRule?.observaciones ? <div className="contextHint">{activeRule.observaciones}</div> : null;
-                })() : null}
               </div>
 
               <div className="panel">
