@@ -384,6 +384,19 @@ type PhotoCapture = {
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
 const SHEETS_SAFE_PHOTO_CHARS = 43000;
+const FOREGROUND_REFRESH_COOLDOWN_MS = 30000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isQuotaLikeMessage(message: string) {
+  return /quota exceeded|read requests per minute per user|temporalmente saturado|google sheets/i.test(message || "");
+}
+
+function isTransientServiceMessage(message: string) {
+  return /service_temporarily_unavailable|servicio temporalmente saturado|quota exceeded|demasiadas solicitudes|error 503|error 429/i.test(message || "");
+}
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -398,15 +411,47 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ initData: getInitData(), ...payload }),
-      signal: controller.signal,
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((json as { error?: string }).error || `Error ${res.status}`);
-    return json as T;
+    const attempt = async () => {
+      const res = await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: getInitData(), ...payload }),
+        signal: controller.signal,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const rawMessage = String((json as { error?: string }).error || `Error ${res.status}`);
+        if (res.status === 503 || res.status === 429 || isQuotaLikeMessage(rawMessage)) {
+          throw new Error("SERVICE_TEMPORARILY_UNAVAILABLE::Servicio temporalmente saturado por límite temporal de Google Sheets. Espera 30 a 60 segundos y vuelve a intentar.");
+        }
+        throw new Error(rawMessage);
+      }
+      return json as T;
+    };
+
+    try {
+      return await attempt();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      if (msg.startsWith("SERVICE_TEMPORARILY_UNAVAILABLE::")) {
+        await sleep(1200);
+        try {
+          return await attempt();
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr || "");
+          if (retryMsg.startsWith("SERVICE_TEMPORARILY_UNAVAILABLE::")) {
+            throw new Error(retryMsg.replace("SERVICE_TEMPORARILY_UNAVAILABLE::", ""));
+          }
+          throw retryErr;
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("La solicitud tardó demasiado. Vuelve a intentar.");
+    }
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
@@ -638,6 +683,7 @@ export default function App() {
   const [detectedExternalId, setDetectedExternalId] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
   const [statusMsgDuration, setStatusMsgDuration] = useState(6800);
+  const foregroundRefreshAtRef = useRef(0);
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -764,11 +810,18 @@ export default function App() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - foregroundRefreshAtRef.current < FOREGROUND_REFRESH_COOLDOWN_MS) return;
+      foregroundRefreshAtRef.current = now;
       if (role === "supervisor") {
         void loadSupervisorDashboard();
         void loadSupervisorTeam();
         void loadSupervisorAlerts();
         void loadSupervisorEvidences();
+      }
+      if (role === "promotor") {
+        void loadPromotorDashboard();
+        void loadEvidencesToday();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -776,6 +829,8 @@ export default function App() {
   }, [role, alertStatusFilter, alertSeverityFilter, alertPromotorFilter, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => () => { void stopCameraStream(); }, []);
+
+  const isTransientBootstrapError = useMemo(() => isTransientServiceMessage(error), [error]);
 
   const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
@@ -1700,7 +1755,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
           </div>
         ) : null}
 
-        {!role ? (
+        {!role && !isTransientBootstrapError ? (
           <div className="card">
             <div className="sectionTitle">Acceso pendiente de configuración</div>
             <div className="helperText">
