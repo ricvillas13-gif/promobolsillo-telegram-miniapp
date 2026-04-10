@@ -1168,6 +1168,7 @@ export default function App() {
     if (role === "promotor") {
       void loadPromotorDashboard();
       void loadEvidencesToday();
+      void loadPromotorRecentAlerts();
       void loadRulesForBrand("", "");
     }
     if (role === "supervisor") {
