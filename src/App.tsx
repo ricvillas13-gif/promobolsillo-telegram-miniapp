@@ -1608,7 +1608,12 @@ export default function App() {
       await loadPromotorDashboard();
       await loadEvidencesToday();
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la salida real.");
+      const message = err instanceof Error ? err.message : "No se pudo registrar la salida real.";
+      if (message.includes("Faltan fotos DESPUES") || message.includes("No puedes registrar salida todavía")) {
+        setPromotorModule("evidencias");
+        setStatusMsgDuration(7500);
+      }
+      setStatusMsg(message);
     } finally {
       setSyncing(false);
     }
