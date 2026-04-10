@@ -173,10 +173,13 @@ type EvidenceContextResponse = {
 type EvidenceRulesResponse = {
   ok: boolean;
   reglas?: Array<{
-    marca_id: string;
+    marca_id?: string;
     tipo_evidencia: string;
     fotos_requeridas: number;
     requiere_antes_despues: boolean;
+    orden?: number;
+    obligatoria?: boolean;
+    observaciones?: string;
   }>;
 };
 
@@ -711,8 +714,7 @@ export default function App() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
   const [availableBrands, setAvailableBrands] = useState<Array<{ marca_id: string; marca_nombre: string }>>([]);
-  const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean }>>([]);
-  const [catalogRules, setCatalogRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean }>>([]);
+  const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean; orden?: number; obligatoria?: boolean; observaciones?: string }>>([]);
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
   const [allEvidenceRows, setAllEvidenceRows] = useState<UiEvidence[]>([]);
@@ -792,11 +794,13 @@ export default function App() {
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
   const [imageViewerSrc, setImageViewerSrc] = useState("");
   const [imageViewerScale, setImageViewerScale] = useState(1);
+  const [imageViewerOffset, setImageViewerOffset] = useState({ x: 0, y: 0 });
+  const [imageViewerDragging, setImageViewerDragging] = useState(false);
   const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const lastImageTapRef = useRef<{ src: string; at: number }>({ src: "", at: 0 });
-  const imageViewerTouchRef = useRef<{ distance: number; startScale: number }>({ distance: 0, startScale: 1 });
+  const imageViewerTouchRef = useRef<{ distance: number; startScale: number; dragging: boolean; dragStartX: number; dragStartY: number; originX: number; originY: number }>({ distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 });
   const attendancePhotoRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
 
@@ -835,9 +839,10 @@ export default function App() {
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
   const evidenceTypeOptions = useMemo(() => {
-    const source = brandRules.length ? brandRules : catalogRules;
-    return source.filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index);
-  }, [brandRules, catalogRules]);
+    return brandRules
+      .filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index)
+      .sort((a, b) => Number(a.orden || 999) - Number(b.orden || 999) || String(a.tipo_evidencia).localeCompare(String(b.tipo_evidencia)));
+  }, [brandRules]);
   const evidencePhaseOptions = useMemo(() => {
     const selectedRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === evidenceType);
     if (!selectedRule) return ["NA", "ANTES", "DESPUES"] as EvidencePhase[];
@@ -962,24 +967,35 @@ export default function App() {
 
   async function loadRulesForBrand(brandId: string, brandLabel: string) {
     try {
+      if (!brandId && !brandLabel) {
+        setBrandRules([]);
+        setEvidenceType("");
+        setEvidencePhase("NA");
+        setEvidenceQty(1);
+        return;
+      }
       const rules = await postJson<EvidenceRulesResponse>("/miniapp/promotor/evidence-rules", { marca_id: brandId, marca_nombre: brandLabel });
       const usableRules = (rules.reglas || []).filter((rule) => isValidRuleType(rule.tipo_evidencia));
-      if (!brandId && !brandLabel) { setCatalogRules(usableRules); setBrandRules([]); }
-      else setBrandRules(usableRules);
-      const source = usableRules.length ? usableRules : catalogRules;
-      if (source.length) {
-        const selectedRule = source.find((item) => item.tipo_evidencia === evidenceType) || source[0];
-        if (!evidenceType || !source.find((item) => item.tipo_evidencia === evidenceType)) setEvidenceType(selectedRule.tipo_evidencia);
+      setBrandRules(usableRules);
+      if (usableRules.length) {
+        const selectedRule = usableRules.find((item) => item.tipo_evidencia === evidenceType) || usableRules[0];
+        if (!evidenceType || !usableRules.find((item) => item.tipo_evidencia === evidenceType)) setEvidenceType(selectedRule.tipo_evidencia);
         setEvidenceQty(selectedRule.fotos_requeridas || 1);
         if (selectedRule.requiere_antes_despues) {
           if (evidencePhase === "NA") setEvidencePhase("ANTES");
         } else if (evidencePhase !== "NA") {
           setEvidencePhase("NA");
         }
+      } else {
+        setEvidenceType("");
+        setEvidencePhase("NA");
+        setEvidenceQty(1);
       }
     } catch {
-      if (!brandId && !brandLabel) { setCatalogRules([]); setBrandRules([]); }
-      else setBrandRules([]);
+      setBrandRules([]);
+      setEvidenceType("");
+      setEvidencePhase("NA");
+      setEvidenceQty(1);
     }
   }
 
@@ -1332,18 +1348,55 @@ export default function App() {
   function openImageViewer(src?: string) {
     if (!src) return;
     setImageViewerScale(1);
-    imageViewerTouchRef.current = { distance: 0, startScale: 1 };
+    setImageViewerOffset({ x: 0, y: 0 });
+    setImageViewerDragging(false);
+    imageViewerTouchRef.current = { distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 };
     setImageViewerSrc(src);
   }
 
   function closeImageViewer() {
     setImageViewerSrc("");
     setImageViewerScale(1);
-    imageViewerTouchRef.current = { distance: 0, startScale: 1 };
+    setImageViewerOffset({ x: 0, y: 0 });
+    setImageViewerDragging(false);
+    imageViewerTouchRef.current = { distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 };
   }
 
   function zoomImageViewer(nextScale: number) {
-    setImageViewerScale(Math.min(4, Math.max(1, Number(nextScale.toFixed(2)))));
+    const normalized = Math.min(4, Math.max(1, Number(nextScale.toFixed(2))));
+    setImageViewerScale(normalized);
+    if (normalized <= 1.02) {
+      setImageViewerOffset({ x: 0, y: 0 });
+      setImageViewerDragging(false);
+    }
+  }
+
+  function startImageViewerDrag(clientX: number, clientY: number) {
+    if (imageViewerScale <= 1) return;
+    imageViewerTouchRef.current = {
+      ...imageViewerTouchRef.current,
+      dragging: true,
+      dragStartX: clientX,
+      dragStartY: clientY,
+      originX: imageViewerOffset.x,
+      originY: imageViewerOffset.y,
+    };
+    setImageViewerDragging(true);
+  }
+
+  function moveImageViewerDrag(clientX: number, clientY: number) {
+    if (!imageViewerTouchRef.current.dragging || imageViewerScale <= 1) return;
+    const dx = clientX - imageViewerTouchRef.current.dragStartX;
+    const dy = clientY - imageViewerTouchRef.current.dragStartY;
+    setImageViewerOffset({
+      x: imageViewerTouchRef.current.originX + dx,
+      y: imageViewerTouchRef.current.originY + dy,
+    });
+  }
+
+  function endImageViewerDrag() {
+    imageViewerTouchRef.current = { ...imageViewerTouchRef.current, dragging: false };
+    setImageViewerDragging(false);
   }
 
   function handleImageViewerWheel(event: React.WheelEvent<HTMLImageElement>) {
@@ -1352,27 +1405,60 @@ export default function App() {
     zoomImageViewer(imageViewerScale + delta);
   }
 
+  function handleImageViewerMouseDown(event: React.MouseEvent<HTMLImageElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    startImageViewerDrag(event.clientX, event.clientY);
+  }
+
+  function handleImageViewerMouseMove(event: React.MouseEvent<HTMLImageElement>) {
+    if (!imageViewerDragging) return;
+    event.preventDefault();
+    moveImageViewerDrag(event.clientX, event.clientY);
+  }
+
+  function handleImageViewerMouseUp() {
+    endImageViewerDrag();
+  }
+
   function handleImageViewerTouchStart(event: React.TouchEvent<HTMLImageElement>) {
-    if (event.touches.length !== 2) return;
-    const a = event.touches[0];
-    const b = event.touches[1];
-    const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    imageViewerTouchRef.current = { distance, startScale: imageViewerScale };
+    if (event.touches.length === 2) {
+      const a = event.touches[0];
+      const b = event.touches[1];
+      const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      imageViewerTouchRef.current = { ...imageViewerTouchRef.current, distance, startScale: imageViewerScale, dragging: false };
+      return;
+    }
+    if (event.touches.length === 1 && imageViewerScale > 1) {
+      const touch = event.touches[0];
+      startImageViewerDrag(touch.clientX, touch.clientY);
+    }
   }
 
   function handleImageViewerTouchMove(event: React.TouchEvent<HTMLImageElement>) {
-    if (event.touches.length !== 2) return;
-    event.preventDefault();
-    const a = event.touches[0];
-    const b = event.touches[1];
-    const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    const base = imageViewerTouchRef.current.distance || distance;
-    const ratio = distance / Math.max(base, 1);
-    zoomImageViewer(imageViewerTouchRef.current.startScale * ratio);
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      const a = event.touches[0];
+      const b = event.touches[1];
+      const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const base = imageViewerTouchRef.current.distance || distance;
+      const ratio = distance / Math.max(base, 1);
+      zoomImageViewer(imageViewerTouchRef.current.startScale * ratio);
+      return;
+    }
+    if (event.touches.length === 1 && imageViewerScale > 1) {
+      event.preventDefault();
+      const touch = event.touches[0];
+      moveImageViewerDrag(touch.clientX, touch.clientY);
+    }
   }
 
   function handleImageViewerTouchEnd() {
-    if (imageViewerScale < 1.02) setImageViewerScale(1);
+    if (imageViewerScale < 1.02) {
+      setImageViewerScale(1);
+      setImageViewerOffset({ x: 0, y: 0 });
+    }
+    endImageViewerDrag();
   }
 
   function handleImageTap(src?: string) {
@@ -2143,6 +2229,10 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
                 <input className="inputLike" type="number" min={1} max={24} value={evidenceQty} readOnly disabled />
+                {evidenceType ? (() => {
+                  const activeRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === evidenceType);
+                  return activeRule?.observaciones ? <div className="contextHint">{activeRule.observaciones}</div> : null;
+                })() : null}
               </div>
 
               <div className="panel">
@@ -2665,9 +2755,12 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   <div className="summaryLine">Alertas: <strong>{expedient.summary?.total_alertas || 0}</strong></div>
                   {expedient.summary_by_brand?.length ? expedient.summary_by_brand.map((brand) => (
                     <div key={`${brand.marca_id || brand.marca_nombre}`} className="traceBox">
-                      <div className="traceTitle">{brand.marca_nombre || brand.marca_id || "Marca"} · {brand.total || 0}</div>
+                      <div className="traceTitle">Marca · {brand.marca_nombre || brand.marca_id || "Marca"} <span style={{ fontWeight: 400 }}>({brand.total || 0})</span></div>
                       {(brand.types || []).map((tipo) => (
-                        <div key={`${brand.marca_id}-${tipo.tipo_evidencia}`} className="summaryLine"><strong>{tipo.tipo_evidencia}</strong>: {(tipo.phases || []).map((phase) => `${phase.fase || "NA"} ${phase.total || 0}`).join(" · ")}</div>
+                        <div key={`${brand.marca_id}-${tipo.tipo_evidencia}`} style={{ marginTop: 6, paddingLeft: 10, borderLeft: "2px solid rgba(15,118,110,0.15)" }}>
+                          <div className="summaryLine"><strong>Tipo:</strong> {tipo.tipo_evidencia} <span style={{ opacity: 0.75 }}>({tipo.total || 0})</span></div>
+                          <div className="summaryLine"><strong>Fases:</strong> {(tipo.phases || []).map((phase) => `${phase.fase || "NA"} ${phase.total || 0}`).join(" · ")}</div>
+                        </div>
                       ))}
                     </div>
                   )) : null}
@@ -2747,7 +2840,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
         {imageViewerSrc ? (
           <div className="overlayBackdrop" onClick={() => closeImageViewer()}>
-            <img src={imageViewerSrc} alt="Vista ampliada" className="overlayImage" style={{ transform: `scale(${imageViewerScale})` }} onClick={(e) => e.stopPropagation()} onWheel={handleImageViewerWheel} onTouchStart={handleImageViewerTouchStart} onTouchMove={handleImageViewerTouchMove} onTouchEnd={handleImageViewerTouchEnd} onDoubleClick={(e) => { e.stopPropagation(); zoomImageViewer(imageViewerScale > 1 ? 1 : 2); }} />
+            <img src={imageViewerSrc} alt="Vista ampliada" className="overlayImage" style={{ transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in" }} onClick={(e) => e.stopPropagation()} onWheel={handleImageViewerWheel} onMouseDown={handleImageViewerMouseDown} onMouseMove={handleImageViewerMouseMove} onMouseUp={handleImageViewerMouseUp} onMouseLeave={handleImageViewerMouseUp} onTouchStart={handleImageViewerTouchStart} onTouchMove={handleImageViewerTouchMove} onTouchEnd={handleImageViewerTouchEnd} onDoubleClick={(e) => { e.stopPropagation(); if (imageViewerScale > 1) { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); } else { zoomImageViewer(2); } }} />
           </div>
         ) : null}
 
