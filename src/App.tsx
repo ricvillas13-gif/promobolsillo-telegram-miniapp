@@ -703,9 +703,9 @@ export default function App() {
   const [promotorModule, setPromotorModule] = useState<PromotorModule>("asistencia");
 
   const [entryLocation, setEntryLocation] = useState<LocationCapture | null>(null);
-  const [exitLocation, setExitLocation] = useState<LocationCapture | null>(null);
+  const [, setExitLocation] = useState<LocationCapture | null>(null);
   const [entryPhoto, setEntryPhoto] = useState<PhotoCapture | null>(null);
-  const [exitPhoto, setExitPhoto] = useState<PhotoCapture | null>(null);
+  const [, setExitPhoto] = useState<PhotoCapture | null>(null);
   const [capturingLocation, setCapturingLocation] = useState<CaptureKind | null>(null);
   const [, setCapturingPhoto] = useState<CameraTarget | null>(null);
 
