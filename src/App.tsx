@@ -222,6 +222,28 @@ type SupervisorTeamResponse = {
   team?: SupervisorTeamRow[];
 };
 
+type SupervisorDayRouteRow = {
+  promotor_id?: string;
+  visita_id: string;
+  tienda_id: string;
+  tienda_nombre: string;
+  hora_inicio: string;
+  hora_fin: string;
+  entry_fmt?: string;
+  exit_fmt?: string;
+  stay_minutes?: number;
+  geofence_entry?: string;
+  geofence_exit?: string;
+  total_evidencias: number;
+  total_alertas: number;
+  summary_by_brand?: Array<{ marca_id: string; marca_nombre: string; total: number }>;
+};
+
+type SupervisorDayRouteResponse = {
+  ok: boolean;
+  rows?: SupervisorDayRouteRow[];
+};
+
 type SupervisorAlert = {
   alerta_id: string;
   fecha_hora: string;
@@ -656,6 +678,9 @@ export default function App() {
   const [supervisorUsage, setSupervisorUsage] = useState<SupervisorUsageSummary>({});
   const [supervisorTeam, setSupervisorTeam] = useState<SupervisorTeamRow[]>([]);
   const [selectedTeamPromotorId, setSelectedTeamPromotorId] = useState("");
+  const [supervisorDayRoute, setSupervisorDayRoute] = useState<SupervisorDayRouteRow[]>([]);
+  const [dayRouteLoading, setDayRouteLoading] = useState(false);
+  const [selectedRouteVisitId, setSelectedRouteVisitId] = useState("");
   const [supervisorAlerts, setSupervisorAlerts] = useState<SupervisorAlert[]>([]);
   const [selectedAlertId, setSelectedAlertId] = useState("");
   const [alertStatusFilter, setAlertStatusFilter] = useState("");
@@ -924,6 +949,27 @@ export default function App() {
     if (rows.length && !rows.find((row) => row.promotor_id === selectedTeamPromotorId)) setSelectedTeamPromotorId(rows[0].promotor_id);
   }
 
+  async function loadSupervisorDayRoute(promotorId: string) {
+    if (!promotorId) {
+      setSupervisorDayRoute([]);
+      setSelectedRouteVisitId("");
+      return;
+    }
+    try {
+      setDayRouteLoading(true);
+      const data = await postJson<SupervisorDayRouteResponse>("/miniapp/supervisor/day-route", { promotor_id: promotorId });
+      const rows = data.rows || [];
+      setSupervisorDayRoute(rows);
+      setSelectedRouteVisitId((current) => (rows.some((item) => item.visita_id === current) ? current : ""));
+    } catch (err) {
+      setSupervisorDayRoute([]);
+      setSelectedRouteVisitId("");
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo cargar la ruta del día.");
+    } finally {
+      setDayRouteLoading(false);
+    }
+  }
+
   async function loadSupervisorAlerts() {
     const data = await postJson<SupervisorAlertsResponse>("/miniapp/supervisor/alerts", { status: alertStatusFilter, severidad: alertSeverityFilter, promotor_id: alertPromotorFilter });
     const rows = data.alerts || [];
@@ -1068,6 +1114,11 @@ export default function App() {
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, role]);
+  useEffect(() => {
+    if (role !== "supervisor") return;
+    void loadSupervisorDayRoute(selectedTeamPromotorId);
+    setExpedient(null);
+  }, [role, selectedTeamPromotorId]);
 
   useEffect(() => {
     if (role !== "supervisor") return;
@@ -2175,11 +2226,8 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       key={item.promotor_id}
                       onClick={() => {
                         setSelectedTeamPromotorId(item.promotor_id);
-                        if (item.ultima_visita_id) {
-                          void openVisitExpedient(item.ultima_visita_id);
-                        } else {
-                          setExpedient(null);
-                        }
+                        setSelectedRouteVisitId("");
+                        setExpedient(null);
                       }}
                       className={`listBtn ${selectedTeamPromotorId === item.promotor_id ? "listBtnGreen" : ""}`}
                     >
@@ -2208,8 +2256,33 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => { setSupEvidencePromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("evidencias"); }}><ImageIcon size={16} /><span>Ver evidencias</span></button>
                       <button className="actionButton" onClick={() => { setAlertPromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("alertas"); }}><ShieldAlert size={16} /><span>Ver alertas</span></button>
-                      <button className="actionButton" onClick={() => { if (selectedTeamMember.ultima_visita_id) void openVisitExpedient(selectedTeamMember.ultima_visita_id); }}><Eye size={16} /><span>Expediente</span></button>
+                      <button className="actionButton" onClick={() => setStatusMsg(supervisorDayRoute.length ? "Selecciona una visita del día abajo." : "Este promotor no tiene visitas del día.")}><Eye size={16} /><span>Ver visitas</span></button>
                     </div>
+                    <div className="miniTitle" style={{ marginTop: 14 }}>Visitas del día</div>
+                    {dayRouteLoading ? <div className="emptyBox">Cargando visitas del día...</div> : null}
+                    {!dayRouteLoading ? (
+                      <div className="stack compactStack" style={{ marginTop: 8 }}>
+                        {supervisorDayRoute.map((row) => (
+                          <button
+                            key={row.visita_id}
+                            className={`listBtn ${selectedRouteVisitId === row.visita_id ? "listBtnGreen" : ""}`}
+                            onClick={() => {
+                              setSelectedRouteVisitId(row.visita_id);
+                              void openVisitExpedient(row.visita_id);
+                            }}
+                          >
+                            <div className="listTitle">{row.tienda_nombre || row.tienda_id || "Tienda"}</div>
+                            <div className="listSub">Entrada: {row.entry_fmt || formatHourFromIso(row.hora_inicio)} · {row.exit_fmt ? `Salida: ${row.exit_fmt}` : "Salida pendiente"}</div>
+                            <div className="listSub">Estancia: {row.stay_minutes ? `${row.stay_minutes} min` : (row.hora_fin ? "0 min" : "En curso")} · Evidencias: {row.total_evidencias} · Alertas: {row.total_alertas}</div>
+                            <div className="geoRow">
+                              <span className={`geoBadge ${geofenceClass(row.geofence_entry)}`}>E: {geofenceShortLabel(row.geofence_entry)}</span>
+                              <span className={`geoBadge ${geofenceClass(row.geofence_exit)}`}>S: {geofenceShortLabel(row.geofence_exit)}</span>
+                            </div>
+                          </button>
+                        ))}
+                        {!supervisorDayRoute.length ? <div className="emptyBox">Este promotor no tiene visitas registradas hoy.</div> : null}
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <div className="emptyBox">Selecciona un promotor.</div>
