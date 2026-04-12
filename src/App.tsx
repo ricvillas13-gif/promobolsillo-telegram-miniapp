@@ -1642,7 +1642,11 @@ export default function App() {
         setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
       }
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
+      const message = err instanceof Error ? err.message : "No se pudo registrar la evidencia.";
+      if (message.includes("Primero debes registrar al menos 1 foto ANTES")) {
+        setStatusMsgDuration(7500);
+      }
+      setStatusMsg(message);
     } finally {
       setSyncing(false);
     }
