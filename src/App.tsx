@@ -2091,7 +2091,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       <div className="galleryGrid attendanceGalleryGrid">
                         {attendanceGallery.map((item) => (
                           <div className="galleryCard" key={item.evidencia_id} ref={(el) => { attendancePhotoRefs.current[item.evidencia_id] = el; }}>
-                            <div className="imageFrame"><img src={item.url_foto} alt={item.tipo_evento} className="img" /></div>
+                            <div className="imageFrame"><img src={item.url_foto} alt={item.tipo_evento} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
                             <div className="galleryTop">
                               <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
                               <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo || "BAJO"}</span>
@@ -2631,7 +2631,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               <div className="galleryGrid">
                 {filteredOperationalGallery.slice(0, 30).map((item) => (
                   <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" /></div>
+                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
                     <div className="galleryBodyCompact">
                       <div className="galleryTop compactTop">
                         <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
@@ -2705,7 +2705,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   <div className="galleryGrid">
                     {expedientAttendance.map((item) => (
                       <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                        <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evento} className="img" /></div>
+                        <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evento} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
                         <div className="galleryBodyCompact">
                           <div className="galleryTop compactTop">
                             <div className="galleryTitle">{item.tipo_evento === "ASISTENCIA_ENTRADA" ? "Entrada" : "Salida"}</div>
@@ -2726,7 +2726,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   <div className="galleryGrid">
                     {expedientOperational.map((item) => (
                       <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                        <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" /></div>
+                        <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
                         <div className="galleryBodyCompact">
                           <div className="galleryTop compactTop">
                             <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
@@ -2919,16 +2919,16 @@ input[type=file] { display: none; }
 .summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; margin-bottom: 10px; }
 .actionButton { border: 0; border-radius: 12px; background: rgba(96,125,139,0.12); color: #37474f; font-weight: 700; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
-.galleryScroll { max-height: 420px; overflow-y: auto; overflow-x: hidden; padding: 8px 10px 8px 8px; scrollbar-width: auto; scrollbar-color: rgba(76,175,80,.58) rgba(76,175,80,.12); border: 1px solid rgba(76,175,80,.16); border-radius: 14px; background: rgba(255,255,255,0.72); }
-.galleryScroll::-webkit-scrollbar { width: 8px; }
+.galleryScroll { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 8px 8px 10px 8px; scrollbar-width: auto; scrollbar-color: rgba(76,175,80,.58) rgba(76,175,80,.12); border: 1px solid rgba(76,175,80,.16); border-radius: 14px; background: rgba(255,255,255,0.72); }
+.galleryScroll::-webkit-scrollbar { height: 8px; }
 .galleryScroll::-webkit-scrollbar-thumb { background: rgba(76,175,80,.52); border-radius: 999px; }
 .galleryScroll::-webkit-scrollbar-track { background: rgba(76,175,80,.10); border-radius: 999px; }
-.compactGalleryScroll { max-height: 320px; }
-.galleryGrid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.attendanceGalleryGrid { grid-template-columns: 1fr; }
+.compactGalleryScroll { max-width: 100%; }
+.galleryGrid { margin-top: 6px; display: flex; flex-wrap: nowrap; gap: 12px; width: max-content; min-width: 100%; align-items: stretch; }
+.attendanceGalleryGrid { display: flex; flex-wrap: nowrap; }
 .attendanceGalleryBlock { margin-top: 8px; }
-.galleryCard { border-radius: 18px; border: 1px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); padding: 12px; }
-.galleryCardCompact { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: start; }
+.galleryCard { flex: 0 0 240px; border-radius: 18px; border: 1px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); padding: 12px; }
+.galleryCardCompact { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: start; min-width: 280px; }
 .galleryBodyCompact { min-width: 0; }
 .imageFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; }
 .imageFrameCompact { width: 72px; height: 72px; aspect-ratio: auto; }
@@ -2976,6 +2976,6 @@ input[type=file] { display: none; }
 .overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
 .cameraModal { width: min(92vw, 520px); background: #111; border-radius: 18px; padding: 14px; }
 .cameraVideo { width: 100%; border-radius: 14px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; }
-@media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } }
+@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } }
 `;
