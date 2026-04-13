@@ -636,11 +636,6 @@ async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEET
   return last;
 }
 
-async function readPhotoForSheets(file: File) {
-  const raw = await fileToDataUrl(file);
-  return compressDataUrlToSheetsSafeSize(raw);
-}
-
 function getCurrentLocation() {
   return new Promise<LocationCapture>((resolve, reject) => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
