@@ -580,15 +580,6 @@ function statusClass(value?: string) {
   return "riskGreen";
 }
 
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("No se pudo leer la foto"));
-    reader.readAsDataURL(file);
-  });
-}
-
 function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   return new Promise<string>((resolve, reject) => {
     const img = new Image();
