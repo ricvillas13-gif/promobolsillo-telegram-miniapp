@@ -436,8 +436,99 @@ type PhotoCapture = {
   capturedAt: string;
 };
 
+type PendingQueueStatus = "PENDIENTE_ENVIO" | "ERROR_ENVIO";
+type PendingOpKind = "entry" | "evidence" | "close";
+type PendingQueueOp = {
+  id: string;
+  kind: PendingOpKind;
+  createdAt: string;
+  status: PendingQueueStatus;
+  attempts: number;
+  lastError?: string;
+  localVisitId?: string;
+  visitaId?: string;
+  tienda_id: string;
+  tienda_nombre: string;
+  payload: Record<string, any>;
+};
+
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
 const SHEETS_SAFE_PHOTO_CHARS = 47000;
+const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
+const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
+
+function safeReadLocalStorage(key: string) {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function safeWriteLocalStorage(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {}
+}
+
+function readPendingQueueStorage(): PendingQueueOp[] {
+  const raw = safeReadLocalStorage(PENDING_QUEUE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingQueueStorage(rows: PendingQueueOp[]) {
+  safeWriteLocalStorage(PENDING_QUEUE_KEY, JSON.stringify(rows));
+}
+
+function readStoreBrandsCacheStorage(): Record<string, Array<{ marca_id: string; marca_nombre: string }>> {
+  const raw = safeReadLocalStorage(STORE_BRANDS_CACHE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoreBrandsCacheStorage(value: Record<string, Array<{ marca_id: string; marca_nombre: string }>>) {
+  safeWriteLocalStorage(STORE_BRANDS_CACHE_KEY, JSON.stringify(value));
+}
+
+function isLocalVisitId(value?: string) {
+  return String(value || "").startsWith("LOCAL-");
+}
+
+function buildPendingQueueId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function shouldQueueSubmission(err: unknown) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  const message = err instanceof Error ? err.message : String(err || "");
+  const text = message.toLowerCase();
+  return text.includes("failed to fetch") || text.includes("networkerror") || text.includes("network request failed") || text.includes("abort") || text.includes("network") || text.includes("load failed");
+}
+
+function sortPendingQueue(rows: PendingQueueOp[]) {
+  return [...rows].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function formatPendingQueueLabel(item: PendingQueueOp) {
+  if (item.kind === "entry") return `Entrada pendiente · ${formatStoreDisplay(item.tienda_id, item.tienda_nombre)}`;
+  if (item.kind === "close") return `Salida pendiente · ${formatStoreDisplay(item.tienda_id, item.tienda_nombre)}`;
+  const brand = String(item.payload?.marca_nombre || item.payload?.marca_id || "Marca");
+  const type = String(item.payload?.tipo_evidencia || "Evidencia");
+  return `Evidencia pendiente · ${formatStoreDisplay(item.tienda_id, item.tienda_nombre)} · ${brand} · ${type}`;
+}
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -719,6 +810,9 @@ export default function App() {
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [promotorRecentAlerts, setPromotorRecentAlerts] = useState<PromotorRecentAlert[]>([]);
+  const [pendingQueue, setPendingQueue] = useState<PendingQueueOp[]>([]);
+  const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
+  const [storeBrandsCache, setStoreBrandsCache] = useState<Record<string, Array<{ marca_id: string; marca_nombre: string }>>>(readStoreBrandsCacheStorage());
   const [evidenceFilterStore, setEvidenceFilterStore] = useState("");
   const [evidenceFilterBrand, setEvidenceFilterBrand] = useState("");
   const [evidenceFilterType, setEvidenceFilterType] = useState("");
@@ -817,6 +911,24 @@ export default function App() {
   }, [statusMsg, statusMsgDuration]);
 
   useEffect(() => {
+    setPendingQueue(sortPendingQueue(readPendingQueueStorage()));
+  }, []);
+
+  useEffect(() => {
+    writeStoreBrandsCacheStorage(storeBrandsCache);
+  }, [storeBrandsCache]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      if (role === "promotor") {
+        void syncPendingQueue(false);
+      }
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [role, pendingQueue]);
+
+  useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
       if (role === "supervisor") {
@@ -832,7 +944,38 @@ export default function App() {
 
   useEffect(() => () => { void stopCameraStream(); }, []);
 
-  const openVisits = useMemo(() => visits.filter((v) => !v.hora_fin), [visits]);
+  const pendingVisits = useMemo<VisitItem[]>(() => {
+    const visitMap = new Map<string, VisitItem>();
+    visits.forEach((visit) => visitMap.set(visit.visita_id, { ...visit }));
+    for (const item of sortPendingQueue(pendingQueue)) {
+      if (item.kind === "entry" && item.localVisitId) {
+        visitMap.set(item.localVisitId, {
+          visita_id: item.localVisitId,
+          tienda_id: item.tienda_id,
+          tienda_nombre: item.tienda_nombre,
+          tienda_display: formatStoreDisplay(item.tienda_id, item.tienda_nombre),
+          hora_inicio: item.createdAt,
+          hora_fin: "",
+          estado_visita: item.status,
+          resultado_geocerca_entrada: "PENDIENTE_ENVIO",
+          resultado_geocerca_salida: "",
+        });
+      }
+      if (item.kind === "close" && item.visitaId) {
+        const existing = visitMap.get(item.visitaId);
+        if (existing) {
+          visitMap.set(item.visitaId, {
+            ...existing,
+            hora_fin: item.createdAt,
+            estado_visita: item.status,
+            resultado_geocerca_salida: existing.resultado_geocerca_salida || "PENDIENTE_ENVIO",
+          });
+        }
+      }
+    }
+    return Array.from(visitMap.values()).sort((a, b) => String(a.hora_inicio).localeCompare(String(b.hora_inicio)));
+  }, [visits, pendingQueue]);
+  const openVisits = useMemo(() => pendingVisits.filter((v) => !v.hora_fin), [pendingVisits]);
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
   const evidenceTypeOptions = useMemo(() => {
@@ -842,8 +985,59 @@ export default function App() {
   }, [brandRules]);
   const evidencePhaseOptions = useMemo(() => ["NA", "ANTES", "DESPUES"] as EvidencePhase[], []);
 
-  const attendanceGallery = useMemo(() => allEvidenceRows.filter((item) => !isOperationalEvidence(item)), [allEvidenceRows]);
-  const operationalGallery = useMemo(() => allEvidenceRows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [allEvidenceRows]);
+  const pendingEvidenceRows = useMemo<UiEvidence[]>(() => {
+    const rows: UiEvidence[] = [];
+    for (const item of pendingQueue) {
+      if (item.kind === "entry") {
+        const photo = item.payload?.entryPhoto as PhotoCapture | undefined;
+        if (!photo?.dataUrl) continue;
+        rows.push({
+          evidencia_id: `PEND-${item.id}`,
+          visita_id: item.localVisitId,
+          tipo_evento: "ASISTENCIA_ENTRADA",
+          tipo_evidencia: "ASISTENCIA",
+          marca_nombre: "",
+          riesgo: "PENDIENTE",
+          fecha_hora_fmt: formatDateTimeMaybe(item.createdAt),
+          fecha_hora: item.createdAt,
+          url_foto: photo.dataUrl,
+          descripcion: "Pendiente por enviar",
+          tienda_id: item.tienda_id,
+          tienda_nombre: item.tienda_nombre,
+          tienda_display: formatStoreDisplay(item.tienda_id, item.tienda_nombre),
+          status: item.status,
+        });
+      }
+      if (item.kind === "evidence") {
+        const photos = Array.isArray(item.payload?.fotos) ? (item.payload.fotos as PhotoCapture[]) : [];
+        photos.forEach((photo, idx) => {
+          rows.push({
+            evidencia_id: `PEND-${item.id}-${idx}`,
+            visita_id: item.visitaId,
+            tipo_evento: "EVIDENCIA_PENDIENTE",
+            tipo_evidencia: String(item.payload?.tipo_evidencia || "Evidencia"),
+            marca_id: item.payload?.marca_id,
+            marca_nombre: normalizeBrandLabel(String(item.payload?.marca_nombre || ""), String(item.payload?.marca_id || "Marca")),
+            riesgo: "PENDIENTE",
+            fecha_hora_fmt: formatDateTimeMaybe(item.createdAt),
+            fecha_hora: item.createdAt,
+            url_foto: photo.dataUrl,
+            descripcion: item.status === "ERROR_ENVIO" ? `Error pendiente: ${item.lastError || "Reintentar envío"}` : "Pendiente por enviar",
+            tienda_id: item.tienda_id,
+            tienda_nombre: item.tienda_nombre,
+            tienda_display: formatStoreDisplay(item.tienda_id, item.tienda_nombre),
+            fase: item.payload?.fase,
+            status: item.status,
+          });
+        });
+      }
+    }
+    return rows;
+  }, [pendingQueue]);
+
+  const mergedEvidenceRows = useMemo(() => [...pendingEvidenceRows, ...allEvidenceRows], [pendingEvidenceRows, allEvidenceRows]);
+  const attendanceGallery = useMemo(() => mergedEvidenceRows.filter((item) => !isOperationalEvidence(item)), [mergedEvidenceRows]);
+  const operationalGallery = useMemo(() => mergedEvidenceRows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [mergedEvidenceRows]);
 
   const evidenceFilterOptions = useMemo(() => {
     const storeRows = operationalGallery;
@@ -897,6 +1091,119 @@ export default function App() {
   const selectedAlert = useMemo(() => supervisorAlerts.find((item) => item.alerta_id === selectedAlertId) || supervisorAlerts[0] || null, [supervisorAlerts, selectedAlertId]);
   const selectedSupervisorEvidence = useMemo(() => filteredSupervisorEvidences.find((item) => item.evidencia_id === selectedSupEvidenceId) || filteredSupervisorEvidences[0] || null, [filteredSupervisorEvidences, selectedSupEvidenceId]);
 
+  function refreshPendingQueue() {
+    setPendingQueue(sortPendingQueue(readPendingQueueStorage()));
+  }
+
+  function upsertPendingOperation(operation: PendingQueueOp) {
+    const current = readPendingQueueStorage().filter((item) => item.id !== operation.id);
+    const next = sortPendingQueue([...current, operation]);
+    writePendingQueueStorage(next);
+    setPendingQueue(next);
+  }
+
+  function removePendingOperation(operationId: string) {
+    const next = readPendingQueueStorage().filter((item) => item.id !== operationId);
+    writePendingQueueStorage(next);
+    setPendingQueue(sortPendingQueue(next));
+  }
+
+  function patchPendingOperation(operationId: string, patch: Partial<PendingQueueOp>) {
+    const next = readPendingQueueStorage().map((item) => (item.id === operationId ? { ...item, ...patch } : item));
+    writePendingQueueStorage(next);
+    setPendingQueue(sortPendingQueue(next));
+  }
+
+  function replacePendingVisitId(previousVisitId: string, nextVisitId: string) {
+    const next = readPendingQueueStorage().map((item) => {
+      const updated: PendingQueueOp = { ...item };
+      if (updated.localVisitId === previousVisitId) updated.localVisitId = nextVisitId;
+      if (updated.visitaId === previousVisitId) updated.visitaId = nextVisitId;
+      if (updated.payload?.visita_id === previousVisitId) {
+        updated.payload = { ...updated.payload, visita_id: nextVisitId };
+      }
+      return updated;
+    });
+    writePendingQueueStorage(next);
+    setPendingQueue(sortPendingQueue(next));
+  }
+
+  async function syncPendingQueue(showStatus = true) {
+    if (!getInitData()) return;
+    const queue = sortPendingQueue(readPendingQueueStorage());
+    if (!queue.length || syncingPendingQueue) return;
+    try {
+      setSyncingPendingQueue(true);
+      let synced = 0;
+      for (const item of queue) {
+        try {
+          if (item.kind === "entry") {
+            const payload = item.payload || {};
+            const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
+              tienda_id: payload.tienda_id,
+              lat: payload.lat,
+              lon: payload.lon,
+              accuracy: payload.accuracy,
+              foto_nombre: payload.foto_nombre,
+              foto_data_url: payload.foto_data_url,
+            });
+            const previousVisitId = item.localVisitId || payload.localVisitId;
+            removePendingOperation(item.id);
+            if (previousVisitId) replacePendingVisitId(previousVisitId, response.visita_id);
+            synced += 1;
+            continue;
+          }
+
+          if (item.kind === "evidence") {
+            const visitId = item.visitaId || item.payload?.visita_id || "";
+            if (!visitId || isLocalVisitId(visitId)) continue;
+            await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", {
+              visita_id: visitId,
+              marca_id: item.payload?.marca_id,
+              marca_nombre: item.payload?.marca_nombre,
+              tipo_evidencia: item.payload?.tipo_evidencia,
+              fase: item.payload?.fase,
+              descripcion: item.payload?.descripcion,
+              fotos: item.payload?.fotos,
+            });
+            removePendingOperation(item.id);
+            synced += 1;
+            continue;
+          }
+
+          if (item.kind === "close") {
+            const visitId = item.visitaId || item.payload?.visita_id || "";
+            if (!visitId || isLocalVisitId(visitId)) continue;
+            await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", { visita_id: visitId });
+            removePendingOperation(item.id);
+            synced += 1;
+          }
+        } catch (err) {
+          if (shouldQueueSubmission(err)) {
+            patchPendingOperation(item.id, { attempts: item.attempts + 1, status: "PENDIENTE_ENVIO", lastError: "" });
+            break;
+          }
+          patchPendingOperation(item.id, { attempts: item.attempts + 1, status: "ERROR_ENVIO", lastError: err instanceof Error ? err.message : "No se pudo enviar" });
+        }
+      }
+      if (synced) {
+        await loadPromotorDashboard();
+        await loadEvidencesToday();
+        await loadPromotorRecentAlerts();
+        if (showStatus) {
+          setStatusMsgDuration(7000);
+          setStatusMsg(`${synced} registro(s) pendiente(s) enviados.`);
+        }
+      } else if (showStatus && readPendingQueueStorage().length) {
+        setStatusMsgDuration(7000);
+        setStatusMsg("Pendientes conservados. Se reenviarán cuando vuelva la conexión.");
+      }
+      refreshPendingQueue();
+    } finally {
+      setSyncingPendingQueue(false);
+    }
+  }
+
   const expedientAttendance = useMemo(() => (expedient?.evidencias || []).filter(isAttendanceEvidence), [expedient]);
   const expedientOperational = useMemo(() => (expedient?.evidencias || []).filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [expedient]);
 
@@ -948,10 +1255,20 @@ export default function App() {
       setSelectedVisitStoreName("");
       return;
     }
+    const offlineVisit = pendingVisits.find((item) => item.visita_id === visitaId);
+    if (isLocalVisitId(visitaId) && offlineVisit) {
+      const cachedBrands = storeBrandsCache[offlineVisit.tienda_id] || [];
+      setAvailableBrands(cachedBrands);
+      setSelectedVisitStoreName(getVisitDisplayName(offlineVisit, stores));
+      return;
+    }
     try {
       const ctx = await postJson<EvidenceContextResponse>("/miniapp/promotor/evidence-context", { visita_id: visitaId });
       setAvailableBrands(ctx.marcas || []);
       setSelectedVisitStoreName(ctx.visita?.tienda_display || ctx.visita?.tienda_nombre || "");
+      if (ctx.visita?.tienda_id && ctx.marcas?.length) {
+        setStoreBrandsCache((prev) => ({ ...prev, [ctx.visita!.tienda_id]: ctx.marcas || [] }));
+      }
     } catch {
       setAvailableBrands([]);
       setSelectedVisitStoreName("");
@@ -1174,6 +1491,7 @@ export default function App() {
       void loadEvidencesToday();
       void loadPromotorRecentAlerts();
       void loadRulesForBrand("", "");
+      void syncPendingQueue(false);
     }
     if (role === "supervisor") {
       void loadSupervisorDashboard();
@@ -1522,6 +1840,7 @@ export default function App() {
 
 
   async function createEntry() {
+    let queuedPayload: Record<string, unknown> | null = null;
     try {
       if (!selectedStoreId) return setStatusMsg("Selecciona una tienda.");
       if (!entryLocation) return setStatusMsg("Captura la ubicación de entrada.");
@@ -1531,14 +1850,15 @@ export default function App() {
       const selectedStoreLabel = selectedStore ? formatStoreDisplay(selectedStore.tienda_id, selectedStore.nombre_tienda) : "la tienda seleccionada";
       if (typeof window !== "undefined" && !window.confirm(`¿Deseas registrar entrada en ${selectedStoreLabel}?`)) return;
       setSyncing(true);
-      const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", {
+      queuedPayload = {
         tienda_id: selectedStoreId,
         lat: entryLocation.lat,
         lon: entryLocation.lon,
         accuracy: entryLocation.accuracy,
         foto_nombre: entryPhoto.name,
         foto_data_url: entryPhoto.dataUrl,
-      });
+      };
+      const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", queuedPayload);
       setStatusMsgDuration(6800);
       setStatusMsg(response.warning === "attendance_photo_too_large_for_sheets" ? "Entrada registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets." : `Entrada registrada en ${response.tienda_display || response.tienda_nombre}`);
       setEntryLocation(null);
@@ -1548,6 +1868,31 @@ export default function App() {
       await loadPromotorDashboard();
       await loadEvidencesToday();
     } catch (err) {
+      if (shouldQueueSubmission(err) && selectedStoreId && entryLocation && entryPhoto && queuedPayload) {
+        const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
+        const localVisitId = buildPendingQueueId("LOCAL");
+        upsertPendingOperation({
+          id: buildPendingQueueId("QENTRY"),
+          kind: "entry",
+          createdAt: new Date().toISOString(),
+          status: "PENDIENTE_ENVIO",
+          attempts: 0,
+          localVisitId,
+          tienda_id: selectedStoreId,
+          tienda_nombre: selectedStore?.nombre_tienda || selectedStoreId,
+          payload: {
+            ...queuedPayload,
+            entryPhoto,
+            localVisitId,
+          },
+        });
+        setSelectedVisitId(localVisitId);
+        setEntryLocation(null);
+        setEntryPhoto(null);
+        setStatusMsgDuration(7500);
+        setStatusMsg("Entrada guardada localmente. Se enviará cuando vuelva la conexión.");
+        return;
+      }
       const message = err instanceof Error ? err.message : "No se pudo registrar la entrada real.";
       if (message.includes("Ya tienes una visita abierta")) {
         setEntryPhoto(null);
@@ -1562,18 +1907,34 @@ export default function App() {
   async function closeVisit() {
     try {
       if (!exitVisit) return setStatusMsg("No hay visita abierta para registrar salida.");
-            if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
       if (typeof window !== "undefined" && !window.confirm(`¿Deseas registrar salida en ${getVisitDisplayName(exitVisit, stores)}?`)) return;
       setSyncing(true);
-      const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", {
-        visita_id: exitVisit.visita_id,
-      });
+      const payload = { visita_id: exitVisit.visita_id };
+      const response = await postJson<CloseVisitResponse>("/miniapp/promotor/close-visit", payload);
       setStatusMsg(response.warning === "attendance_photo_too_large_for_sheets" ? "Salida registrada. La visita quedó guardada, pero la foto no cupo completa en Sheets." : "Salida registrada correctamente.");
       setExitLocation(null);
       setExitPhoto(null);
       await loadPromotorDashboard();
       await loadEvidencesToday();
     } catch (err) {
+      if (shouldQueueSubmission(err) && exitVisit) {
+        upsertPendingOperation({
+          id: buildPendingQueueId("QCLOSE"),
+          kind: "close",
+          createdAt: new Date().toISOString(),
+          status: "PENDIENTE_ENVIO",
+          attempts: 0,
+          visitaId: exitVisit.visita_id,
+          tienda_id: exitVisit.tienda_id,
+          tienda_nombre: exitVisit.tienda_nombre,
+          payload: { visita_id: exitVisit.visita_id },
+        });
+        setVisits((prev) => prev.map((item) => item.visita_id === exitVisit.visita_id ? { ...item, hora_fin: new Date().toISOString(), estado_visita: "PENDIENTE_ENVIO" } : item));
+        setStatusMsgDuration(7500);
+        setStatusMsg("Salida guardada localmente. Se enviará cuando vuelva la conexión.");
+        return;
+      }
       const message = err instanceof Error ? err.message : "No se pudo registrar la salida real.";
       if (message.includes("Faltan fotos DESPUES") || message.includes("No puedes registrar salida todavía")) {
         setPromotorModule("evidencias");
@@ -1586,6 +1947,7 @@ export default function App() {
   }
 
   async function saveEvidenceFlow() {
+    let queuedPayload: Record<string, unknown> | null = null;
     try {
       if (!selectedVisitId) return setStatusMsg("Selecciona una visita activa.");
       if (!evidenceBrandLabel.trim()) return setStatusMsg("Selecciona una marca.");
@@ -1593,7 +1955,7 @@ export default function App() {
       if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
       setSyncing(true);
-      const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", {
+      queuedPayload = {
         visita_id: selectedVisitId,
         marca_id: evidenceBrandId,
         marca_nombre: evidenceBrandLabel,
@@ -1601,7 +1963,8 @@ export default function App() {
         fase: evidencePhase,
         descripcion: evidenceDescription.trim(),
         fotos: evidencePhotos.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
-      });
+      };
+      const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", queuedPayload);
       setEvidenceType("");
       setEvidencePhase("NA");
       setEvidenceQty(1);
@@ -1614,6 +1977,28 @@ export default function App() {
         setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
       }
     } catch (err) {
+      if (shouldQueueSubmission(err) && queuedPayload) {
+        const visit = pendingVisits.find((item) => item.visita_id === selectedVisitId);
+        upsertPendingOperation({
+          id: buildPendingQueueId("QEVID"),
+          kind: "evidence",
+          createdAt: new Date().toISOString(),
+          status: "PENDIENTE_ENVIO",
+          attempts: 0,
+          visitaId: selectedVisitId,
+          tienda_id: visit?.tienda_id || "",
+          tienda_nombre: visit?.tienda_nombre || selectedVisitStoreName || "",
+          payload: queuedPayload,
+        });
+        setEvidenceType("");
+        setEvidencePhase("NA");
+        setEvidenceQty(1);
+        setEvidenceDescription("");
+        setEvidencePhotos([]);
+        setStatusMsgDuration(7500);
+        setStatusMsg("Evidencia guardada localmente. Se enviará cuando vuelva la conexión.");
+        return;
+      }
       const message = err instanceof Error ? err.message : "No se pudo registrar la evidencia.";
       if (message.includes("Primero debes registrar al menos 1 foto ANTES")) {
         setStatusMsgDuration(7500);
@@ -2068,7 +2453,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               <div className="panel">
                 <div className="miniTitle">Visitas de hoy</div>
                 <div className="stack compactStack">
-                  {visits.map((visit) => {
+                  {pendingVisits.map((visit) => {
                     const isOpen = !visit.hora_fin;
                     return (
                       <button key={visit.visita_id} onClick={() => { if (isOpen) setSelectedVisitId(visit.visita_id); focusAttendanceForVisit(visit.visita_id); }} className={`listBtn ${isOpen && selectedVisitId === visit.visita_id ? "listBtnGreen" : ""}`}>
@@ -2081,7 +2466,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       </button>
                     );
                   })}
-                  {!visits.length ? <div className="emptyBox">No hay visitas registradas hoy.</div> : null}
+                  {!pendingVisits.length ? <div className="emptyBox">No hay visitas registradas hoy.</div> : null}
                 </div>
 
                 {attendanceGallery.length ? (
@@ -2274,8 +2659,30 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 <div className="summaryLine summaryGeo">{promotorUsage.reference?.note || "Estimado de uso de la mini app. No es saldo real del operador."}</div>
               </div>
               <div className="summaryBlock">
+                <div className="miniTitle">Pendientes por enviar</div>
+                <div className="summaryLine">Pendientes: <strong>{pendingQueue.length}</strong></div>
+                <div className="summaryLine">Errores: <strong>{pendingQueue.filter((item) => item.status === "ERROR_ENVIO").length}</strong></div>
+                <div className="summaryLine">Con conexión, la app intentará reenviar automáticamente.</div>
+                <button className="secondaryBtn" style={{ marginTop: 10 }} onClick={() => void syncPendingQueue(true)} disabled={syncingPendingQueue || !pendingQueue.length}>
+                  <RefreshCw size={16} className={syncingPendingQueue ? "spin" : ""} />
+                  {syncingPendingQueue ? "Reintentando..." : "Reintentar envíos"}
+                </button>
+                {pendingQueue.length ? (
+                  <div className="stack compactStack" style={{ marginTop: 12, maxHeight: 180, overflowY: "auto" }}>
+                    {pendingQueue.map((item) => (
+                      <div className="listBtn" key={item.id}>
+                        <div className="listTitle">{formatPendingQueueLabel(item)}</div>
+                        <div className="listSub">{formatDateTimeMaybe(item.createdAt)} · {item.status === "ERROR_ENVIO" ? "Error" : "Pendiente"}</div>
+                        {item.lastError ? <div className="summaryLine summaryGeo">{item.lastError}</div> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="summaryBlock">
                 <div className="miniTitle">Registros de visitas</div>
-                {visits.length ? visits.map((visit) => (
+                {pendingVisits.length ? pendingVisits.map((visit) => (
                   <React.Fragment key={visit.visita_id}>
                     <div className="summaryLine">{getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}</div>
                     <div className="summaryLine summaryGeo">E: {geofenceShortLabel(visit.resultado_geocerca_entrada)}{visit.hora_fin ? ` · S: ${geofenceShortLabel(visit.resultado_geocerca_salida)}` : ""}</div>
