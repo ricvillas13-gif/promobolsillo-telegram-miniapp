@@ -41,6 +41,7 @@ type CaptureKind = "entrada" | "salida";
 type CameraTarget = "entrada" | "salida" | "evidencia" | "reemplazo";
 type SupervisorDecision = "APROBADA" | "OBSERVADA" | "RECHAZADA";
 type AlertFinalStatus = "RESUELTA" | "DESCARTADA";
+type PhotoSource = "CAMARA" | "GALERIA_AUTORIZADA";
 
 type BootstrapResponse = {
   ok: boolean;
@@ -157,6 +158,24 @@ type ReplaceEvidenceResponse = {
   evidencia_id: string;
   replaced: boolean;
   warning?: string;
+};
+
+type GalleryAuthorizationState = {
+  allowed: boolean;
+  reason?: string;
+  authorization_id?: string;
+  max_fotos?: number;
+  fotos_restantes?: number;
+  motivo?: string;
+  autorizado_por?: string;
+  vigencia_fin?: string;
+};
+
+type GalleryAuthorizationResponse = {
+  ok: boolean;
+  allowed: boolean;
+  reason?: string;
+  authorization?: GalleryAuthorizationState;
 };
 
 type EvidenceContextResponse = {
@@ -434,6 +453,7 @@ type PhotoCapture = {
   name: string;
   dataUrl: string;
   capturedAt: string;
+  source: PhotoSource;
 };
 
 type PendingQueueStatus = "PENDIENTE_ENVIO" | "ERROR_ENVIO";
@@ -726,6 +746,26 @@ async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEET
   return last;
 }
 
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("No se pudo leer la foto seleccionada."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function readGalleryPhotoForSheets(file: File): Promise<PhotoCapture> {
+  const raw = await fileToDataUrl(file);
+  const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
+  return {
+    name: file.name || `galeria-${Date.now()}.jpg`,
+    dataUrl,
+    capturedAt: nowMxString(),
+    source: "GALERIA_AUTORIZADA",
+  };
+}
+
 function getCurrentLocation() {
   return new Promise<LocationCapture>((resolve, reject) => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -801,6 +841,9 @@ export default function App() {
   const [evidenceQty, setEvidenceQty] = useState(1);
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
+  const [entryGalleryAuthorization, setEntryGalleryAuthorization] = useState<GalleryAuthorizationState>({ allowed: false });
+  const [evidenceGalleryAuthorization, setEvidenceGalleryAuthorization] = useState<GalleryAuthorizationState>({ allowed: false });
+  const [replaceGalleryAuthorization, setReplaceGalleryAuthorization] = useState<GalleryAuthorizationState>({ allowed: false });
   const [availableBrands, setAvailableBrands] = useState<Array<{ marca_id: string; marca_nombre: string }>>([]);
   const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean; orden?: number; obligatoria?: boolean; observaciones?: string }>>([]);
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
@@ -890,6 +933,9 @@ export default function App() {
   const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const entryGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  const evidenceGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceGalleryInputRef = useRef<HTMLInputElement | null>(null);
   const lastImageTapRef = useRef<{ src: string; at: number }>({ src: "", at: 0 });
   const imageViewerTouchRef = useRef<{ distance: number; startScale: number; dragging: boolean; dragStartX: number; dragStartY: number; originX: number; originY: number }>({ distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 });
   const attendancePhotoRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1146,6 +1192,7 @@ export default function App() {
               accuracy: payload.accuracy,
               foto_nombre: payload.foto_nombre,
               foto_data_url: payload.foto_data_url,
+              foto_source: payload.foto_source || "CAMARA",
             });
             const previousVisitId = item.localVisitId || payload.localVisitId;
             removePendingOperation(item.id);
@@ -1301,6 +1348,44 @@ export default function App() {
       setEvidenceType("");
       setEvidencePhase("NA");
       setEvidenceQty(1);
+    }
+  }
+
+  async function loadGalleryAuthorization(scope: "entrada" | "evidencia" | "reemplazo") {
+    try {
+      const payload: Record<string, unknown> = { scope };
+      if (scope === "entrada") {
+        if (!selectedStoreId) {
+          setEntryGalleryAuthorization({ allowed: false });
+          return;
+        }
+        payload.tienda_id = selectedStoreId;
+      } else if (scope === "evidencia") {
+        if (!selectedVisitId) {
+          setEvidenceGalleryAuthorization({ allowed: false });
+          return;
+        }
+        payload.visita_id = !isLocalVisitId(selectedVisitId) ? selectedVisitId : "";
+        const pendingVisit = pendingVisits.find((item) => item.visita_id === selectedVisitId);
+        payload.tienda_id = pendingVisit?.tienda_id || "";
+        if (evidenceBrandId) payload.marca_id = evidenceBrandId;
+        if (evidenceType) payload.tipo_evidencia = evidenceType;
+      } else {
+        if (!selectedEvidence?.evidencia_id || selectedEvidence.evidencia_id.startsWith("PEND-")) {
+          setReplaceGalleryAuthorization({ allowed: false });
+          return;
+        }
+        payload.evidencia_id = selectedEvidence.evidencia_id;
+      }
+      const data = await postJson<GalleryAuthorizationResponse>("/miniapp/promotor/gallery-authorization", payload);
+      const next = data.allowed ? { allowed: true, ...(data.authorization || {}) } : { allowed: false, reason: data.reason };
+      if (scope === "entrada") setEntryGalleryAuthorization(next);
+      if (scope === "evidencia") setEvidenceGalleryAuthorization(next);
+      if (scope === "reemplazo") setReplaceGalleryAuthorization(next);
+    } catch {
+      if (scope === "entrada") setEntryGalleryAuthorization({ allowed: false });
+      if (scope === "evidencia") setEvidenceGalleryAuthorization({ allowed: false });
+      if (scope === "reemplazo") setReplaceGalleryAuthorization({ allowed: false });
     }
   }
 
@@ -1512,6 +1597,9 @@ export default function App() {
 
   useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("NA"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
+  useEffect(() => { if (role === "promotor") void loadGalleryAuthorization("entrada"); }, [role, selectedStoreId]);
+  useEffect(() => { if (role === "promotor") void loadGalleryAuthorization("evidencia"); }, [role, selectedVisitId, evidenceBrandId, evidenceType, pendingVisits]);
+  useEffect(() => { if (role === "promotor") void loadGalleryAuthorization("reemplazo"); }, [role, selectedEvidenceId, selectedEvidence?.evidencia_id]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, role]);
   useEffect(() => {
@@ -1648,7 +1736,7 @@ export default function App() {
     ctx.drawImage(video, 0, 0, width, height);
     const raw = canvas.toDataURL("image/jpeg", 0.92);
     const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
-    const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
+    const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString(), source: "CAMARA" };
     if (cameraModal.target === "entrada") {
       setEntryPhoto(payload);
       setStatusMsg("Foto de entrada lista.");
@@ -1810,6 +1898,41 @@ export default function App() {
     }, 120);
   }
 
+  function triggerGalleryPicker(target: "entrada" | "evidencia" | "reemplazo") {
+    if (target === "entrada") entryGalleryInputRef.current?.click();
+    if (target === "evidencia") evidenceGalleryInputRef.current?.click();
+    if (target === "reemplazo") replaceGalleryInputRef.current?.click();
+  }
+
+  async function handleGallerySelection(target: "entrada" | "evidencia" | "reemplazo", files: FileList | null) {
+    if (!files?.length) return;
+    try {
+      const selectedFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+      if (!selectedFiles.length) return;
+      if (target === "entrada") {
+        const payload = await readGalleryPhotoForSheets(selectedFiles[0]);
+        setEntryPhoto(payload);
+        setStatusMsg("Foto de galería lista para entrada.");
+        return;
+      }
+      if (target === "reemplazo") {
+        const payload = await readGalleryPhotoForSheets(selectedFiles[0]);
+        setStatusMsg("Reemplazando foto...");
+        setStatusMsgDuration(7000);
+        await replaceEvidencePhotoPayload(payload.name, payload.dataUrl, payload.source);
+        return;
+      }
+      const payloads: PhotoCapture[] = [];
+      for (const file of selectedFiles.slice(0, Math.max(1, 24 - evidencePhotos.length))) {
+        payloads.push(await readGalleryPhotoForSheets(file));
+      }
+      setEvidencePhotos((prev) => [...prev, ...payloads].slice(0, 24));
+      setStatusMsg("Foto(s) de galería agregada(s).");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo procesar la foto de galería.");
+    }
+  }
+
   function removeEvidencePhotoAt(index: number) {
     setEvidencePhotos((prev) => prev.filter((_, i) => i !== index));
   }
@@ -1857,6 +1980,7 @@ export default function App() {
         accuracy: entryLocation.accuracy,
         foto_nombre: entryPhoto.name,
         foto_data_url: entryPhoto.dataUrl,
+        foto_source: entryPhoto.source || "CAMARA",
       };
       const response = await postJson<StartEntryResponse>("/miniapp/promotor/start-entry", queuedPayload);
       setStatusMsgDuration(6800);
@@ -1962,7 +2086,7 @@ export default function App() {
         tipo_evidencia: evidenceType,
         fase: evidencePhase,
         descripcion: evidenceDescription.trim(),
-        fotos: evidencePhotos.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
+        fotos: evidencePhotos.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt, source: photo.source || "CAMARA" })),
       };
       const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", queuedPayload);
       setEvidenceType("");
@@ -2009,11 +2133,11 @@ export default function App() {
     }
   }
 
-  async function replaceEvidencePhotoPayload(fileName: string, dataUrl: string) {
+  async function replaceEvidencePhotoPayload(fileName: string, dataUrl: string, source: PhotoSource = "CAMARA") {
     if (!selectedEvidence) return;
     setSyncing(true);
     try {
-      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", { evidencia_id: selectedEvidence.evidencia_id, foto_nombre: fileName, foto_data_url: dataUrl });
+      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", { evidencia_id: selectedEvidence.evidencia_id, foto_nombre: fileName, foto_data_url: dataUrl, foto_source: source });
       await loadEvidencesToday();
       setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "La evidencia se reemplazó, pero la foto no cupo completa en Sheets." : "Evidencia reemplazada.");
       setStatusMsgDuration(6800);
@@ -2432,7 +2556,14 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       <Camera size={16} />
                       {entryPhoto ? "Selfie lista" : "Tomar selfie"}
                     </button>
+                    {entryGalleryAuthorization.allowed ? (
+                      <button className="secondaryBtn compactBtn" onClick={() => triggerGalleryPicker("entrada")}>
+                        <ImageIcon size={16} />
+                        Galería autorizada
+                      </button>
+                    ) : null}
                   </div>
+                  {entryGalleryAuthorization.allowed ? <div className="contextHint">Galería autorizada temporalmente por Operaciones.</div> : null}
                   {entryLocation ? <div className="captureMeta">Lat {entryLocation.lat.toFixed(5)} · Lon {entryLocation.lon.toFixed(5)}</div> : null}
                   {entryPhoto ? <div className="thumbRow"><img src={entryPhoto.dataUrl} className="thumb" alt="Entrada" /></div> : null}
                 </div>
@@ -2554,7 +2685,14 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <Camera size={16} />
                     Tomar foto
                   </button>
+                  {evidenceGalleryAuthorization.allowed ? (
+                    <button className="secondaryBtn compactBtn" onClick={() => triggerGalleryPicker("evidencia")}>
+                      <ImageIcon size={16} />
+                      Galería autorizada
+                    </button>
+                  ) : null}
                 </div>
+                {evidenceGalleryAuthorization.allowed ? <div className="contextHint">Galería autorizada temporalmente por Operaciones para esta evidencia.</div> : null}
                 <div className="contextHint">Las evidencias se capturan solo con la cámara. Máximo 24 fotos en la selección actual.</div>
                 {evidencePhotos.length ? (
                   <>
@@ -2621,10 +2759,12 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
                     <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
                     <div className="summaryLine">Riesgo: <strong>{selectedEvidence.riesgo}</strong></div>
+                    {replaceGalleryAuthorization.allowed ? <div className="contextHint">Galería autorizada temporalmente por Operaciones para reemplazo.</div> : null}
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => openImageViewer(selectedEvidence.url_foto)}><Eye size={16} /><span>Ver foto</span></button>
                       <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}><Trash2 size={16} /><span>Anular</span></button>
                       <button className="actionButton" onClick={() => void openCamera("reemplazo", "environment")}><Camera size={16} /><span>Reemplazar cámara</span></button>
+                      {replaceGalleryAuthorization.allowed ? <button className="actionButton" onClick={() => triggerGalleryPicker("reemplazo")}><ImageIcon size={16} /><span>Reemplazar galería</span></button> : null}
                       <button className="actionButton" onClick={() => void saveNote()}><Pencil size={16} /><span>Guardar nota</span></button>
                     </div>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
@@ -3153,6 +3293,10 @@ ${selectedEvidence.fecha_hora_fmt}`);
             )}
           </div>
         ) : null}
+
+        <input ref={entryGalleryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { void handleGallerySelection("entrada", e.target.files); e.currentTarget.value = ""; }} />
+        <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => { void handleGallerySelection("evidencia", e.target.files); e.currentTarget.value = ""; }} />
+        <input ref={replaceGalleryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { void handleGallerySelection("reemplazo", e.target.files); e.currentTarget.value = ""; }} />
 
         {cameraModal.open ? (
           <div className="overlayBackdrop" onClick={() => void closeCameraModal()}>
