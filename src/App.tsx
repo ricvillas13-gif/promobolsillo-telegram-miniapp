@@ -505,6 +505,14 @@ function getStoreDisplayFromItem(item?: { tienda_display?: string; tienda_id?: s
   return item.tienda_display || formatStoreDisplay(item.tienda_id, item.tienda_nombre);
 }
 
+function formatPhaseLabel(value?: string) {
+  const phase = String(value || "").trim().toUpperCase();
+  if (phase === "ANTES") return "Antes";
+  if (phase === "DESPUES") return "Después";
+  if (phase === "NA") return "Foto estado actual";
+  return value || "";
+}
+
 
 function nowMxString() {
   return formatDateTimeMaybe(new Date().toISOString());
@@ -832,11 +840,7 @@ export default function App() {
       .filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index)
       .sort((a, b) => Number(a.orden || 999) - Number(b.orden || 999) || String(a.tipo_evidencia).localeCompare(String(b.tipo_evidencia)));
   }, [brandRules]);
-  const evidencePhaseOptions = useMemo(() => {
-    const selectedRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === evidenceType);
-    if (!selectedRule) return ["NA", "ANTES", "DESPUES"] as EvidencePhase[];
-    return selectedRule.requiere_antes_despues ? (["ANTES", "DESPUES"] as EvidencePhase[]) : (["NA"] as EvidencePhase[]);
-  }, [evidenceTypeOptions, evidenceType]);
+  const evidencePhaseOptions = useMemo(() => ["NA", "ANTES", "DESPUES"] as EvidencePhase[], []);
 
   const attendanceGallery = useMemo(() => allEvidenceRows.filter((item) => !isOperationalEvidence(item)), [allEvidenceRows]);
   const operationalGallery = useMemo(() => allEvidenceRows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [allEvidenceRows]);
@@ -970,11 +974,6 @@ export default function App() {
         const selectedRule = usableRules.find((item) => item.tipo_evidencia === evidenceType) || usableRules[0];
         if (!evidenceType || !usableRules.find((item) => item.tipo_evidencia === evidenceType)) setEvidenceType(selectedRule.tipo_evidencia);
         setEvidenceQty(selectedRule.fotos_requeridas || 1);
-        if (selectedRule.requiere_antes_despues) {
-          if (evidencePhase === "NA") setEvidencePhase("ANTES");
-        } else if (evidencePhase !== "NA") {
-          setEvidencePhase("NA");
-        }
       } else {
         setEvidenceType("");
         setEvidencePhase("NA");
@@ -1281,7 +1280,23 @@ export default function App() {
   async function openCamera(target: CameraTarget, facing: "user" | "environment") {
     try {
       setCapturingPhoto(target === "evidencia" ? "entrada" : target);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false });
+      await stopCameraStream();
+      const attempts: MediaStreamConstraints[] = [
+        { video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+        { video: { facingMode: facing }, audio: false },
+        { video: true, audio: false },
+      ];
+      let stream: MediaStream | null = null;
+      let lastError: unknown = null;
+      for (const constraints of attempts) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (!stream) throw lastError || new Error("No se pudo abrir la cámara.");
       cameraStreamRef.current = stream;
       setCameraModal({ open: true, target, facing });
       window.setTimeout(() => {
@@ -1291,7 +1306,12 @@ export default function App() {
         }
       }, 10);
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo abrir la cámara.");
+      const rawMessage = err instanceof Error ? err.message : String(err || "");
+      const friendly = rawMessage.includes("Could not start video source")
+        ? "No se pudo iniciar la cámara. Cierra otras apps que la estén usando e inténtalo de nuevo."
+        : (rawMessage || "No se pudo abrir la cámara.");
+      setStatusMsg(friendly);
+      setStatusMsgDuration(7200);
     } finally {
       setCapturingPhoto(null);
     }
@@ -2124,7 +2144,6 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
                   if (nextRule) {
                     setEvidenceQty(nextRule.fotos_requeridas || 1);
-                    setEvidencePhase(nextRule.requiere_antes_despues ? "ANTES" : "NA");
                   }
                 }} disabled={!evidenceTypeOptions.length}>
                   <option value="">{evidenceTypeOptions.length ? "Selecciona un tipo" : "Selecciona primero tienda y marca"}</option>
@@ -2135,7 +2154,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
                 <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={!evidenceType}>
-                  {evidencePhaseOptions.map((value) => <option key={value} value={value}>{value === "NA" ? "No aplica" : value === "ANTES" ? "Antes" : "Después"}</option>)}
+                  {evidencePhaseOptions.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
@@ -2192,7 +2211,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               </select>
               <select className="inputLike" value={evidenceFilterPhase} onChange={(e) => setEvidenceFilterPhase(e.target.value)}>
                 <option value="">Todas las fases</option>
-                {evidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
+                {evidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
               </select>
             </div>
             <div className="twoCol">
@@ -2522,6 +2541,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               </div>
             ) : null}
 
+            <div className="railScrollFrame">
             <div className="reviewRail" aria-label="Carrete de evidencias">
               {filteredSupervisorEvidences.map((item) => {
                 const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
@@ -2548,7 +2568,8 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 );
               })}
             </div>
-            <div className="contextHint">Vista rápida tipo carrete: toca para seleccionar y da doble clic para abrir la foto completa.</div>
+            </div>
+            <div className="contextHint">Vista rápida tipo carrete: toca para seleccionar, desliza para ver más y da doble clic para abrir la foto completa.</div>
 
             {selectedSupervisorEvidence ? (
               <div className="card detailSubcard">
@@ -2680,6 +2701,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 </div>
                 <div className="panel fullSpan">
                   <div className="miniTitle">Asistencia de la visita</div>
+                  <div className="galleryScroll compactGalleryScroll">
                   <div className="galleryGrid">
                     {expedientAttendance.map((item) => (
                       <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
@@ -2696,9 +2718,11 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     ))}
                     {!expedientAttendance.length ? <div className="emptyBox">Sin fotos de asistencia ligadas.</div> : null}
                   </div>
+                  </div>
                 </div>
                 <div className="panel fullSpan">
                   <div className="miniTitle">Evidencias operativas de la visita</div>
+                  <div className="galleryScroll compactGalleryScroll">
                   <div className="galleryGrid">
                     {expedientOperational.map((item) => (
                       <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
@@ -2715,6 +2739,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       </div>
                     ))}
                     {!expedientOperational.length ? <div className="emptyBox">Sin evidencias operativas ligadas.</div> : null}
+                  </div>
                   </div>
                 </div>
               </div>
@@ -2852,7 +2877,10 @@ input[type=file] { display: none; }
 .twoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
-.compactStack { max-height: 320px; overflow: auto; }
+.compactStack { max-height: 320px; overflow-y: auto; overflow-x: hidden; scrollbar-width: auto; scrollbar-color: rgba(76,175,80,.58) rgba(76,175,80,.12); border: 1px solid rgba(76,175,80,.16); border-radius: 14px; padding: 8px; background: rgba(255,255,255,0.72); }
+.compactStack::-webkit-scrollbar { width: 8px; }
+.compactStack::-webkit-scrollbar-thumb { background: rgba(76,175,80,.52); border-radius: 999px; }
+.compactStack::-webkit-scrollbar-track { background: rgba(76,175,80,.10); border-radius: 999px; }
 .listBtn { width: 100%; text-align: left; border-radius: 16px; border: 1px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); padding: 12px; color: #263238; cursor: pointer; }
 .listBtnGreen { border-color: rgba(76,175,80,.45); background: rgba(232,245,233,0.95); }
 .listTitle { font-weight: 800; }
@@ -2891,7 +2919,10 @@ input[type=file] { display: none; }
 .summaryGeo { margin-top: 4px; color: #607d8b; font-size: 12px; }
 .previewFrame { aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: #dfe5e8; margin-bottom: 10px; }
 .actionButton { border: 0; border-radius: 12px; background: rgba(96,125,139,0.12); color: #37474f; font-weight: 700; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
-.galleryScroll { max-height: 420px; overflow: auto; padding-right: 4px; }
+.galleryScroll { max-height: 420px; overflow-y: auto; overflow-x: hidden; padding: 8px 10px 8px 8px; scrollbar-width: auto; scrollbar-color: rgba(76,175,80,.58) rgba(76,175,80,.12); border: 1px solid rgba(76,175,80,.16); border-radius: 14px; background: rgba(255,255,255,0.72); }
+.galleryScroll::-webkit-scrollbar { width: 8px; }
+.galleryScroll::-webkit-scrollbar-thumb { background: rgba(76,175,80,.52); border-radius: 999px; }
+.galleryScroll::-webkit-scrollbar-track { background: rgba(76,175,80,.10); border-radius: 999px; }
 .compactGalleryScroll { max-height: 320px; }
 .galleryGrid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .attendanceGalleryGrid { grid-template-columns: 1fr; }
@@ -2924,7 +2955,11 @@ input[type=file] { display: none; }
 .selectionToolbar { margin-top: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
 .selectionToolbarLeft { display: inline-flex; gap: 6px; align-items: center; color: #455a64; }
 .selectionToolbarActions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
-.reviewRail { margin-top: 14px; display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.railScrollFrame { margin-top: 14px; border: 1px solid rgba(76,175,80,.16); border-radius: 14px; background: rgba(255,255,255,0.72); padding: 8px; }
+.reviewRail { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: auto; scrollbar-color: rgba(76,175,80,.58) rgba(76,175,80,.12); }
+.reviewRail::-webkit-scrollbar { height: 8px; }
+.reviewRail::-webkit-scrollbar-thumb { background: rgba(76,175,80,.52); border-radius: 999px; }
+.reviewRail::-webkit-scrollbar-track { background: rgba(76,175,80,.10); border-radius: 999px; }
 .reviewRailCard { flex: 0 0 152px; border-radius: 16px; border: 2px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); overflow: hidden; cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; padding: 0; text-align: left; }
 .reviewRailCard:hover { transform: translateY(-1px); box-shadow: 0 10px 18px rgba(38,50,56,0.10); }
 .reviewRailCardSelected { border-color: rgba(76,175,80,.65); box-shadow: 0 12px 20px rgba(76,175,80,.12); }
