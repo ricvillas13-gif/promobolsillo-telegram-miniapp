@@ -437,7 +437,7 @@ type PhotoCapture = {
 };
 
 const API_BASE = "https://promobolsillo-telegram.onrender.com";
-const SHEETS_SAFE_PHOTO_CHARS = 43000;
+const SHEETS_SAFE_PHOTO_CHARS = 47000;
 
 function getTelegramWebApp() {
   if (typeof window === "undefined") return undefined;
@@ -619,14 +619,14 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
 
 async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
   const attempts = [
-    { side: 720, quality: 0.72 },
-    { side: 640, quality: 0.65 },
-    { side: 560, quality: 0.58 },
-    { side: 480, quality: 0.5 },
-    { side: 420, quality: 0.44 },
-    { side: 360, quality: 0.38 },
-    { side: 320, quality: 0.32 },
-    { side: 280, quality: 0.28 },
+    { side: 1440, quality: 0.92 },
+    { side: 1280, quality: 0.9 },
+    { side: 1180, quality: 0.88 },
+    { side: 1080, quality: 0.86 },
+    { side: 960, quality: 0.84 },
+    { side: 840, quality: 0.8 },
+    { side: 720, quality: 0.76 },
+    { side: 640, quality: 0.72 },
   ];
   let last = dataUrl;
   for (const attempt of attempts) {
@@ -1322,7 +1322,7 @@ export default function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, width, height);
-    const raw = canvas.toDataURL("image/jpeg", 0.85);
+    const raw = canvas.toDataURL("image/jpeg", 0.92);
     const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
     const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
     if (cameraModal.target === "entrada") {
@@ -1513,41 +1513,7 @@ export default function App() {
     }
   }
 
-  async function captureAttendancePhoto(kind: CaptureKind, fileList: FileList | null) {
-    const file = fileList?.[0];
-    if (!file) return;
-    try {
-      setCapturingPhoto(kind);
-      const dataUrl = await readPhotoForSheets(file);
-      const payload: PhotoCapture = { name: file.name, dataUrl, capturedAt: nowMxString() };
-      if (kind === "entrada") {
-        setEntryPhoto(payload);
-        setStatusMsg("Foto de entrada lista.");
-      } else {
-        setExitPhoto(payload);
-        setStatusMsg("Foto de salida lista.");
-      }
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo procesar la foto.");
-    } finally {
-      setCapturingPhoto(null);
-    }
-  }
 
-  async function captureEvidencePhotos(fileList: FileList | null) {
-    const files = Array.from(fileList || []).slice(0, 12);
-    if (!files.length) return;
-    try {
-      setCapturingPhoto("entrada");
-      const processed = await Promise.all(files.map(async (file) => ({ name: file.name, dataUrl: await readPhotoForSheets(file), capturedAt: nowMxString() })));
-      setEvidencePhotos((prev) => [...prev, ...processed].slice(0, 24));
-      setStatusMsg(`${processed.length} foto(s) agregadas.`);
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudieron procesar las fotos.");
-    } finally {
-      setCapturingPhoto(null);
-    }
-  }
 
   async function createEntry() {
     try {
@@ -1690,25 +1656,6 @@ ${selectedEvidence.fecha_hora_fmt}`);
     }
   }
 
-  async function replaceEvidencePhoto(fileList: FileList | null) {
-    const file = fileList?.[0];
-    if (!file || !selectedEvidence) return;
-    const confirmed = typeof window === "undefined" ? true : window.confirm(`¿Deseas reemplazar esta foto?
-
-${getStoreDisplayFromItem(selectedEvidence)}
-${normalizeBrandLabel(selectedEvidence.marca_nombre || "", "Marca")}
-${selectedEvidence.tipo_evidencia}
-${selectedEvidence.fecha_hora_fmt}`);
-    if (!confirmed) return;
-    try {
-      setStatusMsg("Reemplazando foto...");
-      setStatusMsgDuration(7000);
-      const dataUrl = await readPhotoForSheets(file);
-      await replaceEvidencePhotoPayload(file.name, dataUrl);
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo reemplazar la evidencia.");
-    }
-  }
 
   async function saveNote() {
     try {
@@ -2094,11 +2041,6 @@ ${selectedEvidence.fecha_hora_fmt}`);
                       <Camera size={16} />
                       {entryPhoto ? "Selfie lista" : "Tomar selfie"}
                     </button>
-                    <label className="fileBtn compactBtn">
-                      <ImageIcon size={16} />
-                      {entryPhoto ? "Reemplazar con galería" : "Elegir de galería"}
-                      <input type="file" accept="image/*" onChange={(e) => void captureAttendancePhoto("entrada", e.target.files)} />
-                    </label>
                   </div>
                   {entryLocation ? <div className="captureMeta">Lat {entryLocation.lat.toFixed(5)} · Lon {entryLocation.lon.toFixed(5)}</div> : null}
                   {entryPhoto ? <div className="thumbRow"><img src={entryPhoto.dataUrl} className="thumb" alt="Entrada" /></div> : null}
@@ -2222,13 +2164,8 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <Camera size={16} />
                     Tomar foto
                   </button>
-                  <label className="fileBtn compactBtn">
-                    <ImageIcon size={16} />
-                    Elegir de galería
-                    <input type="file" accept="image/*" multiple onChange={(e) => void captureEvidencePhotos(e.target.files)} />
-                  </label>
                 </div>
-                <div className="contextHint">Máximo 24 fotos en la selección actual.</div>
+                <div className="contextHint">Las evidencias se capturan solo con la cámara. Máximo 24 fotos en la selección actual.</div>
                 {evidencePhotos.length ? (
                   <>
                     <div className="thumbGrid">{evidencePhotos.map((photo, index) => (
@@ -2297,7 +2234,6 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => openImageViewer(selectedEvidence.url_foto)}><Eye size={16} /><span>Ver foto</span></button>
                       <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}><Trash2 size={16} /><span>Anular</span></button>
-                      <label className="actionButton"><ImageIcon size={16} /><span>Reemplazar galería</span><input type="file" accept="image/*" onChange={(e) => void replaceEvidencePhoto(e.target.files)} /></label>
                       <button className="actionButton" onClick={() => void openCamera("reemplazo", "environment")}><Camera size={16} /><span>Reemplazar cámara</span></button>
                       <button className="actionButton" onClick={() => void saveNote()}><Pencil size={16} /><span>Guardar nota</span></button>
                     </div>
@@ -2594,48 +2530,44 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
                 <div className="actionGrid actionGridButtons">
                   <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
-                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Observar lote</span></button>
+                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Comentar lote</span></button>
                   <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
                 </div>
               </div>
             ) : null}
 
-            <div className="galleryReviewGrid">
+            <div className="reviewRail" aria-label="Carrete de evidencias">
               {filteredSupervisorEvidences.map((item) => {
                 const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
                 return (
-                  <div
+                  <button
                     key={item.evidencia_id}
-                    className={`galleryReviewCard ${isSelected ? "galleryReviewCardSelected" : ""}`}
+                    className={`reviewRailCard ${isSelected ? "reviewRailCardSelected" : ""}`}
                     onClick={() => toggleSupervisorEvidenceSelection(item.evidencia_id)}
-                    role="button"
-                    tabIndex={0}
+                    onDoubleClick={() => openImageViewer(item.url_foto)}
+                    type="button"
                   >
-                    <div className="galleryReviewMedia">
+                    <div className="reviewRailMedia">
                       <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
                       <div className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`}>{isSelected ? "✓" : "○"}</div>
                     </div>
-                    <div className="galleryReviewBody">
-                      <div className="galleryTop compactTop">
-                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
-                      </div>
-                      <div className="gallerySub compactMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
-                      <div className="gallerySub compactMeta">{compactMetaLine(item)}</div>
-                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                      <div className="geoRow">
-                        <span className={`riskBadge ${statusClass(item.status || item.decision_supervisor)}`}>{item.status || item.decision_supervisor || "RECIBIDA"}</span>
-                        {item.decision_supervisor ? <span className="riskBadge riskGreen">Rev: {item.decision_supervisor}</span> : null}
-                      </div>
+                    <div className="reviewRailBody">
+                      <div className="reviewRailTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                      <div className="reviewRailMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                      <div className="reviewRailMeta">{normalizeBrandLabel(item.marca_nombre || "", "Marca")}</div>
+                      <div className="reviewRailMeta">{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</div>
+                      <div className="reviewRailMeta">{item.fecha_hora_fmt}</div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
+            <div className="contextHint">Vista rápida tipo carrete: toca para seleccionar y da doble clic para abrir la foto completa.</div>
 
             {selectedSupervisorEvidence ? (
               <div className="card detailSubcard">
                 <div className="sectionTitle">Detalle de evidencia</div>
+                <div className="contextHint">La imagen completa se abre con doble clic sobre el carrete o sobre esta vista.</div>
                 <div className="twoCol">
                   <div className="panel">
                     <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
@@ -2663,7 +2595,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Decisión</label>
                     <select className="inputLike" value={reviewDecision} onChange={(e) => setReviewDecision(e.target.value as SupervisorDecision)}>
                       <option value="APROBADA">APROBADA</option>
-                      <option value="OBSERVADA">OBSERVADA</option>
+                      <option value="OBSERVADA">COMENTADA</option>
                       <option value="RECHAZADA">RECHAZADA</option>
                     </select>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Motivo</label>
@@ -3006,12 +2938,14 @@ input[type=file] { display: none; }
 .selectionToolbar { margin-top: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
 .selectionToolbarLeft { display: inline-flex; gap: 6px; align-items: center; color: #455a64; }
 .selectionToolbarActions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
-.galleryReviewGrid { margin-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.galleryReviewCard { border-radius: 18px; border: 2px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); overflow: hidden; cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
-.galleryReviewCard:hover { transform: translateY(-1px); box-shadow: 0 10px 18px rgba(38,50,56,0.10); }
-.galleryReviewCardSelected { border-color: rgba(76,175,80,.65); box-shadow: 0 12px 20px rgba(76,175,80,.12); }
-.galleryReviewMedia { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #dfe5e8; }
-.galleryReviewBody { padding: 10px 12px 12px; }
+.reviewRail { margin-top: 14px; display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.reviewRailCard { flex: 0 0 152px; border-radius: 16px; border: 2px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); overflow: hidden; cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; padding: 0; text-align: left; }
+.reviewRailCard:hover { transform: translateY(-1px); box-shadow: 0 10px 18px rgba(38,50,56,0.10); }
+.reviewRailCardSelected { border-color: rgba(76,175,80,.65); box-shadow: 0 12px 20px rgba(76,175,80,.12); }
+.reviewRailMedia { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #dfe5e8; }
+.reviewRailBody { padding: 8px 10px 10px; }
+.reviewRailTitle { font-weight: 800; color: #263238; font-size: 12px; line-height: 1.2; }
+.reviewRailMeta { margin-top: 4px; color: #607d8b; font-size: 11px; line-height: 1.2; }
 .selectionPill { position: absolute; right: 10px; top: 10px; width: 28px; height: 28px; border-radius: 999px; background: rgba(255,255,255,0.92); color: #546e7a; display: grid; place-items: center; font-weight: 900; border: 1px solid rgba(38,50,56,0.14); }
 .selectionPillActive { background: #4caf50; color: white; border-color: rgba(76,175,80,.65); }
 .detailSubcard { margin-top: 16px; }
@@ -3021,6 +2955,6 @@ input[type=file] { display: none; }
 .overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
 .cameraModal { width: min(92vw, 520px); background: #111; border-radius: 18px; padding: 14px; }
 .cameraVideo { width: 100%; border-radius: 14px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; }
-@media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .galleryReviewGrid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .twoCol, .galleryGrid, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } }
 `;
