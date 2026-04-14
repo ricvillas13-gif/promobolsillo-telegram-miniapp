@@ -2598,15 +2598,15 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   {entryPhoto ? <div className="thumbRow"><img src={entryPhoto.dataUrl} className="thumb" alt="Entrada" /></div> : null}
                 </div>
 
-                <button className="primaryBtn mainActionBtn" onClick={() => void createEntry()} disabled={syncing}>
-                  <MapPin size={16} />
-                  {syncing ? "Procesando..." : "Registrar entrada"}
+                <button className="primaryBtn mainActionBtn entryActionBtn" onClick={() => void createEntry()} disabled={syncing}>
+                  <span className="mainActionTop"><MapPin size={16} /><span>{syncing ? "Procesando..." : "Registrar entrada"}</span></span>
+                  {!syncing && selectedStoreId ? <span className="mainActionSub">{formatStoreDisplay(selectedStoreId, getStoreNameById(selectedStoreId, stores) || selectedStoreId)}</span> : null}
                 </button>
 
                 {hasOpenVisit && exitVisit ? (
-                  <button className="secondaryBtn mainActionBtn" style={{ background: "#d32f2f", color: "white" }} onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
-                    <CheckCircle2 size={16} />
-                    {syncing ? "Procesando..." : "Registrar salida"}
+                  <button className="secondaryBtn dangerBtn mainActionBtn exitActionBtn" onClick={() => void closeVisit()} disabled={syncing || !hasOpenVisit}>
+                    <span className="mainActionTop"><CheckCircle2 size={16} /><span>{syncing ? "Procesando..." : "Registrar salida"}</span></span>
+                    {!syncing && exitVisit ? <span className="mainActionSub">{getVisitDisplayName(exitVisit, stores)}</span> : null}
                   </button>
                 ) : null}
               </div>
@@ -3554,18 +3554,22 @@ input[type=file] { display: none; }
 .detailSubcard { margin-top: 16px; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
-.authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 12px; line-height: 1.35; }
-.mainActionBtn { white-space: normal; line-height: 1.2; min-height: 52px; }
-.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 16px; touch-action: none; overflow: hidden; }
+.authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 12px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.mainActionBtn { white-space: normal; line-height: 1.2; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; }
+.mainActionTop { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; width: 100%; }
+.mainActionSub { display: block; width: 100%; font-size: 12px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; }
+.entryActionBtn { background: #4caf50; color: white; }
+.dangerBtn { background: #d32f2f !important; color: white !important; }
+.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 12px; touch-action: none; overflow: hidden; }
 .overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
-.cameraModal { width: min(96vw, 430px); max-height: 92vh; background: #111; border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.cameraViewport { width: 100%; border-radius: 14px; overflow: hidden; background: #000; }
-.cameraVideo { width: 100%; border-radius: 14px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; display: block; }
+.cameraModal { width: min(92vw, 390px); max-height: 86vh; background: #111; border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.cameraViewport { width: 100%; border-radius: 14px; overflow: hidden; background: #000; max-height: 58vh; }
+.cameraVideo { width: 100%; height: min(58vh, 460px); border-radius: 14px; background: #000; object-fit: cover; display: block; }
 .cameraHint { color: rgba(255,255,255,0.74); font-size: 12px; text-align: center; }
 .cameraActionRow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cameraCaptureBtn, .cameraCancelBtn { border: 0; border-radius: 14px; min-height: 52px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
 @media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } }
-@media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraActionRow { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal { width: min(94vw, 360px); max-height: 82vh; padding: 10px; } .cameraViewport { max-height: 50vh; } .cameraVideo { height: min(50vh, 360px); } .cameraActionRow { grid-template-columns: 1fr; } .mainActionBtn { min-height: 60px; } }
 `;
