@@ -3422,16 +3422,18 @@ const styles: Record<string, React.CSSProperties> = {
     background: "linear-gradient(180deg, #eef1f4 0%, #e7ebef 100%)",
     color: "#263238",
     padding: "12px 12px 28px",
+    overflowX: "hidden",
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
   },
 };
 
 const globalCss = `
 * { box-sizing: border-box; }
+html, body, #root { max-width: 100%; overflow-x: hidden; }
 body { margin: 0; background: #eef1f4; }
 button, input, select { font: inherit; }
 input[type=file] { display: none; }
-.shell { max-width: 1180px; margin: 0 auto; }
+.shell { width: 100%; max-width: 1180px; margin: 0 auto; overflow-x: hidden; }
 .stickyTop { position: sticky; top: 0; z-index: 20; background: linear-gradient(180deg, rgba(238,241,244,0.97) 0%, rgba(238,241,244,0.92) 100%); backdrop-filter: blur(6px); padding-bottom: 8px; }
 .hero { display: flex; background: linear-gradient(135deg, #f8f9fb 0%, #edf1f3 100%); border: 1px solid rgba(38,50,56,0.08); border-radius: 16px; padding: 8px 12px; box-shadow: 0 6px 16px rgba(38,50,56,0.06); }
 .heroSplit { justify-content: space-between; align-items: center; gap: 12px; }
@@ -3472,11 +3474,13 @@ input[type=file] { display: none; }
 .geoAmber { background: rgba(245,158,11,.14); color: #ed6c02; }
 .geoRed { background: rgba(239,68,68,.14); color: #d32f2f; }
 .geoNeutral { background: rgba(96,125,139,.12); color: #546e7a; }
-.panel { border-radius: 16px; border: 1px solid rgba(38,50,56,0.08); background: rgba(248,249,251,0.95); padding: 14px; }
+.panel { border-radius: 16px; border: 1px solid rgba(38,50,56,0.08); background: rgba(248,249,251,0.95); padding: 14px; width: 100%; max-width: 100%; overflow-x: hidden; }
+.card, .captureBlock, .tabsBar, .hero { width: 100%; max-width: 100%; overflow-x: hidden; }
 .fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
 .inputLike { width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10); background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px; }
 .contextHint { margin-top: 8px; font-size: 12px; color: #607d8b; }
-.primaryBtn, .secondaryBtn, .fileBtn { margin-top: 10px; width: 100%; border: 0; border-radius: 14px; padding: 13px 14px; display: inline-flex; justify-content: center; align-items: center; gap: 8px; font-weight: 800; cursor: pointer; text-decoration: none; }
+.primaryBtn, .secondaryBtn, .fileBtn { margin-top: 10px; width: 100%; max-width: 100%; border: 0; border-radius: 14px; padding: 13px 14px; display: inline-flex; justify-content: center; align-items: center; gap: 8px; font-weight: 800; cursor: pointer; text-decoration: none; flex-wrap: wrap; min-width: 0; text-align: center; line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; }
+.primaryBtn svg, .secondaryBtn svg, .fileBtn svg { flex: 0 0 auto; }
 .primaryBtn { background: #4caf50; color: white; }
 .secondaryBtn, .fileBtn { background: #eceff1; color: #37474f; }
 .primaryBtn:disabled, .secondaryBtn:disabled, .inputLike:disabled { opacity: 0.7; cursor: not-allowed; }
@@ -3485,8 +3489,9 @@ input[type=file] { display: none; }
 .emptyBox { padding: 12px; border-radius: 12px; background: rgba(96,125,139,0.08); color: #607d8b; font-size: 13px; }
 .captureBlock { margin-top: 12px; border-radius: 14px; background: rgba(255,255,255,0.86); border: 1px solid rgba(38,50,56,0.08); padding: 12px; }
 .captureTitle { font-size: 13px; font-weight: 800; color: #37474f; margin-bottom: 8px; }
-.captureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.captureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
 .captureGrid.threeCols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.captureGrid > * { min-width: 0; }
 .captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .thumbRow, .thumbGrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .thumb { width: 66px; height: 66px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(38,50,56,0.12); }
@@ -3554,21 +3559,22 @@ input[type=file] { display: none; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
 .authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 12px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 14px 16px; white-space: normal; line-height: 1.2; min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; overflow: hidden; }
-.mainActionTop { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; }
-.mainActionSub { display: block; width: 100%; max-width: 100%; font-size: 12px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; }
+.mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 12px 12px; white-space: normal; line-height: 1.15; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; overflow: hidden; }
+.mainActionTop { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; min-width: 0; }
+.mainActionTop > span:last-child { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.mainActionSub { display: block; width: 100%; max-width: 100%; font-size: 11px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; padding: 0 4px; }
 .entryActionBtn { background: #4caf50; color: white; }
 .dangerBtn { background: #d32f2f !important; color: white !important; }
-.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 12px; touch-action: none; overflow: hidden; }
+.overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 10px; touch-action: none; overflow: hidden; }
 .overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
-.cameraModal { width: min(88vw, 320px); max-width: 88vw; max-height: 74vh; background: #111; border-radius: 18px; padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; box-sizing: border-box; margin: 0 auto; }
-.cameraViewport { width: 100%; border-radius: 14px; overflow: hidden; background: #000; aspect-ratio: 3 / 4; max-height: min(46vh, 360px); }
-.cameraVideo { width: 100%; height: 100%; min-height: 260px; max-height: min(46vh, 360px); border-radius: 14px; background: #000; object-fit: cover; display: block; }
-.cameraHint { color: rgba(255,255,255,0.74); font-size: 12px; text-align: center; }
-.cameraActionRow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.cameraCaptureBtn, .cameraCancelBtn { border: 0; border-radius: 14px; min-height: 52px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
+.cameraModal { width: min(calc(100vw - 20px), 280px); max-width: calc(100vw - 20px); max-height: calc(100vh - 110px); background: #111; border-radius: 16px; padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; box-sizing: border-box; margin: 0 auto; }
+.cameraViewport { width: 100%; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 1 / 1; max-height: min(34vh, 240px); }
+.cameraVideo { width: 100%; height: 100%; min-height: 0; max-height: min(34vh, 240px); border-radius: 12px; background: #000; object-fit: cover; display: block; }
+.cameraHint { color: rgba(255,255,255,0.74); font-size: 11px; text-align: center; }
+.cameraActionRow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cameraCaptureBtn, .cameraCancelBtn { border: 0; border-radius: 14px; min-height: 48px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
 @media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } }
-@media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal { width: min(90vw, 300px); max-height: 72vh; padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraVideo { min-height: 240px; max-height: min(42vh, 320px); } .cameraActionRow { grid-template-columns: 1fr; } .mainActionBtn { min-height: 58px; padding: 13px 14px; } }
+@media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal { width: min(calc(100vw - 16px), 270px); max-height: calc(100vh - 96px); padding: 8px; } .cameraViewport { max-height: min(32vh, 220px); } .cameraVideo { min-height: 0; max-height: min(32vh, 220px); } .cameraActionRow { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 10px; } .compactBtn { padding: 10px 10px; } }
 `;
