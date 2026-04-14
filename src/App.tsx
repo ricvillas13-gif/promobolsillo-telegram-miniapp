@@ -986,49 +986,6 @@ export default function App() {
   }, [role, pendingQueue]);
 
   useEffect(() => {
-    if (role !== "promotor") return;
-    if (!selectedStoreId) {
-      setAttendanceGalleryAuth({ allowed: false, authorization: null, debug: { reason: "NO_STORE" } });
-      return;
-    }
-    void loadGalleryAuthorization("attendance", {
-      tienda_id: selectedStoreId,
-      visita_id: "",
-      marca_id: "",
-      tipo_evidencia: "ASISTENCIA",
-    }, setAttendanceGalleryAuth);
-  }, [role, selectedStoreId]);
-
-  useEffect(() => {
-    if (role !== "promotor") return;
-    if (!selectedVisitId) {
-      setEvidenceGalleryAuth({ allowed: false, authorization: null, debug: { reason: "NO_VISIT" } });
-      return;
-    }
-    const selectedVisit = pendingVisits.find((item) => item.visita_id === selectedVisitId);
-    void loadGalleryAuthorization("evidence", {
-      tienda_id: selectedVisit?.tienda_id || "",
-      visita_id: isLocalVisitId(selectedVisitId) ? "" : selectedVisitId,
-      marca_id: evidenceBrandId,
-      tipo_evidencia: evidenceType,
-    }, setEvidenceGalleryAuth);
-  }, [role, selectedVisitId, evidenceBrandId, evidenceType, pendingVisits]);
-
-  useEffect(() => {
-    if (role !== "promotor") return;
-    if (!selectedEvidence || String(selectedEvidence.status || "").toUpperCase().startsWith("PEND")) {
-      setReplaceGalleryAuth({ allowed: false, authorization: null, debug: { reason: "NO_EVIDENCE" } });
-      return;
-    }
-    void loadGalleryAuthorization("replace", {
-      tienda_id: selectedEvidence.tienda_id || "",
-      visita_id: selectedEvidence.visita_id || "",
-      marca_id: selectedEvidence.marca_id || "",
-      tipo_evidencia: selectedEvidence.tipo_evidencia || "",
-    }, setReplaceGalleryAuth);
-  }, [role, selectedEvidence]);
-
-  useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
       if (role === "supervisor") {
@@ -1163,6 +1120,50 @@ export default function App() {
   }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
 
   const selectedEvidence = useMemo(() => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || null, [filteredOperationalGallery, selectedEvidenceId]);
+
+  useEffect(() => {
+    if (role !== "promotor") return;
+    if (!selectedStoreId) {
+      setAttendanceGalleryAuth({ allowed: false, authorization: null, debug: { reason: "NO_STORE" } });
+      return;
+    }
+    void loadGalleryAuthorization("attendance", {
+      tienda_id: selectedStoreId,
+      visita_id: "",
+      marca_id: "",
+      tipo_evidencia: "ASISTENCIA",
+    }, setAttendanceGalleryAuth);
+  }, [role, selectedStoreId]);
+
+  useEffect(() => {
+    if (role !== "promotor") return;
+    if (!selectedVisitId) {
+      setEvidenceGalleryAuth({ allowed: false, authorization: null, debug: { reason: "NO_VISIT" } });
+      return;
+    }
+    const selectedVisit = pendingVisits.find((item) => item.visita_id === selectedVisitId);
+    void loadGalleryAuthorization("evidence", {
+      tienda_id: selectedVisit?.tienda_id || "",
+      visita_id: isLocalVisitId(selectedVisitId) ? "" : selectedVisitId,
+      marca_id: evidenceBrandId,
+      tipo_evidencia: evidenceType,
+    }, setEvidenceGalleryAuth);
+  }, [role, selectedVisitId, evidenceBrandId, evidenceType, pendingVisits]);
+
+  useEffect(() => {
+    if (role !== "promotor") return;
+    if (!selectedEvidence || String(selectedEvidence.status || "").toUpperCase().startsWith("PEND")) {
+      setReplaceGalleryAuth({ allowed: false, authorization: null, debug: { reason: "NO_EVIDENCE" } });
+      return;
+    }
+    void loadGalleryAuthorization("replace", {
+      tienda_id: selectedEvidence.tienda_id || "",
+      visita_id: selectedEvidence.visita_id || "",
+      marca_id: selectedEvidence.marca_id || "",
+      tipo_evidencia: selectedEvidence.tipo_evidencia || "",
+    }, setReplaceGalleryAuth);
+  }, [role, selectedEvidence]);
+
 
   const supervisorPromotorOptions = useMemo(() => supervisorTeam.map((item) => ({ id: item.promotor_id, nombre: item.nombre })), [supervisorTeam]);
 
