@@ -3341,7 +3341,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                             <div className="reviewRailBody reviewRailBodyWide">
                               <div className="reviewRailTitle">{item.tipo_evidencia || item.tipo_evento}</div>
                               <div className="reviewRailBadges">
-                                <span className={`riskBadge ${riskClass(item.riesgo)}`}>{item.riesgo || "Sin riesgo"}</span>
+                                <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
                                 {item.fase ? <span className="riskBadge riskNeutral">{item.fase}</span> : null}
                                 <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{reviewState}</span>
                               </div>
@@ -3577,7 +3577,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 </div>
                 <div className="viewerTopBadges">
                   {activeViewerSupervisorEvidence.fase ? <span className="riskBadge riskNeutral">{activeViewerSupervisorEvidence.fase}</span> : null}
-                  <span className={`riskBadge ${riskClass(activeViewerSupervisorEvidence.riesgo)}`}>{activeViewerSupervisorEvidence.riesgo || "Sin riesgo"}</span>
+                  <span className={`riskBadge ${severityClass(activeViewerSupervisorEvidence.riesgo || "BAJO")}`}>{activeViewerSupervisorEvidence.riesgo || "Sin riesgo"}</span>
                   <span className={`riskBadge ${getSupervisorReviewClass(activeViewerSupervisorEvidence)}`}>{getSupervisorReviewState(activeViewerSupervisorEvidence)}</span>
                   <button className="actionButton compactBtn" onClick={() => closeImageViewer()}><span>Cerrar</span></button>
                 </div>
