@@ -2576,17 +2576,17 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
                 <div className="captureBlock">
                   <div className="captureTitle">Entrada</div>
-                  <div className="captureGrid threeCols">
-                    <button className="secondaryBtn compactBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
+                  <div className="captureStack">
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
                     </button>
-                    <button className="secondaryBtn compactBtn" onClick={() => void openCamera("entrada", "user")}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")}>
                       <Camera size={16} />
                       {entryPhoto ? "Selfie lista" : "Tomar selfie"}
                     </button>
                     {attendanceGalleryAuth.allowed ? (
-                      <button className="secondaryBtn compactBtn" onClick={() => entryGalleryInputRef.current?.click()}>
+                      <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => entryGalleryInputRef.current?.click()}>
                         <ImageIcon size={16} />
                         Galería autorizada
                       </button>
@@ -3326,16 +3326,16 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {cameraModal.open ? (
-          <div className="overlayBackdrop" onClick={() => void closeCameraModal()}>
-            <div className="cameraModal" onClick={(e) => e.stopPropagation()}>
-              <div className="miniTitle">Captura de foto</div>
-              <div className="cameraViewport">
-                <video ref={cameraVideoRef} className="cameraVideo" playsInline muted autoPlay />
+          <div className="overlayBackdrop cameraBackdrop" onClick={() => void closeCameraModal()}>
+            <div className="cameraModal cameraModalTight" onClick={(e) => e.stopPropagation()}>
+              <div className="miniTitle cameraTitle">Captura de foto</div>
+              <div className="cameraViewport cameraViewportTight">
+                <video ref={cameraVideoRef} className="cameraVideo cameraVideoTight" playsInline muted autoPlay />
               </div>
               <div className="cameraHint">Ajusta la foto antes de capturar.</div>
-              <div className="cameraActionRow">
-                <button className="cameraCaptureBtn" onClick={() => void captureFromCameraModal()}><Camera size={18} />Capturar</button>
-                <button className="cameraCancelBtn" onClick={() => void closeCameraModal()}><Trash2 size={16} />Cancelar</button>
+              <div className="cameraActionRow cameraActionRowTight">
+                <button className="cameraCaptureBtn cameraCaptureBtnTight" onClick={() => void captureFromCameraModal()}><Camera size={18} />Capturar</button>
+                <button className="cameraCancelBtn cameraCancelBtnTight" onClick={() => void closeCameraModal()}><Trash2 size={16} />Cancelar</button>
               </div>
             </div>
           </div>
@@ -3479,19 +3479,22 @@ input[type=file] { display: none; }
 .fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
 .inputLike { width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10); background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px; }
 .contextHint { margin-top: 8px; font-size: 12px; color: #607d8b; }
-.primaryBtn, .secondaryBtn, .fileBtn { margin-top: 10px; width: 100%; max-width: 100%; border: 0; border-radius: 14px; padding: 13px 14px; display: inline-flex; justify-content: center; align-items: center; gap: 8px; font-weight: 800; cursor: pointer; text-decoration: none; flex-wrap: wrap; min-width: 0; text-align: center; line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; }
+.primaryBtn, .secondaryBtn, .fileBtn { margin-top: 10px; width: 100%; max-width: 100%; border: 0; border-radius: 14px; padding: 13px 14px; display: flex; justify-content: flex-start; align-items: center; gap: 8px; font-weight: 800; cursor: pointer; text-decoration: none; flex-wrap: wrap; min-width: 0; text-align: left; line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; }
 .primaryBtn svg, .secondaryBtn svg, .fileBtn svg { flex: 0 0 auto; }
 .primaryBtn { background: #4caf50; color: white; }
 .secondaryBtn, .fileBtn { background: #eceff1; color: #37474f; }
 .primaryBtn:disabled, .secondaryBtn:disabled, .inputLike:disabled { opacity: 0.7; cursor: not-allowed; }
-.compactBtn { margin-top: 0; padding: 11px 12px; }
+.compactBtn { margin-top: 0; padding: 11px 12px; min-height: 48px; }
+.assistQuickBtn { justify-content: flex-start; text-align: left; padding: 12px 14px; }
 .wideFileBtn { margin-top: 12px; }
 .emptyBox { padding: 12px; border-radius: 12px; background: rgba(96,125,139,0.08); color: #607d8b; font-size: 13px; }
 .captureBlock { margin-top: 12px; border-radius: 14px; background: rgba(255,255,255,0.86); border: 1px solid rgba(38,50,56,0.08); padding: 12px; }
 .captureTitle { font-size: 13px; font-weight: 800; color: #37474f; margin-bottom: 8px; }
-.captureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.captureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; min-width: 0; }
 .captureGrid.threeCols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .captureGrid > * { min-width: 0; }
+.captureStack { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
+.captureStack > * { min-width: 0; }
 .captureMeta { margin-top: 8px; font-size: 12px; color: #607d8b; }
 .thumbRow, .thumbGrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .thumb { width: 66px; height: 66px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(38,50,56,0.12); }
@@ -3558,23 +3561,29 @@ input[type=file] { display: none; }
 .detailSubcard { margin-top: 16px; }
 .traceTitle { font-size: 12px; font-weight: 800; color: #455a64; margin-bottom: 4px; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
-.authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 12px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 12px 12px; white-space: normal; line-height: 1.15; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; overflow: hidden; }
-.mainActionTop { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; min-width: 0; }
+.authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 11px; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
+.mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 12px 14px; white-space: normal; line-height: 1.15; min-height: 56px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; text-align: left; gap: 4px; overflow: hidden; }
+.mainActionTop { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; min-width: 0; text-align: left; }
 .mainActionTop > span:last-child { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
-.mainActionSub { display: block; width: 100%; max-width: 100%; font-size: 11px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; padding: 0 4px; }
+.mainActionSub { display: block; width: 100%; max-width: 100%; font-size: 11px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; padding: 0; text-align: left; }
 .entryActionBtn { background: #4caf50; color: white; }
 .dangerBtn { background: #d32f2f !important; color: white !important; }
 .overlayBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.86); z-index: 90; display: grid; place-items: center; padding: 10px; touch-action: none; overflow: hidden; }
+.cameraBackdrop { align-content: center; }
 .overlayImage { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; transition: transform .12s ease; touch-action: none; }
-.cameraModal { width: min(calc(100vw - 20px), 280px); max-width: calc(100vw - 20px); max-height: calc(100vh - 110px); background: #111; border-radius: 16px; padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; box-sizing: border-box; margin: 0 auto; }
-.cameraViewport { width: 100%; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 1 / 1; max-height: min(34vh, 240px); }
-.cameraVideo { width: 100%; height: 100%; min-height: 0; max-height: min(34vh, 240px); border-radius: 12px; background: #000; object-fit: cover; display: block; }
+.cameraModal { width: min(calc(100vw - 20px), 320px); max-width: calc(100vw - 20px); max-height: calc(100vh - 90px); background: #111; border-radius: 16px; padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; box-sizing: border-box; margin: 0 auto; }
+.cameraModalTight { width: min(calc(100vw - 20px), 320px); max-width: calc(100vw - 20px); }
+.cameraViewport { width: 100%; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 1 / 1; max-height: min(38vh, 300px); }
+.cameraViewportTight { aspect-ratio: 3 / 4; max-height: min(46vh, 420px); }
+.cameraVideo { width: 100%; height: 100%; min-height: 0; max-height: min(38vh, 300px); border-radius: 12px; background: #000; object-fit: cover; display: block; }
+.cameraVideoTight { max-height: min(46vh, 420px); }
 .cameraHint { color: rgba(255,255,255,0.74); font-size: 11px; text-align: center; }
 .cameraActionRow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.cameraCaptureBtn, .cameraCancelBtn { border: 0; border-radius: 14px; min-height: 48px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.cameraActionRowTight { margin-top: 2px; }
+.cameraCaptureBtn, .cameraCancelBtn { border: 0; border-radius: 14px; min-height: 50px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
 @media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } }
-@media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal { width: min(calc(100vw - 16px), 270px); max-height: calc(100vh - 96px); padding: 8px; } .cameraViewport { max-height: min(32vh, 220px); } .cameraVideo { min-height: 0; max-height: min(32vh, 220px); } .cameraActionRow { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 10px; } .compactBtn { padding: 10px 10px; } }
+@media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal, .cameraModalTight { width: calc(100vw - 16px); max-height: calc(100vh - 64px); padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraViewportTight { max-height: min(48vh, 440px); } .cameraVideo { min-height: 0; max-height: min(42vh, 320px); } .cameraVideoTight { max-height: min(48vh, 440px); } .cameraActionRow, .cameraActionRowTight { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 12px; } .compactBtn, .assistQuickBtn { padding: 12px 14px; } }
 `;
