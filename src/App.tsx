@@ -726,6 +726,15 @@ function getSupervisorReviewClass(item?: Pick<EvidenceItem, "decision_supervisor
   return "riskNeutral";
 }
 
+function getSupervisorReviewLabel(value?: string | Pick<EvidenceItem, "decision_supervisor" | "status"> | null) {
+  const state = typeof value === "string" ? value.trim().toUpperCase() : getSupervisorReviewState(value);
+  if (state === "OBSERVADA") return "COMENTADA";
+  if (state === "PENDIENTE") return "PENDIENTE";
+  if (state === "APROBADA") return "APROBADA";
+  if (state === "RECHAZADA") return "RECHAZADA";
+  return state || "PENDIENTE";
+}
+
 function isSupervisorPendingEvidence(item?: Pick<EvidenceItem, "decision_supervisor" | "status"> | null) {
   return getSupervisorReviewState(item) === "PENDIENTE";
 }
@@ -1191,7 +1200,9 @@ export default function App() {
 
   const supervisorPromotorOptions = useMemo(() => supervisorTeam.map((item) => ({ id: item.promotor_id, nombre: item.nombre })), [supervisorTeam]);
 
-  const filteredSupervisorEvidences = useMemo(() => supervisorEvidences.filter((item) => {
+  const visibleSupervisorEvidencesBase = useMemo(() => supervisorEvidences.filter((item) => getSupervisorReviewState(item) !== "APROBADA"), [supervisorEvidences]);
+
+  const filteredSupervisorEvidences = useMemo(() => visibleSupervisorEvidencesBase.filter((item) => {
     const byPromotor = !supEvidencePromotorFilter || item.promotor_id === supEvidencePromotorFilter;
     const byStore = !supEvidenceStoreFilter || getStoreDisplayFromItem(item) === supEvidenceStoreFilter;
     const byBrand = !supEvidenceBrandFilter || normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter;
@@ -1202,7 +1213,7 @@ export default function App() {
     const byPending = !supEvidenceOnlyPending || isSupervisorPendingEvidence(item);
     return byPromotor && byStore && byBrand && byType && byPhase && byRisk && byStatus && byPending;
   }), [
-    supervisorEvidences,
+    visibleSupervisorEvidencesBase,
     supEvidencePromotorFilter,
     supEvidenceStoreFilter,
     supEvidenceBrandFilter,
@@ -1214,7 +1225,7 @@ export default function App() {
   ]);
 
   const supervisorEvidenceFilterOptions = useMemo(() => {
-    const promotorRows = supEvidencePromotorFilter ? supervisorEvidences.filter((item) => item.promotor_id === supEvidencePromotorFilter) : supervisorEvidences;
+    const promotorRows = supEvidencePromotorFilter ? visibleSupervisorEvidencesBase.filter((item) => item.promotor_id === supEvidencePromotorFilter) : visibleSupervisorEvidencesBase;
     const storeRows = supEvidenceStoreFilter ? promotorRows.filter((item) => getStoreDisplayFromItem(item) === supEvidenceStoreFilter) : promotorRows;
     const brandRows = supEvidenceBrandFilter ? storeRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter) : storeRows;
     const typeRows = supEvidenceTypeFilter ? brandRows.filter((item) => (item.tipo_evidencia || "") === supEvidenceTypeFilter) : brandRows;
@@ -1228,7 +1239,7 @@ export default function App() {
       statuses: Array.from(new Set(phaseRows.map((item) => getSupervisorReviewState(item)).filter(Boolean))).sort(),
     };
   }, [
-    supervisorEvidences,
+    visibleSupervisorEvidencesBase,
     supEvidencePromotorFilter,
     supEvidenceStoreFilter,
     supEvidenceBrandFilter,
@@ -2348,7 +2359,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
       if (!evidenceIds.length) return setStatusMsg("Selecciona al menos una evidencia.");
       const trimmedNote = note.trim();
       if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !trimmedNote) {
-        return setStatusMsg(decision === "OBSERVADA" ? "Agrega un comentario para observar la evidencia." : "Agrega un motivo para rechazar la evidencia.");
+        return setStatusMsg(decision === "OBSERVADA" ? "Agrega un comentario para comentar la evidencia." : "Agrega un motivo para rechazar la evidencia.");
       }
       const visibleIds = filteredSupervisorEvidences.map((item) => item.evidencia_id);
       const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
@@ -2371,8 +2382,11 @@ ${selectedEvidence.fecha_hora_fmt}`);
         setSelectedSupEvidenceId(nextId);
         const nextItem = filteredSupervisorEvidences.find((item) => item.evidencia_id === nextId);
         if (nextItem) openImageViewer(nextItem.url_foto, nextItem.evidencia_id);
+      } else if (options?.focusEvidenceId && imageViewerEvidenceId === options.focusEvidenceId) {
+        closeImageViewer();
       }
-      setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decision.toLowerCase()}s.`);
+      const decisionLabel = decision === "OBSERVADA" ? "comentadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
+      setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decisionLabel}.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión.");
     } finally {
@@ -2391,11 +2405,11 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
   async function quickReviewEvidence(item: EvidenceItem, decision: SupervisorDecision) {
     const requiresNote = decision === "OBSERVADA" || decision === "RECHAZADA";
-    const prompted = requiresNote ? window.prompt(decision === "OBSERVADA" ? "Escribe el comentario de observación:" : "Escribe el motivo del rechazo:", reviewNote || item.motivo_revision || "") : (reviewNote || item.motivo_revision || "");
-    if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló la observación por falta de comentario." : "Se canceló el rechazo por falta de motivo.");
+    const prompted = requiresNote ? window.prompt(decision === "OBSERVADA" ? "Escribe el comentario:" : "Escribe el motivo del rechazo:", reviewNote || item.motivo_revision || "") : (reviewNote || item.motivo_revision || "");
+    if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló el comentario por falta de texto." : "Se canceló el rechazo por falta de motivo.");
     setSelectedSupEvidenceId(item.evidencia_id);
     await applyEvidenceReviewBatch([item.evidencia_id], decision, String(prompted || ""), {
-      successMessage: `${item.tipo_evidencia || "Evidencia"} ${decision.toLowerCase()}.`,
+      successMessage: `${item.tipo_evidencia || "Evidencia"} ${decision === "OBSERVADA" ? "comentada" : decision === "RECHAZADA" ? "rechazada" : "aprobada"}.`,
       focusEvidenceId: item.evidencia_id,
       autoAdvance: imageViewerEvidenceId === item.evidencia_id,
     });
@@ -2428,10 +2442,10 @@ ${selectedEvidence.fecha_hora_fmt}`);
     if (!group?.items.length) return setStatusMsg("No hay evidencias visibles en esa marca.");
     const requiresNote = decision === "OBSERVADA" || decision === "RECHAZADA";
     const prompted = requiresNote ? window.prompt(decision === "OBSERVADA" ? `Comentario general para ${group.brandLabel}:` : `Motivo general de rechazo para ${group.brandLabel}:`, reviewNote || "") : reviewNote;
-    if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló la observación masiva por falta de comentario." : "Se canceló el rechazo masivo por falta de motivo.");
+    if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló el comentario masivo por falta de texto." : "Se canceló el rechazo masivo por falta de motivo.");
     setSelectedSupEvidenceId(group.items[0].evidencia_id);
     await applyEvidenceReviewBatch(group.items.map((item) => item.evidencia_id), decision, String(prompted || ""), {
-      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision.toLowerCase()}s.`,
+      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision === "OBSERVADA" ? "comentadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas"}.`,
       focusEvidenceId: group.items[0].evidencia_id,
     });
   }
@@ -3253,7 +3267,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 </select>
                 <select className="inputLike" value={supEvidenceStatusFilter} onChange={(e) => setSupEvidenceStatusFilter(e.target.value)}>
                   <option value="">Todos los estatus</option>
-                  {supervisorEvidenceFilterOptions.statuses.map((value) => <option key={value} value={value}>{value}</option>)}
+                  {supervisorEvidenceFilterOptions.statuses.map((value) => <option key={value} value={value}>{getSupervisorReviewLabel(value)}</option>)}
                 </select>
                 <label className="toggleCard">
                   <input type="checkbox" checked={supEvidenceOnlyPending} onChange={(e) => setSupEvidenceOnlyPending(e.target.checked)} />
@@ -3277,7 +3291,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{supervisorEvidenceSummary.total}</div><div className="kpiLabel">Fotos visibles</div></div>
               <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{supervisorEvidenceSummary.pendientes}</div><div className="kpiLabel">Pendientes</div></div>
               <div className="summaryBlock kpiBlock"><Check size={16} /><div className="kpiValue">{supervisorEvidenceSummary.aprobadas}</div><div className="kpiLabel">Aprobadas</div></div>
-              <div className="summaryBlock kpiBlock"><Pencil size={16} /><div className="kpiValue">{supervisorEvidenceSummary.observadas}</div><div className="kpiLabel">Observadas</div></div>
+              <div className="summaryBlock kpiBlock"><Pencil size={16} /><div className="kpiValue">{supervisorEvidenceSummary.observadas}</div><div className="kpiLabel">Comentadas</div></div>
               <div className="summaryBlock kpiBlock"><Trash2 size={16} /><div className="kpiValue">{supervisorEvidenceSummary.rechazadas}</div><div className="kpiLabel">Rechazadas</div></div>
             </div>
 
@@ -3290,7 +3304,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
                 <div className="actionGrid actionGridButtons">
                   <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
-                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Observar lote</span></button>
+                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Comentar lote</span></button>
                   <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
                 </div>
               </div>
@@ -3306,14 +3320,14 @@ ${selectedEvidence.fecha_hora_fmt}`);
                         <span className="riskBadge riskNeutral">{group.total} fotos</span>
                         <span className="riskBadge riskNeutral">{group.pendientes} pendientes</span>
                         <span className="riskBadge riskGreen">{group.aprobadas} aprobadas</span>
-                        <span className="riskBadge riskAmber">{group.observadas} observadas</span>
+                        <span className="riskBadge riskAmber">{group.observadas} comentadas</span>
                         <span className="riskBadge riskRed">{group.rechazadas} rechazadas</span>
                       </div>
                     </div>
                     <div className="brandGroupActions">
                       <button className="actionButton" onClick={() => selectBrandSupervisorEvidences(group.brandKey)}><Check size={16} /><span>Seleccionar marca</span></button>
                       <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "APROBADA")}><Check size={16} /><span>Aprobar visibles</span></button>
-                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "OBSERVADA")}><Pencil size={16} /><span>Observar visibles</span></button>
+                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "OBSERVADA")}><Pencil size={16} /><span>Comentar visibles</span></button>
                       <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "RECHAZADA")}><Trash2 size={16} /><span>Rechazar visibles</span></button>
                     </div>
                   </div>
@@ -3343,7 +3357,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                               <div className="reviewRailBadges">
                                 <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
                                 {item.fase ? <span className="riskBadge riskNeutral">{item.fase}</span> : null}
-                                <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{reviewState}</span>
+                                <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(reviewState)}</span>
                               </div>
                               <div className="reviewRailMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
                               <div className="reviewRailMeta">{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</div>
@@ -3351,7 +3365,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                               <div className="reviewRailMeta reviewRailDesc">{cleanEvidenceDescription(item.descripcion)}</div>
                               <div className="quickActionRow">
                                 <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "APROBADA"); }}><Check size={14} /><span>Aprobar</span></button>
-                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "OBSERVADA"); }}><Pencil size={14} /><span>Observar</span></button>
+                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "OBSERVADA"); }}><Pencil size={14} /><span>Comentar</span></button>
                                 <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "RECHAZADA"); }}><Trash2 size={14} /><span>Rechazar</span></button>
                                 <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto, item.evidencia_id); }}><Eye size={14} /><span>Ver grande</span></button>
                               </div>
@@ -3384,11 +3398,11 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   </div>
                   <div className="panel">
                     <div className="miniTitle">Revisión individual</div>
-                    <div className="summaryLine">Estatus actual: <span className={`riskBadge ${getSupervisorReviewClass(selectedSupervisorEvidence)}`}>{getSupervisorReviewState(selectedSupervisorEvidence)}</span></div>
+                    <div className="summaryLine">Estatus actual: <span className={`riskBadge ${getSupervisorReviewClass(selectedSupervisorEvidence)}`}>{getSupervisorReviewLabel(selectedSupervisorEvidence)}</span></div>
                     {(selectedSupervisorEvidence.decision_supervisor || selectedSupervisorEvidence.revisado_por || selectedSupervisorEvidence.fecha_revision || selectedSupervisorEvidence.motivo_revision) ? (
                       <div className="traceBox">
                         <div className="traceTitle">Última revisión</div>
-                        {selectedSupervisorEvidence.decision_supervisor ? <div className="summaryLine">Decisión: <strong>{selectedSupervisorEvidence.decision_supervisor}</strong></div> : null}
+                        {selectedSupervisorEvidence.decision_supervisor ? <div className="summaryLine">Decisión: <strong>{getSupervisorReviewLabel(selectedSupervisorEvidence.decision_supervisor)}</strong></div> : null}
                         {selectedSupervisorEvidence.revisado_por ? <div className="summaryLine">Revisado por: <strong>{selectedSupervisorEvidence.revisado_por}</strong></div> : null}
                         {selectedSupervisorEvidence.fecha_revision ? <div className="summaryLine">Fecha revisión: <strong>{formatDateTimeMaybe(selectedSupervisorEvidence.fecha_revision)}</strong></div> : null}
                         {selectedSupervisorEvidence.motivo_revision ? <div className="summaryLine">Motivo: {selectedSupervisorEvidence.motivo_revision}</div> : null}
@@ -3397,11 +3411,11 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Decisión</label>
                     <select className="inputLike" value={reviewDecision} onChange={(e) => setReviewDecision(e.target.value as SupervisorDecision)}>
                       <option value="APROBADA">APROBADA</option>
-                      <option value="OBSERVADA">OBSERVADA</option>
+                      <option value="OBSERVADA">COMENTADA</option>
                       <option value="RECHAZADA">RECHAZADA</option>
                     </select>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Motivo</label>
-                    <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario de revisión" />
+                    <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario" />
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar revisión</span></button>
                       <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
@@ -3570,18 +3584,43 @@ ${selectedEvidence.fecha_hora_fmt}`);
             onTouchEnd={handleImageViewerTouchEnd}
           >
             {activeViewerSupervisorEvidence ? (
-              <div className="viewerChrome viewerChromeTop" onClick={(e) => e.stopPropagation()}>
-                <div>
-                  <div className="viewerTitle">{normalizeBrandLabel(activeViewerSupervisorEvidence.marca_nombre || "", activeViewerSupervisorEvidence.marca_id || "Marca")} · {activeViewerSupervisorEvidence.tipo_evidencia || activeViewerSupervisorEvidence.tipo_evento}</div>
-                  <div className="viewerMeta">{activeViewerSupervisorEvidence.promotor_nombre || activeViewerSupervisorEvidence.promotor_id || "Promotor"} · {getStoreDisplayFromItem(activeViewerSupervisorEvidence) || activeViewerSupervisorEvidence.tienda_nombre || "Tienda"}</div>
+              <>
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ position: "fixed", top: 12, left: 12, zIndex: 92, maxWidth: "min(420px, calc(100vw - 96px))", borderRadius: 14, background: "rgba(15,23,42,0.56)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", color: "#fff", padding: "10px 12px", display: "grid", gap: 6 }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>{normalizeBrandLabel(activeViewerSupervisorEvidence.marca_nombre || "", activeViewerSupervisorEvidence.marca_id || "Marca")} · {activeViewerSupervisorEvidence.tipo_evidencia || activeViewerSupervisorEvidence.tipo_evento}</div>
+                  <div style={{ fontSize: 12, opacity: 0.84 }}>{activeViewerSupervisorEvidence.promotor_nombre || activeViewerSupervisorEvidence.promotor_id || "Promotor"} · {getStoreDisplayFromItem(activeViewerSupervisorEvidence) || activeViewerSupervisorEvidence.tienda_nombre || "Tienda"}</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {activeViewerSupervisorEvidence.fase ? <span className="riskBadge riskNeutral">{activeViewerSupervisorEvidence.fase}</span> : null}
+                    <span className={`riskBadge ${severityClass(activeViewerSupervisorEvidence.riesgo || "BAJO")}`}>{activeViewerSupervisorEvidence.riesgo || "Sin riesgo"}</span>
+                    <span className={`riskBadge ${getSupervisorReviewClass(activeViewerSupervisorEvidence)}`}>{getSupervisorReviewLabel(activeViewerSupervisorEvidence)}</span>
+                  </div>
                 </div>
-                <div className="viewerTopBadges">
-                  {activeViewerSupervisorEvidence.fase ? <span className="riskBadge riskNeutral">{activeViewerSupervisorEvidence.fase}</span> : null}
-                  <span className={`riskBadge ${severityClass(activeViewerSupervisorEvidence.riesgo || "BAJO")}`}>{activeViewerSupervisorEvidence.riesgo || "Sin riesgo"}</span>
-                  <span className={`riskBadge ${getSupervisorReviewClass(activeViewerSupervisorEvidence)}`}>{getSupervisorReviewState(activeViewerSupervisorEvidence)}</span>
-                  <button className="actionButton compactBtn" onClick={() => closeImageViewer()}><span>Cerrar</span></button>
-                </div>
-              </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); closeImageViewer(); }}
+                  style={{ position: "fixed", top: 12, right: 12, zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(15,23,42,0.62)", color: "#fff", padding: "10px 14px", cursor: "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(-1); }}
+                  disabled={activeViewerSupervisorEvidenceIndex <= 0}
+                  style={{ position: "fixed", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex <= 0 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex <= 0 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(1); }}
+                  disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1}
+                  style={{ position: "fixed", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
+                >
+                  ›
+                </button>
+              </>
             ) : null}
 
             <img
@@ -3603,22 +3642,23 @@ ${selectedEvidence.fecha_hora_fmt}`);
             />
 
             {activeViewerSupervisorEvidence ? (
-              <div className="viewerChrome viewerChromeBottom" onClick={(e) => e.stopPropagation()}>
-                <div className="viewerActionRow">
-                  <button className="actionButton" onClick={() => moveSupervisorEvidenceViewer(-1)} disabled={activeViewerSupervisorEvidenceIndex <= 0}><span>Anterior</span></button>
-                  <button className="actionButton" onClick={() => void quickReviewEvidence(activeViewerSupervisorEvidence, "APROBADA")}><Check size={16} /><span>Aprobar</span></button>
-                  <button className="actionButton" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(activeViewerSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>Observar</span></button>
-                  <button className="actionButton" onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(activeViewerSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>Rechazar</span></button>
-                  <button className="actionButton" onClick={() => moveSupervisorEvidenceViewer(1)} disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1}><span>Siguiente</span></button>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ position: "fixed", left: "50%", bottom: 14, transform: "translateX(-50%)", zIndex: 92, width: "min(920px, calc(100vw - 24px))", borderRadius: 16, background: "rgba(15,23,42,0.50)", border: "1px solid rgba(255,255,255,0.10)", backdropFilter: "blur(8px)", padding: 10, display: "grid", gap: 8 }}
+              >
+                <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
+                  <button className="actionButton compactBtn" onClick={() => void quickReviewEvidence(activeViewerSupervisorEvidence, "APROBADA")}><Check size={14} /><span>Aprobar</span></button>
+                  <button className="actionButton compactBtn" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(activeViewerSupervisorEvidence, "OBSERVADA"); }}><Pencil size={14} /><span>Comentar</span></button>
+                  <button className="actionButton compactBtn" onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(activeViewerSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={14} /><span>Rechazar</span></button>
+                  <input className="inputLike" style={{ minWidth: 220, flex: "1 1 260px", maxWidth: 360, margin: 0 }} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario" />
                 </div>
-                <input className="inputLike viewerInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario rápido para la revisión" />
-                <div className="viewerFooterMeta">Doble clic para zoom. Arrastra la imagen cuando esté ampliada.</div>
+                <div style={{ textAlign: "center", fontSize: 12, color: "rgba(255,255,255,0.74)" }}>Doble clic para zoom. Arrastra la imagen cuando esté ampliada.</div>
               </div>
             ) : null}
           </div>
         ) : null}
 
-        {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
+{statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
           <button className="secondaryBtn footerBtn" onClick={() => {
@@ -3797,7 +3837,7 @@ input[type=file] { display: none; }
 .reviewRailBadges { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
 .reviewRailDesc { min-height: 32px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .quickActionRow { margin-top: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.overlayBackdropRich { padding-top: 88px; padding-bottom: 132px; }
+.overlayBackdropRich { padding: 12px; }
 .viewerChrome { position: fixed; left: 12px; right: 12px; z-index: 92; max-width: 1040px; margin: 0 auto; border-radius: 16px; background: rgba(15,23,42,0.86); border: 1px solid rgba(255,255,255,0.10); backdrop-filter: blur(12px); padding: 12px; color: white; display: flex; gap: 12px; justify-content: space-between; align-items: center; }
 .viewerChromeTop { top: 10px; }
 .viewerChromeBottom { bottom: 10px; flex-direction: column; align-items: stretch; }
