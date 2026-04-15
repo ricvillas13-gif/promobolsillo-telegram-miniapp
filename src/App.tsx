@@ -710,6 +710,26 @@ function statusClass(value?: string) {
   return "riskGreen";
 }
 
+function getSupervisorReviewState(item?: Pick<EvidenceItem, "decision_supervisor" | "status"> | null) {
+  const decision = String(item?.decision_supervisor || "").trim().toUpperCase();
+  if (["APROBADA", "OBSERVADA", "RECHAZADA"].includes(decision)) return decision;
+  const status = String(item?.status || "").trim().toUpperCase();
+  if (["APROBADA", "OBSERVADA", "RECHAZADA"].includes(status)) return status;
+  return "PENDIENTE";
+}
+
+function getSupervisorReviewClass(item?: Pick<EvidenceItem, "decision_supervisor" | "status"> | null) {
+  const state = getSupervisorReviewState(item);
+  if (state === "APROBADA") return "riskGreen";
+  if (state === "OBSERVADA") return "riskAmber";
+  if (state === "RECHAZADA") return "riskRed";
+  return "riskNeutral";
+}
+
+function isSupervisorPendingEvidence(item?: Pick<EvidenceItem, "decision_supervisor" | "status"> | null) {
+  return getSupervisorReviewState(item) === "PENDIENTE";
+}
+
 function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   return new Promise<string>((resolve, reject) => {
     const img = new Image();
@@ -895,7 +915,10 @@ export default function App() {
   const [supEvidenceStoreFilter, setSupEvidenceStoreFilter] = useState("");
   const [supEvidenceBrandFilter, setSupEvidenceBrandFilter] = useState("");
   const [supEvidenceTypeFilter, setSupEvidenceTypeFilter] = useState("");
+  const [supEvidencePhaseFilter, setSupEvidencePhaseFilter] = useState("");
   const [supEvidenceRiskFilter, setSupEvidenceRiskFilter] = useState("");
+  const [supEvidenceStatusFilter, setSupEvidenceStatusFilter] = useState("");
+  const [supEvidenceOnlyPending, setSupEvidenceOnlyPending] = useState(false);
   const [reviewDecision, setReviewDecision] = useState<SupervisorDecision>("APROBADA");
   const [reviewNote, setReviewNote] = useState("");
   const [alertCloseNote, setAlertCloseNote] = useState("");
@@ -938,6 +961,7 @@ export default function App() {
   const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
   const [imageViewerSrc, setImageViewerSrc] = useState("");
+  const [imageViewerEvidenceId, setImageViewerEvidenceId] = useState("");
   const [imageViewerScale, setImageViewerScale] = useState(1);
   const [imageViewerOffset, setImageViewerOffset] = useState({ x: 0, y: 0 });
   const [imageViewerDragging, setImageViewerDragging] = useState(false);
@@ -1172,21 +1196,101 @@ export default function App() {
     const byStore = !supEvidenceStoreFilter || getStoreDisplayFromItem(item) === supEvidenceStoreFilter;
     const byBrand = !supEvidenceBrandFilter || normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter;
     const byType = !supEvidenceTypeFilter || (item.tipo_evidencia || "") === supEvidenceTypeFilter;
+    const byPhase = !supEvidencePhaseFilter || String(item.fase || "").toUpperCase() === supEvidencePhaseFilter;
     const byRisk = !supEvidenceRiskFilter || (item.riesgo || "") === supEvidenceRiskFilter;
-    return byPromotor && byStore && byBrand && byType && byRisk;
-  }), [supervisorEvidences, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+    const byStatus = !supEvidenceStatusFilter || getSupervisorReviewState(item) === supEvidenceStatusFilter;
+    const byPending = !supEvidenceOnlyPending || isSupervisorPendingEvidence(item);
+    return byPromotor && byStore && byBrand && byType && byPhase && byRisk && byStatus && byPending;
+  }), [
+    supervisorEvidences,
+    supEvidencePromotorFilter,
+    supEvidenceStoreFilter,
+    supEvidenceBrandFilter,
+    supEvidenceTypeFilter,
+    supEvidencePhaseFilter,
+    supEvidenceRiskFilter,
+    supEvidenceStatusFilter,
+    supEvidenceOnlyPending,
+  ]);
 
   const supervisorEvidenceFilterOptions = useMemo(() => {
-    const storeRows = supEvidencePromotorFilter ? supervisorEvidences.filter((item) => item.promotor_id === supEvidencePromotorFilter) : supervisorEvidences;
-    const brandRows = supEvidenceStoreFilter ? storeRows.filter((item) => getStoreDisplayFromItem(item) === supEvidenceStoreFilter) : storeRows;
-    const typeRows = supEvidenceBrandFilter ? brandRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter) : brandRows;
+    const promotorRows = supEvidencePromotorFilter ? supervisorEvidences.filter((item) => item.promotor_id === supEvidencePromotorFilter) : supervisorEvidences;
+    const storeRows = supEvidenceStoreFilter ? promotorRows.filter((item) => getStoreDisplayFromItem(item) === supEvidenceStoreFilter) : promotorRows;
+    const brandRows = supEvidenceBrandFilter ? storeRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter) : storeRows;
+    const typeRows = supEvidenceTypeFilter ? brandRows.filter((item) => (item.tipo_evidencia || "") === supEvidenceTypeFilter) : brandRows;
+    const phaseRows = supEvidencePhaseFilter ? typeRows.filter((item) => String(item.fase || "").toUpperCase() === supEvidencePhaseFilter) : typeRows;
     return {
-      stores: Array.from(new Set(storeRows.map((item) => getStoreDisplayFromItem(item)).filter(Boolean))).sort(),
-      brands: Array.from(new Set(brandRows.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
-      types: Array.from(new Set(typeRows.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
-      risks: Array.from(new Set(typeRows.map((item) => item.riesgo || "").filter(Boolean))).sort(),
+      stores: Array.from(new Set(promotorRows.map((item) => getStoreDisplayFromItem(item)).filter(Boolean))).sort(),
+      brands: Array.from(new Set(storeRows.map((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca")).filter(Boolean))).sort(),
+      types: Array.from(new Set(brandRows.map((item) => item.tipo_evidencia || "").filter(Boolean))).sort(),
+      phases: Array.from(new Set(typeRows.map((item) => String(item.fase || "").toUpperCase()).filter(Boolean))).sort(),
+      risks: Array.from(new Set(phaseRows.map((item) => item.riesgo || "").filter(Boolean))).sort(),
+      statuses: Array.from(new Set(phaseRows.map((item) => getSupervisorReviewState(item)).filter(Boolean))).sort(),
     };
-  }, [supervisorEvidences, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter]);
+  }, [
+    supervisorEvidences,
+    supEvidencePromotorFilter,
+    supEvidenceStoreFilter,
+    supEvidenceBrandFilter,
+    supEvidenceTypeFilter,
+    supEvidencePhaseFilter,
+  ]);
+
+  const supervisorEvidenceSummary = useMemo(() => {
+    return filteredSupervisorEvidences.reduce((acc, item) => {
+      const state = getSupervisorReviewState(item);
+      acc.total += 1;
+      if (state === "APROBADA") acc.aprobadas += 1;
+      else if (state === "OBSERVADA") acc.observadas += 1;
+      else if (state === "RECHAZADA") acc.rechazadas += 1;
+      else acc.pendientes += 1;
+      return acc;
+    }, { total: 0, pendientes: 0, aprobadas: 0, observadas: 0, rechazadas: 0 });
+  }, [filteredSupervisorEvidences]);
+
+  const groupedSupervisorEvidences = useMemo(() => {
+    const groups = new Map<string, {
+      brandKey: string;
+      brandLabel: string;
+      items: EvidenceItem[];
+      total: number;
+      pendientes: number;
+      aprobadas: number;
+      observadas: number;
+      rechazadas: number;
+    }>();
+    filteredSupervisorEvidences.forEach((item) => {
+      const brandLabel = normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca");
+      const brandKey = `${item.marca_id || brandLabel}__${brandLabel}`;
+      const current = groups.get(brandKey) || {
+        brandKey,
+        brandLabel,
+        items: [],
+        total: 0,
+        pendientes: 0,
+        aprobadas: 0,
+        observadas: 0,
+        rechazadas: 0,
+      };
+      current.items.push(item);
+      current.total += 1;
+      const state = getSupervisorReviewState(item);
+      if (state === "APROBADA") current.aprobadas += 1;
+      else if (state === "OBSERVADA") current.observadas += 1;
+      else if (state === "RECHAZADA") current.rechazadas += 1;
+      else current.pendientes += 1;
+      groups.set(brandKey, current);
+    });
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        items: [...group.items].sort((a, b) => String(b.fecha_hora || b.fecha_hora_fmt || "").localeCompare(String(a.fecha_hora || a.fecha_hora_fmt || ""))),
+      }))
+      .sort((a, b) => a.brandLabel.localeCompare(b.brandLabel));
+  }, [filteredSupervisorEvidences]);
+
+  const activeViewerSupervisorEvidence = useMemo(() => imageViewerEvidenceId ? filteredSupervisorEvidences.find((item) => item.evidencia_id === imageViewerEvidenceId) || null : null, [filteredSupervisorEvidences, imageViewerEvidenceId]);
+  const activeViewerSupervisorEvidenceIndex = useMemo(() => activeViewerSupervisorEvidence ? filteredSupervisorEvidences.findIndex((item) => item.evidencia_id === activeViewerSupervisorEvidence.evidencia_id) : -1, [filteredSupervisorEvidences, activeViewerSupervisorEvidence]);
 
   const selectedTeamMember = useMemo(() => supervisorTeam.find((item) => item.promotor_id === selectedTeamPromotorId) || supervisorTeam[0] || null, [supervisorTeam, selectedTeamPromotorId]);
   const selectedAlert = useMemo(() => supervisorAlerts.find((item) => item.alerta_id === selectedAlertId) || supervisorAlerts[0] || null, [supervisorAlerts, selectedAlertId]);
@@ -1655,11 +1759,18 @@ export default function App() {
 
   useEffect(() => {
     if (role !== "supervisor") return;
+    setSelectedSupEvidenceIds((prev) => prev.filter((id) => filteredSupervisorEvidences.some((item) => item.evidencia_id === id)));
+  }, [filteredSupervisorEvidences, role]);
+
+  useEffect(() => {
+    if (role !== "supervisor") return;
     if (supEvidenceStoreFilter && !supervisorEvidenceFilterOptions.stores.includes(supEvidenceStoreFilter)) setSupEvidenceStoreFilter("");
     if (supEvidenceBrandFilter && !supervisorEvidenceFilterOptions.brands.includes(supEvidenceBrandFilter)) setSupEvidenceBrandFilter("");
     if (supEvidenceTypeFilter && !supervisorEvidenceFilterOptions.types.includes(supEvidenceTypeFilter)) setSupEvidenceTypeFilter("");
+    if (supEvidencePhaseFilter && !supervisorEvidenceFilterOptions.phases.includes(supEvidencePhaseFilter)) setSupEvidencePhaseFilter("");
     if (supEvidenceRiskFilter && !supervisorEvidenceFilterOptions.risks.includes(supEvidenceRiskFilter)) setSupEvidenceRiskFilter("");
-  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
+    if (supEvidenceStatusFilter && !supervisorEvidenceFilterOptions.statuses.includes(supEvidenceStatusFilter)) setSupEvidenceStatusFilter("");
+  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter]);
 
   useEffect(() => {
     if (role !== "cliente") return;
@@ -1671,13 +1782,6 @@ export default function App() {
     void loadClientDeliverables();
   }, [role, clientFilters]);
 
-  useEffect(() => {
-    if (role !== "supervisor") return;
-    if (supEvidenceStoreFilter && !supervisorEvidenceFilterOptions.stores.includes(supEvidenceStoreFilter)) setSupEvidenceStoreFilter("");
-    if (supEvidenceBrandFilter && !supervisorEvidenceFilterOptions.brands.includes(supEvidenceBrandFilter)) setSupEvidenceBrandFilter("");
-    if (supEvidenceTypeFilter && !supervisorEvidenceFilterOptions.types.includes(supEvidenceTypeFilter)) setSupEvidenceTypeFilter("");
-    if (supEvidenceRiskFilter && !supervisorEvidenceFilterOptions.risks.includes(supEvidenceRiskFilter)) setSupEvidenceRiskFilter("");
-  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => {
     if (role !== "cliente") return;
@@ -1822,17 +1926,19 @@ export default function App() {
     await stopCameraStream();
   }
 
-  function openImageViewer(src?: string) {
+  function openImageViewer(src?: string, evidenceId = "") {
     if (!src) return;
     setImageViewerScale(1);
     setImageViewerOffset({ x: 0, y: 0 });
     setImageViewerDragging(false);
     imageViewerTouchRef.current = { distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 };
+    setImageViewerEvidenceId(evidenceId);
     setImageViewerSrc(src);
   }
 
   function closeImageViewer() {
     setImageViewerSrc("");
+    setImageViewerEvidenceId("");
     setImageViewerScale(1);
     setImageViewerOffset({ x: 0, y: 0 });
     setImageViewerDragging(false);
@@ -2237,25 +2343,62 @@ ${selectedEvidence.fecha_hora_fmt}`);
     }
   }
 
-  async function reviewSelectedEvidence() {
+  async function applyEvidenceReviewBatch(evidenceIds: string[], decision: SupervisorDecision, note: string, options?: { clearSelection?: boolean; successMessage?: string; focusEvidenceId?: string; autoAdvance?: boolean }) {
     try {
-      if (!selectedSupervisorEvidence) return setStatusMsg("Selecciona una evidencia.");
+      if (!evidenceIds.length) return setStatusMsg("Selecciona al menos una evidencia.");
+      const trimmedNote = note.trim();
+      if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !trimmedNote) {
+        return setStatusMsg(decision === "OBSERVADA" ? "Agrega un comentario para observar la evidencia." : "Agrega un motivo para rechazar la evidencia.");
+      }
+      const visibleIds = filteredSupervisorEvidences.map((item) => item.evidencia_id);
+      const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
+      const focusIndex = focusId ? visibleIds.indexOf(focusId) : -1;
+      const nextId = options?.autoAdvance && focusIndex >= 0 ? (visibleIds[focusIndex + 1] || visibleIds[focusIndex - 1] || "") : "";
       setSyncing(true);
-      await postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
-        evidencia_id: selectedSupervisorEvidence.evidencia_id,
-        decision_supervisor: reviewDecision,
-        motivo_revision: reviewNote.trim(),
-        requiere_revision_supervisor: reviewDecision !== "APROBADA",
-      });
+      for (const evidenciaId of evidenceIds) {
+        await postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
+          evidencia_id: evidenciaId,
+          decision_supervisor: decision,
+          motivo_revision: trimmedNote,
+          requiere_revision_supervisor: decision !== "APROBADA",
+        });
+      }
+      if (options?.clearSelection) setSelectedSupEvidenceIds([]);
       setReviewNote("");
       await loadSupervisorDashboard();
       await loadSupervisorEvidences();
-      setStatusMsg(`Evidencia ${reviewDecision.toLowerCase()}.`);
+      if (nextId) {
+        setSelectedSupEvidenceId(nextId);
+        const nextItem = filteredSupervisorEvidences.find((item) => item.evidencia_id === nextId);
+        if (nextItem) openImageViewer(nextItem.url_foto, nextItem.evidencia_id);
+      }
+      setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decision.toLowerCase()}s.`);
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo revisar la evidencia.");
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión.");
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function reviewSelectedEvidence() {
+    if (!selectedSupervisorEvidence) return setStatusMsg("Selecciona una evidencia.");
+    await applyEvidenceReviewBatch([selectedSupervisorEvidence.evidencia_id], reviewDecision, reviewNote, {
+      successMessage: `Evidencia ${reviewDecision.toLowerCase()}.`,
+      focusEvidenceId: selectedSupervisorEvidence.evidencia_id,
+      autoAdvance: !!imageViewerEvidenceId,
+    });
+  }
+
+  async function quickReviewEvidence(item: EvidenceItem, decision: SupervisorDecision) {
+    const requiresNote = decision === "OBSERVADA" || decision === "RECHAZADA";
+    const prompted = requiresNote ? window.prompt(decision === "OBSERVADA" ? "Escribe el comentario de observación:" : "Escribe el motivo del rechazo:", reviewNote || item.motivo_revision || "") : (reviewNote || item.motivo_revision || "");
+    if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló la observación por falta de comentario." : "Se canceló el rechazo por falta de motivo.");
+    setSelectedSupEvidenceId(item.evidencia_id);
+    await applyEvidenceReviewBatch([item.evidencia_id], decision, String(prompted || ""), {
+      successMessage: `${item.tipo_evidencia || "Evidencia"} ${decision.toLowerCase()}.`,
+      focusEvidenceId: item.evidencia_id,
+      autoAdvance: imageViewerEvidenceId === item.evidencia_id,
+    });
   }
 
   function toggleSupervisorEvidenceSelection(evidenceId: string) {
@@ -2269,34 +2412,47 @@ ${selectedEvidence.fecha_hora_fmt}`);
     if (ids[0]) setSelectedSupEvidenceId(ids[0]);
   }
 
+  function selectBrandSupervisorEvidences(brandKey: string) {
+    const group = groupedSupervisorEvidences.find((item) => item.brandKey === brandKey);
+    const ids = group?.items.map((item) => item.evidencia_id) || [];
+    setSelectedSupEvidenceIds(ids);
+    if (ids[0]) setSelectedSupEvidenceId(ids[0]);
+  }
+
   async function runBatchEvidenceReview(decision: SupervisorDecision) {
-    try {
-      if (!selectedSupEvidenceIds.length) return setStatusMsg("Selecciona al menos una evidencia.");
-      if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !reviewNote.trim()) {
-        return setStatusMsg("Agrega un comentario para la revisión masiva.");
-      }
-      setSyncing(true);
-      await Promise.all(
-        selectedSupEvidenceIds.map((evidenciaId) =>
-          postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
-            evidencia_id: evidenciaId,
-            decision_supervisor: decision,
-            motivo_revision: reviewNote.trim(),
-            requiere_revision_supervisor: decision !== "APROBADA",
-          })
-        )
-      );
-      const total = selectedSupEvidenceIds.length;
-      setSelectedSupEvidenceIds([]);
-      setReviewNote("");
-      await loadSupervisorDashboard();
-      await loadSupervisorEvidences();
-      setStatusMsg(`${total} evidencia(s) ${decision.toLowerCase()}s.`);
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión masiva.");
-    } finally {
-      setSyncing(false);
-    }
+    await applyEvidenceReviewBatch(selectedSupEvidenceIds, decision, reviewNote, { clearSelection: true });
+  }
+
+  async function runBrandEvidenceReview(brandKey: string, decision: SupervisorDecision) {
+    const group = groupedSupervisorEvidences.find((item) => item.brandKey === brandKey);
+    if (!group?.items.length) return setStatusMsg("No hay evidencias visibles en esa marca.");
+    const requiresNote = decision === "OBSERVADA" || decision === "RECHAZADA";
+    const prompted = requiresNote ? window.prompt(decision === "OBSERVADA" ? `Comentario general para ${group.brandLabel}:` : `Motivo general de rechazo para ${group.brandLabel}:`, reviewNote || "") : reviewNote;
+    if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló la observación masiva por falta de comentario." : "Se canceló el rechazo masivo por falta de motivo.");
+    setSelectedSupEvidenceId(group.items[0].evidencia_id);
+    await applyEvidenceReviewBatch(group.items.map((item) => item.evidencia_id), decision, String(prompted || ""), {
+      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision.toLowerCase()}s.`,
+      focusEvidenceId: group.items[0].evidencia_id,
+    });
+  }
+
+  function clearSupervisorEvidenceFilters() {
+    setSupEvidencePromotorFilter("");
+    setSupEvidenceStoreFilter("");
+    setSupEvidenceBrandFilter("");
+    setSupEvidenceTypeFilter("");
+    setSupEvidencePhaseFilter("");
+    setSupEvidenceRiskFilter("");
+    setSupEvidenceStatusFilter("");
+    setSupEvidenceOnlyPending(false);
+  }
+
+  function moveSupervisorEvidenceViewer(step: number) {
+    if (activeViewerSupervisorEvidenceIndex < 0) return;
+    const next = filteredSupervisorEvidences[activeViewerSupervisorEvidenceIndex + step];
+    if (!next) return;
+    setSelectedSupEvidenceId(next.evidencia_id);
+    openImageViewer(next.url_foto, next.evidencia_id);
   }
 
   if (loading) {
@@ -3068,94 +3224,155 @@ ${selectedEvidence.fecha_hora_fmt}`);
         {role === "supervisor" && supervisorModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
-            <div className="filtersRow">
-              <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => { setSupEvidencePromotorFilter(e.target.value); setSupEvidenceStoreFilter(""); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); }}>
-                <option value="">Todos los promotores</option>
-                {supervisorPromotorOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.nombre}</option>)}
-              </select>
-              <select className="inputLike" value={supEvidenceStoreFilter} onChange={(e) => { setSupEvidenceStoreFilter(e.target.value); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); }}>
-                <option value="">Todas las tiendas</option>
-                {supervisorEvidenceFilterOptions.stores.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-              <select className="inputLike" value={supEvidenceBrandFilter} onChange={(e) => { setSupEvidenceBrandFilter(e.target.value); setSupEvidenceTypeFilter(""); }}>
-                <option value="">Todas las marcas</option>
-                {supervisorEvidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-              <select className="inputLike" value={supEvidenceTypeFilter} onChange={(e) => setSupEvidenceTypeFilter(e.target.value)}>
-                <option value="">Todos los tipos</option>
-                {supervisorEvidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </div>
-            <div className="filtersRow twoColsFilters" style={{ marginTop: 8 }}>
-              <select className="inputLike" value={supEvidenceRiskFilter} onChange={(e) => setSupEvidenceRiskFilter(e.target.value)}>
-                <option value="">Todos los riesgos</option>
-                {supervisorEvidenceFilterOptions.risks.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
+            <div className="filtersStickyCard">
+              <div className="filtersRow filtersRowSupervisorTop">
+                <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => { setSupEvidencePromotorFilter(e.target.value); setSupEvidenceStoreFilter(""); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); setSupEvidencePhaseFilter(""); }}>
+                  <option value="">Todos los promotores</option>
+                  {supervisorPromotorOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.nombre}</option>)}
+                </select>
+                <select className="inputLike" value={supEvidenceStoreFilter} onChange={(e) => { setSupEvidenceStoreFilter(e.target.value); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); setSupEvidencePhaseFilter(""); }}>
+                  <option value="">Todas las tiendas</option>
+                  {supervisorEvidenceFilterOptions.stores.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <select className="inputLike" value={supEvidenceBrandFilter} onChange={(e) => { setSupEvidenceBrandFilter(e.target.value); setSupEvidenceTypeFilter(""); setSupEvidencePhaseFilter(""); }}>
+                  <option value="">Todas las marcas</option>
+                  {supervisorEvidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+                <select className="inputLike" value={supEvidenceTypeFilter} onChange={(e) => { setSupEvidenceTypeFilter(e.target.value); setSupEvidencePhaseFilter(""); }}>
+                  <option value="">Todos los tipos</option>
+                  {supervisorEvidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+              </div>
+              <div className="filtersRow filtersRowSupervisorBottom" style={{ marginTop: 8 }}>
+                <select className="inputLike" value={supEvidencePhaseFilter} onChange={(e) => setSupEvidencePhaseFilter(e.target.value)}>
+                  <option value="">Todas las fases</option>
+                  {supervisorEvidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <select className="inputLike" value={supEvidenceRiskFilter} onChange={(e) => setSupEvidenceRiskFilter(e.target.value)}>
+                  <option value="">Todos los riesgos</option>
+                  {supervisorEvidenceFilterOptions.risks.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <select className="inputLike" value={supEvidenceStatusFilter} onChange={(e) => setSupEvidenceStatusFilter(e.target.value)}>
+                  <option value="">Todos los estatus</option>
+                  {supervisorEvidenceFilterOptions.statuses.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <label className="toggleCard">
+                  <input type="checkbox" checked={supEvidenceOnlyPending} onChange={(e) => setSupEvidenceOnlyPending(e.target.checked)} />
+                  <span>Solo pendientes</span>
+                </label>
+              </div>
+              <div className="selectionToolbar" style={{ marginTop: 10 }}>
+                <div className="selectionToolbarLeft">
+                  <strong>{selectedSupEvidenceIds.length}</strong>
+                  <span>seleccionada(s)</span>
+                </div>
+                <div className="selectionToolbarActions">
+                  <button className="actionButton" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={16} /><span>Seleccionar visibles</span></button>
+                  <button className="actionButton" onClick={() => clearSupervisorEvidenceFilters()}><Trash2 size={16} /><span>Limpiar filtros</span></button>
+                  <button className="actionButton" onClick={() => setSelectedSupEvidenceIds([])}><Trash2 size={16} /><span>Limpiar selección</span></button>
+                </div>
+              </div>
             </div>
 
-            {!filteredSupervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas para poblar filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
-
-            <div className="selectionToolbar">
-              <div className="selectionToolbarLeft">
-                <strong>{selectedSupEvidenceIds.length}</strong>
-                <span>seleccionada(s)</span>
-              </div>
-              <div className="selectionToolbarActions">
-                <button className="actionButton" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={16} /><span>Seleccionar visibles</span></button>
-                <button className="actionButton" onClick={() => setSelectedSupEvidenceIds([])}><Trash2 size={16} /><span>Limpiar</span></button>
-              </div>
+            <div className="summaryGrid supervisorSummaryGrid">
+              <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{supervisorEvidenceSummary.total}</div><div className="kpiLabel">Fotos visibles</div></div>
+              <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{supervisorEvidenceSummary.pendientes}</div><div className="kpiLabel">Pendientes</div></div>
+              <div className="summaryBlock kpiBlock"><Check size={16} /><div className="kpiValue">{supervisorEvidenceSummary.aprobadas}</div><div className="kpiLabel">Aprobadas</div></div>
+              <div className="summaryBlock kpiBlock"><Pencil size={16} /><div className="kpiValue">{supervisorEvidenceSummary.observadas}</div><div className="kpiLabel">Observadas</div></div>
+              <div className="summaryBlock kpiBlock"><Trash2 size={16} /><div className="kpiValue">{supervisorEvidenceSummary.rechazadas}</div><div className="kpiLabel">Rechazadas</div></div>
             </div>
+
+            {!filteredSupervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas con esos filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
 
             {selectedSupEvidenceIds.length > 0 ? (
-              <div className="traceBox" style={{ marginTop: 10 }}>
-                <div className="traceTitle">Revisión masiva</div>
+              <div className="traceBox" style={{ marginTop: 12 }}>
+                <div className="traceTitle">Revisión masiva global</div>
                 <label className="fieldLabel" style={{ marginTop: 8 }}>Comentario del lote</label>
                 <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
                 <div className="actionGrid actionGridButtons">
                   <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
-                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Comentar lote</span></button>
+                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Observar lote</span></button>
                   <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
                 </div>
               </div>
             ) : null}
 
-            <div className="railScrollFrame">
-            <div className="reviewRail" aria-label="Carrete de evidencias">
-              {filteredSupervisorEvidences.map((item) => {
-                const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
-                return (
-                  <button
-                    key={item.evidencia_id}
-                    className={`reviewRailCard ${isSelected ? "reviewRailCardSelected" : ""}`}
-                    onClick={() => toggleSupervisorEvidenceSelection(item.evidencia_id)}
-                    onDoubleClick={() => openImageViewer(item.url_foto)}
-                    type="button"
-                  >
-                    <div className="reviewRailMedia">
-                      <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
-                      <div className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`}>{isSelected ? "✓" : "○"}</div>
+            <div className="brandGroupList">
+              {groupedSupervisorEvidences.map((group) => (
+                <div className="brandGroupCard" key={group.brandKey}>
+                  <div className="brandGroupHeader">
+                    <div>
+                      <div className="brandGroupTitle">{group.brandLabel}</div>
+                      <div className="brandGroupCounters">
+                        <span className="riskBadge riskNeutral">{group.total} fotos</span>
+                        <span className="riskBadge riskNeutral">{group.pendientes} pendientes</span>
+                        <span className="riskBadge riskGreen">{group.aprobadas} aprobadas</span>
+                        <span className="riskBadge riskAmber">{group.observadas} observadas</span>
+                        <span className="riskBadge riskRed">{group.rechazadas} rechazadas</span>
+                      </div>
                     </div>
-                    <div className="reviewRailBody">
-                      <div className="reviewRailTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                      <div className="reviewRailMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
-                      <div className="reviewRailMeta">{normalizeBrandLabel(item.marca_nombre || "", "Marca")}</div>
-                      <div className="reviewRailMeta">{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</div>
-                      <div className="reviewRailMeta">{item.fecha_hora_fmt}</div>
+                    <div className="brandGroupActions">
+                      <button className="actionButton" onClick={() => selectBrandSupervisorEvidences(group.brandKey)}><Check size={16} /><span>Seleccionar marca</span></button>
+                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "APROBADA")}><Check size={16} /><span>Aprobar visibles</span></button>
+                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "OBSERVADA")}><Pencil size={16} /><span>Observar visibles</span></button>
+                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "RECHAZADA")}><Trash2 size={16} /><span>Rechazar visibles</span></button>
                     </div>
-                  </button>
-                );
-              })}
+                  </div>
+                  <div className="railScrollFrame">
+                    <div className="reviewRail" aria-label={`Carrete ${group.brandLabel}`}>
+                      {group.items.map((item) => {
+                        const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
+                        const reviewState = getSupervisorReviewState(item);
+                        return (
+                          <div
+                            key={item.evidencia_id}
+                            className={`reviewRailCard reviewRailCardWide ${isSelected ? "reviewRailCardSelected" : ""}`}
+                            onClick={() => { setSelectedSupEvidenceId(item.evidencia_id); }}
+                          >
+                            <div className="reviewRailMedia" onDoubleClick={() => openImageViewer(item.url_foto, item.evidencia_id)}>
+                              <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
+                              <button
+                                type="button"
+                                className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`}
+                                onClick={(e) => { e.stopPropagation(); toggleSupervisorEvidenceSelection(item.evidencia_id); }}
+                              >
+                                {isSelected ? "✓" : "○"}
+                              </button>
+                            </div>
+                            <div className="reviewRailBody reviewRailBodyWide">
+                              <div className="reviewRailTitle">{item.tipo_evidencia || item.tipo_evento}</div>
+                              <div className="reviewRailBadges">
+                                <span className={`riskBadge ${riskClass(item.riesgo)}`}>{item.riesgo || "Sin riesgo"}</span>
+                                {item.fase ? <span className="riskBadge riskNeutral">{item.fase}</span> : null}
+                                <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{reviewState}</span>
+                              </div>
+                              <div className="reviewRailMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                              <div className="reviewRailMeta">{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</div>
+                              <div className="reviewRailMeta">{item.fecha_hora_fmt}</div>
+                              <div className="reviewRailMeta reviewRailDesc">{cleanEvidenceDescription(item.descripcion)}</div>
+                              <div className="quickActionRow">
+                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "APROBADA"); }}><Check size={14} /><span>Aprobar</span></button>
+                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "OBSERVADA"); }}><Pencil size={14} /><span>Observar</span></button>
+                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "RECHAZADA"); }}><Trash2 size={14} /><span>Rechazar</span></button>
+                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto, item.evidencia_id); }}><Eye size={14} /><span>Ver grande</span></button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-            </div>
-            <div className="contextHint">Vista rápida tipo carrete: toca para seleccionar, desliza para ver más y da doble clic para abrir la foto completa.</div>
+            <div className="contextHint">Ahora la revisión se organiza por marca. Cada marca tiene su propio carrete y acciones masivas visibles.</div>
 
             {selectedSupervisorEvidence ? (
               <div className="card detailSubcard">
                 <div className="sectionTitle">Detalle de evidencia</div>
-                <div className="contextHint">La imagen completa se abre con doble clic sobre el carrete o sobre esta vista.</div>
+                <div className="contextHint">Da doble clic sobre cualquier miniatura para abrir el visor ampliado con revisión directa.</div>
                 <div className="twoCol">
                   <div className="panel">
-                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
+                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.evidencia_id)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
                     <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
                     <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
                     <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
@@ -3167,7 +3384,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   </div>
                   <div className="panel">
                     <div className="miniTitle">Revisión individual</div>
-                    <div className="summaryLine">Estatus actual: <span className={`riskBadge ${statusClass(selectedSupervisorEvidence.status || selectedSupervisorEvidence.decision_supervisor)}`}>{selectedSupervisorEvidence.status || selectedSupervisorEvidence.decision_supervisor || "RECIBIDA"}</span></div>
+                    <div className="summaryLine">Estatus actual: <span className={`riskBadge ${getSupervisorReviewClass(selectedSupervisorEvidence)}`}>{getSupervisorReviewState(selectedSupervisorEvidence)}</span></div>
                     {(selectedSupervisorEvidence.decision_supervisor || selectedSupervisorEvidence.revisado_por || selectedSupervisorEvidence.fecha_revision || selectedSupervisorEvidence.motivo_revision) ? (
                       <div className="traceBox">
                         <div className="traceTitle">Última revisión</div>
@@ -3180,7 +3397,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Decisión</label>
                     <select className="inputLike" value={reviewDecision} onChange={(e) => setReviewDecision(e.target.value as SupervisorDecision)}>
                       <option value="APROBADA">APROBADA</option>
-                      <option value="OBSERVADA">COMENTADA</option>
+                      <option value="OBSERVADA">OBSERVADA</option>
                       <option value="RECHAZADA">RECHAZADA</option>
                     </select>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Motivo</label>
@@ -3343,7 +3560,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
         {imageViewerSrc ? (
           <div
-            className="overlayBackdrop"
+            className="overlayBackdrop overlayBackdropRich"
             onClick={(e) => { if (e.target === e.currentTarget) closeImageViewer(); }}
             onMouseMove={handleImageViewerMouseMove as any}
             onMouseUp={handleImageViewerMouseUp}
@@ -3352,6 +3569,21 @@ ${selectedEvidence.fecha_hora_fmt}`);
             onTouchMove={handleImageViewerTouchMove as any}
             onTouchEnd={handleImageViewerTouchEnd}
           >
+            {activeViewerSupervisorEvidence ? (
+              <div className="viewerChrome viewerChromeTop" onClick={(e) => e.stopPropagation()}>
+                <div>
+                  <div className="viewerTitle">{normalizeBrandLabel(activeViewerSupervisorEvidence.marca_nombre || "", activeViewerSupervisorEvidence.marca_id || "Marca")} · {activeViewerSupervisorEvidence.tipo_evidencia || activeViewerSupervisorEvidence.tipo_evento}</div>
+                  <div className="viewerMeta">{activeViewerSupervisorEvidence.promotor_nombre || activeViewerSupervisorEvidence.promotor_id || "Promotor"} · {getStoreDisplayFromItem(activeViewerSupervisorEvidence) || activeViewerSupervisorEvidence.tienda_nombre || "Tienda"}</div>
+                </div>
+                <div className="viewerTopBadges">
+                  {activeViewerSupervisorEvidence.fase ? <span className="riskBadge riskNeutral">{activeViewerSupervisorEvidence.fase}</span> : null}
+                  <span className={`riskBadge ${riskClass(activeViewerSupervisorEvidence.riesgo)}`}>{activeViewerSupervisorEvidence.riesgo || "Sin riesgo"}</span>
+                  <span className={`riskBadge ${getSupervisorReviewClass(activeViewerSupervisorEvidence)}`}>{getSupervisorReviewState(activeViewerSupervisorEvidence)}</span>
+                  <button className="actionButton compactBtn" onClick={() => closeImageViewer()}><span>Cerrar</span></button>
+                </div>
+              </div>
+            ) : null}
+
             <img
               src={imageViewerSrc}
               alt="Vista ampliada"
@@ -3369,6 +3601,20 @@ ${selectedEvidence.fecha_hora_fmt}`);
               onTouchEnd={handleImageViewerTouchEnd}
               onDoubleClick={(e) => { e.stopPropagation(); if (imageViewerScale > 1) { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); } else { zoomImageViewer(2); } }}
             />
+
+            {activeViewerSupervisorEvidence ? (
+              <div className="viewerChrome viewerChromeBottom" onClick={(e) => e.stopPropagation()}>
+                <div className="viewerActionRow">
+                  <button className="actionButton" onClick={() => moveSupervisorEvidenceViewer(-1)} disabled={activeViewerSupervisorEvidenceIndex <= 0}><span>Anterior</span></button>
+                  <button className="actionButton" onClick={() => void quickReviewEvidence(activeViewerSupervisorEvidence, "APROBADA")}><Check size={16} /><span>Aprobar</span></button>
+                  <button className="actionButton" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(activeViewerSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>Observar</span></button>
+                  <button className="actionButton" onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(activeViewerSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>Rechazar</span></button>
+                  <button className="actionButton" onClick={() => moveSupervisorEvidenceViewer(1)} disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1}><span>Siguiente</span></button>
+                </div>
+                <input className="inputLike viewerInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario rápido para la revisión" />
+                <div className="viewerFooterMeta">Doble clic para zoom. Arrastra la imagen cuando esté ampliada.</div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -3534,7 +3780,32 @@ input[type=file] { display: none; }
 .riskRed { background: rgba(239,68,68,.14); color: #d32f2f; }
 .riskAmber { background: rgba(245,158,11,.14); color: #ed6c02; }
 .riskGreen { background: rgba(76,175,80,.14); color: #2e7d32; }
+.riskNeutral { background: rgba(96,125,139,.14); color: #546e7a; }
 .filtersRow { margin-top: 12px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.filtersStickyCard { margin-top: 10px; padding: 12px; border-radius: 16px; background: rgba(248,249,251,0.95); border: 1px solid rgba(38,50,56,0.08); }
+.filtersRowSupervisorBottom { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.toggleCard { min-height: 48px; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10); background: rgba(255,255,255,0.96); padding: 10px 12px; display: inline-flex; align-items: center; gap: 10px; color: #37474f; font-weight: 700; }
+.supervisorSummaryGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.brandGroupList { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
+.brandGroupCard { border-radius: 18px; border: 1px solid rgba(38,50,56,0.08); background: rgba(255,255,255,0.96); padding: 14px; }
+.brandGroupHeader { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.brandGroupTitle { font-size: 16px; font-weight: 900; color: #263238; }
+.brandGroupCounters { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+.brandGroupActions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.reviewRailCardWide { flex-basis: 220px; }
+.reviewRailBodyWide { display: flex; flex-direction: column; gap: 6px; }
+.reviewRailBadges { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+.reviewRailDesc { min-height: 32px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.quickActionRow { margin-top: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.overlayBackdropRich { padding-top: 88px; padding-bottom: 132px; }
+.viewerChrome { position: fixed; left: 12px; right: 12px; z-index: 92; max-width: 1040px; margin: 0 auto; border-radius: 16px; background: rgba(15,23,42,0.86); border: 1px solid rgba(255,255,255,0.10); backdrop-filter: blur(12px); padding: 12px; color: white; display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.viewerChromeTop { top: 10px; }
+.viewerChromeBottom { bottom: 10px; flex-direction: column; align-items: stretch; }
+.viewerTitle { font-size: 14px; font-weight: 900; }
+.viewerMeta, .viewerFooterMeta { font-size: 12px; color: rgba(255,255,255,0.72); }
+.viewerTopBadges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.viewerActionRow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.viewerInput { margin-top: 8px; }
 .twoColsFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .statusBar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 60; width: calc(100% - 24px); max-width: 760px; border-radius: 16px; padding: 12px 14px; background: rgba(232,245,233,0.98); color: #2e7d32; border: 1px solid rgba(76,175,80,0.20); font-weight: 700; box-shadow: 0 12px 28px rgba(38,50,56,0.16); }
 .footerActions { margin-top: 12px; margin-bottom: 74px; display: flex; justify-content: flex-end; }
@@ -3584,6 +3855,6 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
-@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } }
+@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal, .cameraModalTight { width: calc(100vw - 16px); max-height: calc(100vh - 64px); padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraViewportTight { max-height: min(48vh, 440px); } .cameraVideo { min-height: 0; max-height: min(42vh, 320px); } .cameraVideoTight { max-height: min(48vh, 440px); } .cameraActionRow, .cameraActionRowTight { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 12px; } .compactBtn, .assistQuickBtn { padding: 12px 14px; } }
 `;
