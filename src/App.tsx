@@ -483,7 +483,7 @@ type GalleryAuthorizationResponse = {
 };
 
 
-const API_BASE = "https://promobolsillo-telegram.onrender.com";
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
 const SHEETS_SAFE_PHOTO_CHARS = 47000;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
@@ -3743,6 +3743,11 @@ input[type=file] { display: none; }
 .tabsInline::-webkit-scrollbar-thumb { background: rgba(96,125,139,0.24); border-radius: 999px; }
 .tabBtn { border: 0; border-radius: 8px; background: transparent; color: #546e7a; padding: 8px 12px; cursor: pointer; font-weight: 700; flex: 0 0 auto; }
 .tabBtnActive { background: rgba(76,175,80,.14); color: #2e7d32; }
+/* E006_TAB_MOBILE_GRID: en celular muestra tabs en 2 columnas para que Resumen no quede oculto. */
+@media (max-width: 430px) {
+  .tabsBar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; overflow-x: visible; white-space: normal; }
+  .tabBtn { width: 100%; min-width: 0; padding: 8px 6px; font-size: 12px; text-align: center; justify-content: center; }
+}
 .twoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
 .miniTitle { font-size: 15px; font-weight: 800; margin-bottom: 10px; color: #263238; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
@@ -3761,7 +3766,8 @@ input[type=file] { display: none; }
 .geoRed { background: rgba(239,68,68,.14); color: #d32f2f; }
 .geoNeutral { background: rgba(96,125,139,.12); color: #546e7a; }
 .panel { border-radius: 16px; border: 1px solid rgba(38,50,56,0.08); background: rgba(248,249,251,0.95); padding: 14px; width: 100%; max-width: 100%; overflow-x: hidden; }
-.card, .captureBlock, .tabsBar, .hero { width: 100%; max-width: 100%; overflow-x: hidden; }
+/* E006_TAB_VISIBILITY_FIX: tabsBar no debe ocultar el boton Resumen en celular. */
+.card, .captureBlock, .hero { width: 100%; max-width: 100%; overflow-x: hidden; }
 .fieldLabel { margin-bottom: 6px; display: block; font-size: 13px; color: #546e7a; }
 .inputLike { width: 100%; border-radius: 12px; border: 1px solid rgba(38,50,56,0.10); background: rgba(255,255,255,0.96); color: #263238; padding: 11px 12px; }
 .contextHint { margin-top: 8px; font-size: 12px; color: #607d8b; }
