@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-// E009B_DEMO_INLINE_COMPRESSED_STORAGE: preview local + compresión para almacenamiento inline demo en Sheets.
+// E010_UX_ACTION_FIRST_SUPERVISOR: rediseño UX visual action-first conservando E009B inline demo.
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -832,23 +832,23 @@ function getCurrentLocation() {
 }
 
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
-  { key: "asistencia", label: "Asistencia" },
-  { key: "evidencias", label: "Evidencias" },
-  { key: "mis_evidencias", label: "Mis evidencias" },
+  { key: "asistencia", label: "Inicio" },
+  { key: "evidencias", label: "Capturar" },
+  { key: "mis_evidencias", label: "Mis fotos" },
   { key: "resumen", label: "Resumen" },
 ];
 
 const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
-  { key: "equipo", label: "Equipo" },
+  { key: "evidencias", label: "Bandeja" },
   { key: "alertas", label: "Alertas" },
-  { key: "evidencias", label: "Evidencias" },
-  { key: "resumen", label: "Resumen" },
+  { key: "equipo", label: "Equipo" },
+  { key: "resumen", label: "Dashboard" },
 ];
 
 const clientTabs: Array<{ key: ClientModule; label: string }> = [
-  { key: "resumen", label: "Resumen" },
+  { key: "resumen", label: "Dashboard" },
   { key: "tiendas", label: "Tiendas" },
-  { key: "evidencias", label: "Evidencias" },
+  { key: "evidencias", label: "Evidencia validada" },
   { key: "incidencias", label: "Incidencias" },
   { key: "entregables", label: "Entregables" },
 ];
@@ -906,7 +906,7 @@ export default function App() {
   const [evidenceFilterPhase, setEvidenceFilterPhase] = useState("");
   const localEvidencePreviewsRef = useRef<Record<string, string>>({}); // E009A_LOCAL_PREVIEW_AFTER_REGISTER
 
-  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
+  const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("evidencias");
   const [supervisorSummary, setSupervisorSummary] = useState<SupervisorSummary>({ promotores: 0, visitasHoy: 0, abiertas: 0, evidenciasHoy: 0, alertas: 0 });
   const [supervisorUsage, setSupervisorUsage] = useState<SupervisorUsageSummary>({});
   const [supervisorPendingClose, setSupervisorPendingClose] = useState<SupervisorPendingClose>({});
@@ -3308,8 +3308,16 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {role === "supervisor" && supervisorModule === "evidencias" ? (
-          <div className="card">
-            <div className="sectionTitle">Evidencias</div>
+          <div className="card e010ReviewHub">
+            <div className="sectionTitle e010PageTitle">Bandeja de revisión</div>
+            <div className="contextHint e010PageSub">Cada foto que llega del equipo debe quedar aprobada, observada o rechazada antes de integrarse a la información que verá el cliente.</div>
+            <div className="e010FlowSteps">
+              <div><strong>1</strong><span>Filtrar</span></div>
+              <div><strong>2</strong><span>Agrupar</span></div>
+              <div><strong>3</strong><span>Revisar foto</span></div>
+              <div><strong>4</strong><span>Comentar / autorizar</span></div>
+              <div><strong>5</strong><span>Liberar al cliente</span></div>
+            </div>
             <div className="filtersStickyCard">
               <div className="filtersRow filtersRowSupervisorTop">
                 <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => { setSupEvidencePromotorFilter(e.target.value); setSupEvidenceStoreFilter(""); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); setSupEvidencePhaseFilter(""); }}>
@@ -3975,4 +3983,274 @@ input[type=file] { display: none; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
 @media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal, .cameraModalTight { width: calc(100vw - 16px); max-height: calc(100vh - 64px); padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraViewportTight { max-height: min(48vh, 440px); } .cameraVideo { min-height: 0; max-height: min(42vh, 320px); } .cameraVideoTight { max-height: min(48vh, 440px); } .cameraActionRow, .cameraActionRowTight { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 12px; } .compactBtn, .assistQuickBtn { padding: 12px 14px; } }
+
+
+/* E010_UX_ACTION_FIRST_SUPERVISOR -------------------------------------------------
+   Refresh visual para Promobolsillo: más actual, móvil y orientado a acción.
+   Mantiene la funcionalidad E009B; cambia jerarquía visual, tabs, tarjetas y bandeja supervisor.
+*/
+:root {
+  --e010-bg: #f7f8fb;
+  --e010-ink: #0f172a;
+  --e010-muted: #64748b;
+  --e010-line: rgba(15, 23, 42, 0.08);
+  --e010-green: #16a34a;
+  --e010-green-dark: #047857;
+  --e010-purple: #6d28d9;
+  --e010-orange: #f97316;
+  --e010-red: #ef4444;
+  --e010-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+body {
+  background:
+    radial-gradient(circle at 16% 4%, rgba(34, 197, 94, 0.12), transparent 30%),
+    radial-gradient(circle at 92% 0%, rgba(109, 40, 217, 0.10), transparent 28%),
+    var(--e010-bg);
+}
+.shell { max-width: 1240px; }
+.stickyTop {
+  background: rgba(247, 248, 251, 0.84);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  padding-top: 6px;
+}
+.hero {
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 28px;
+  box-shadow: var(--e010-shadow);
+}
+.heroTitle, .heroTitleTight {
+  letter-spacing: -0.04em;
+  color: var(--e010-ink);
+  font-weight: 900;
+}
+.brandWord { color: var(--e010-green); }
+.tabsBar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 999px;
+  padding: 6px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabsBar::-webkit-scrollbar { display: none; }
+.tabBtn {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--e010-muted);
+  font-weight: 800;
+  padding: 11px 16px;
+  white-space: nowrap;
+  transition: all 160ms ease;
+}
+.tabBtnActive {
+  background: linear-gradient(135deg, var(--e010-green) 0%, var(--e010-green-dark) 100%);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(22, 163, 74, 0.24);
+}
+.card, .panel, .detailSubcard, .filtersStickyCard, .traceBox, .emptyBox {
+  border-radius: 28px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--e010-shadow);
+}
+.panel { box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05); }
+.sectionTitle {
+  color: var(--e010-ink);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+.contextHint, .helperText, .summaryLine, .listSub, .reviewRailMeta, .kpiLabel {
+  color: var(--e010-muted);
+}
+.e010PageTitle { font-size: 24px; margin-bottom: 6px; }
+.e010PageSub { max-width: 820px; margin-bottom: 12px; }
+.e010FlowSteps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 14px;
+}
+.e010FlowSteps > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(109,40,217,0.09), rgba(34,197,94,0.07));
+  border: 1px solid rgba(109, 40, 217, 0.10);
+  color: var(--e010-ink);
+  font-weight: 800;
+  font-size: 12px;
+}
+.e010FlowSteps strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--e010-purple);
+  flex: 0 0 auto;
+}
+.inputLike, select.inputLike, input.inputLike {
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.92);
+  min-height: 42px;
+  color: var(--e010-ink);
+}
+.summaryGrid { gap: 12px; }
+.summaryBlock, .kpiBlock {
+  border-radius: 24px;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+}
+.kpiValue {
+  color: var(--e010-ink);
+  font-size: 26px;
+  letter-spacing: -0.04em;
+}
+.filtersStickyCard {
+  position: sticky;
+  top: 112px;
+  z-index: 9;
+  padding: 12px;
+  margin-bottom: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.selectionToolbar {
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(109, 40, 217, 0.08), rgba(22, 163, 74, 0.06));
+  border: 1px solid rgba(109, 40, 217, 0.12);
+}
+.actionButton, .primaryBtn, .secondaryBtn, .mainActionBtn, .compactBtn {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  font-weight: 850;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.actionButton:active, .primaryBtn:active, .secondaryBtn:active, .mainActionBtn:active { transform: translateY(1px) scale(0.99); }
+.mainActionBtn, .primaryBtn {
+  background: linear-gradient(135deg, var(--e010-green) 0%, var(--e010-green-dark) 100%);
+  color: #fff;
+  box-shadow: 0 14px 30px rgba(22, 163, 74, 0.25);
+}
+.brandGroupCard {
+  border-radius: 30px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%);
+  border: 1px solid rgba(109, 40, 217, 0.10);
+  box-shadow: var(--e010-shadow);
+  overflow: hidden;
+}
+.brandGroupHeader {
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(109, 40, 217, 0.08), rgba(22, 163, 74, 0.04));
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.brandGroupTitle {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--e010-ink);
+  letter-spacing: -0.03em;
+}
+.railScrollFrame { padding: 14px 16px 18px; }
+.reviewRail { gap: 14px; }
+.reviewRailCard, .reviewRailCardWide {
+  min-width: 260px;
+  max-width: 280px;
+  border-radius: 26px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
+  overflow: hidden;
+}
+.reviewRailCardSelected {
+  outline: 3px solid rgba(109, 40, 217, 0.28);
+  box-shadow: 0 18px 42px rgba(109, 40, 217, 0.16);
+}
+.reviewRailMedia {
+  height: 158px;
+  border-radius: 22px;
+  margin: 10px 10px 0;
+  overflow: hidden;
+  background: #0f172a;
+}
+.reviewRailBody { padding: 12px; }
+.reviewRailTitle {
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--e010-ink);
+}
+.riskBadge {
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+.quickActionRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.quickActionRow .actionButton:nth-child(1) { background: #ecfdf5; color: #166534; border-color: rgba(22, 163, 74, 0.18); }
+.quickActionRow .actionButton:nth-child(2) { background: #fff7ed; color: #9a3412; border-color: rgba(249, 115, 22, 0.20); }
+.quickActionRow .actionButton:nth-child(3) { background: #fef2f2; color: #991b1b; border-color: rgba(239, 68, 68, 0.20); }
+.quickActionRow .actionButton:nth-child(4) { background: #f8fafc; color: #334155; border-color: rgba(15, 23, 42, 0.10); }
+.detailSubcard {
+  margin-top: 16px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(245,243,255,0.86));
+  border-color: rgba(109, 40, 217, 0.16);
+}
+.previewFrame, .imageFrame, .galleryCard {
+  border-radius: 24px;
+  overflow: hidden;
+}
+.galleryCard {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+.footerActions {
+  background: rgba(255,255,255,0.86);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+.footerBtn {
+  border-radius: 18px;
+  font-weight: 800;
+}
+@media (max-width: 820px) {
+  .shell { max-width: 100%; }
+  .hero { border-radius: 24px; }
+  .card, .panel, .detailSubcard, .filtersStickyCard { border-radius: 24px; }
+  .e010FlowSteps { grid-template-columns: 1fr; }
+  .e010FlowSteps > div { justify-content: flex-start; }
+  .filtersStickyCard { top: 98px; }
+  .reviewRailCard, .reviewRailCardWide { min-width: 78vw; max-width: 78vw; }
+  .reviewRailMedia { height: 190px; }
+  .brandGroupActions { width: 100%; overflow-x: auto; padding-bottom: 3px; }
+  .quickActionRow { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .reviewRailCard, .reviewRailCardWide { min-width: 84vw; max-width: 84vw; }
+  .reviewRailMedia { height: 172px; }
+  .tabBtn { padding: 10px 14px; }
+  .kpiValue { font-size: 23px; }
+}
 `;
