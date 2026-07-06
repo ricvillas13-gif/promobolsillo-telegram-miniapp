@@ -37,6 +37,7 @@ type AppRole = Role | null;
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "entregables";
+type EvidenceGroupMode = "marca" | "tienda" | "promotor" | "estatus";
 type EvidencePhase = "NA" | "ANTES" | "DESPUES";
 type CaptureKind = "entrada" | "salida";
 type CameraTarget = "entrada" | "salida" | "evidencia" | "reemplazo";
@@ -485,6 +486,8 @@ type GalleryAuthorizationResponse = {
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
+const E011_GROUPS_PER_PAGE = 8;
+const E011_THUMBS_PER_GROUP = 18;
 const SHEETS_SAFE_PHOTO_CHARS = 42000;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
@@ -740,6 +743,90 @@ function isSupervisorPendingEvidence(item?: Pick<EvidenceItem, "decision_supervi
   return getSupervisorReviewState(item) === "PENDIENTE";
 }
 
+function getEvidenceGroupModeLabel(mode: EvidenceGroupMode) {
+  if (mode === "tienda") return "Tienda";
+  if (mode === "promotor") return "Promotor";
+  if (mode === "estatus") return "Estatus";
+  return "Marca";
+}
+
+function getEvidenceGroupInfo(item: EvidenceItem, mode: EvidenceGroupMode) {
+  const brandLabel = normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca");
+  const storeLabel = getStoreDisplayFromItem(item) || item.tienda_nombre || item.tienda_id || "Tienda sin nombre";
+  const promotorLabel = item.promotor_nombre || item.promotor_id || "Promotor sin nombre";
+  const state = getSupervisorReviewState(item);
+  if (mode === "tienda") {
+    return { key: `tienda::${item.tienda_id || storeLabel}`, label: storeLabel, subtitle: `${brandLabel} · ${promotorLabel}` };
+  }
+  if (mode === "promotor") {
+    return { key: `promotor::${item.promotor_id || promotorLabel}`, label: promotorLabel, subtitle: `${storeLabel} · ${brandLabel}` };
+  }
+  if (mode === "estatus") {
+    return { key: `estatus::${state}`, label: getSupervisorReviewLabel(state), subtitle: `${brandLabel} · ${storeLabel}` };
+  }
+  return { key: `marca::${item.marca_id || brandLabel}`, label: brandLabel, subtitle: `${storeLabel} · ${promotorLabel}` };
+}
+
+function buildEvidenceGroups(items: EvidenceItem[], mode: EvidenceGroupMode) {
+  const groups = new Map<string, {
+    brandKey: string;
+    brandLabel: string;
+    brandSubtitle: string;
+    items: EvidenceItem[];
+    previewItems: EvidenceItem[];
+    total: number;
+    pendientes: number;
+    aprobadas: number;
+    observadas: number;
+    rechazadas: number;
+    tiendas: string[];
+    promotores: string[];
+    marcas: string[];
+  }>();
+  items.forEach((item) => {
+    const info = getEvidenceGroupInfo(item, mode);
+    const current = groups.get(info.key) || {
+      brandKey: info.key,
+      brandLabel: info.label,
+      brandSubtitle: info.subtitle,
+      items: [],
+      previewItems: [],
+      total: 0,
+      pendientes: 0,
+      aprobadas: 0,
+      observadas: 0,
+      rechazadas: 0,
+      tiendas: [],
+      promotores: [],
+      marcas: [],
+    };
+    current.items.push(item);
+    current.total += 1;
+    const state = getSupervisorReviewState(item);
+    if (state === "APROBADA") current.aprobadas += 1;
+    else if (state === "OBSERVADA") current.observadas += 1;
+    else if (state === "RECHAZADA") current.rechazadas += 1;
+    else current.pendientes += 1;
+    const storeLabel = getStoreDisplayFromItem(item) || item.tienda_nombre || item.tienda_id || "";
+    const promotorLabel = item.promotor_nombre || item.promotor_id || "";
+    const brandLabel = normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "");
+    if (storeLabel && !current.tiendas.includes(storeLabel)) current.tiendas.push(storeLabel);
+    if (promotorLabel && !current.promotores.includes(promotorLabel)) current.promotores.push(promotorLabel);
+    if (brandLabel && !current.marcas.includes(brandLabel)) current.marcas.push(brandLabel);
+    groups.set(info.key, current);
+  });
+  return Array.from(groups.values())
+    .map((group) => {
+      const sortedItems = [...group.items].sort((a, b) => String(b.fecha_hora || b.fecha_hora_fmt || "").localeCompare(String(a.fecha_hora || a.fecha_hora_fmt || "")));
+      return { ...group, items: sortedItems, previewItems: sortedItems.slice(0, 4) };
+    })
+    .sort((a, b) => {
+      if (b.pendientes !== a.pendientes) return b.pendientes - a.pendientes;
+      if (b.total !== a.total) return b.total - a.total;
+      return a.brandLabel.localeCompare(b.brandLabel);
+    });
+}
+
 function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   return new Promise<string>((resolve, reject) => {
     const img = new Image();
@@ -933,6 +1020,9 @@ export default function App() {
   const [supEvidenceRiskFilter, setSupEvidenceRiskFilter] = useState("");
   const [supEvidenceStatusFilter, setSupEvidenceStatusFilter] = useState("");
   const [supEvidenceOnlyPending, setSupEvidenceOnlyPending] = useState(false);
+  const [supEvidenceGroupMode, setSupEvidenceGroupMode] = useState<EvidenceGroupMode>("marca");
+  const [activeSupEvidenceGroupKey, setActiveSupEvidenceGroupKey] = useState("");
+  const [supEvidenceGroupPage, setSupEvidenceGroupPage] = useState(1);
   const [reviewDecision, setReviewDecision] = useState<SupervisorDecision>("APROBADA");
   const [reviewNote, setReviewNote] = useState("");
   const [alertCloseNote, setAlertCloseNote] = useState("");
@@ -972,6 +1062,9 @@ export default function App() {
   const [selectedClientStoreId, setSelectedClientStoreId] = useState("");
   const [clientStoreDetail, setClientStoreDetail] = useState<ClientStoreDetail | null>(null);
   const [clientEvidences, setClientEvidences] = useState<EvidenceItem[]>([]);
+  const [clientEvidenceGroupMode, setClientEvidenceGroupMode] = useState<EvidenceGroupMode>("marca");
+  const [activeClientEvidenceGroupKey, setActiveClientEvidenceGroupKey] = useState("");
+  const [clientEvidenceGroupPage, setClientEvidenceGroupPage] = useState(1);
   const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
   const [imageViewerSrc, setImageViewerSrc] = useState("");
@@ -1286,49 +1379,28 @@ export default function App() {
     }, { total: 0, pendientes: 0, aprobadas: 0, observadas: 0, rechazadas: 0 });
   }, [filteredSupervisorEvidences]);
 
-  const groupedSupervisorEvidences = useMemo(() => {
-    const groups = new Map<string, {
-      brandKey: string;
-      brandLabel: string;
-      items: EvidenceItem[];
-      total: number;
-      pendientes: number;
-      aprobadas: number;
-      observadas: number;
-      rechazadas: number;
-    }>();
-    filteredSupervisorEvidences.forEach((item) => {
-      const brandLabel = normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca");
-      const brandKey = `${item.marca_id || brandLabel}__${brandLabel}`;
-      const current = groups.get(brandKey) || {
-        brandKey,
-        brandLabel,
-        items: [],
-        total: 0,
-        pendientes: 0,
-        aprobadas: 0,
-        observadas: 0,
-        rechazadas: 0,
-      };
-      current.items.push(item);
-      current.total += 1;
-      const state = getSupervisorReviewState(item);
-      if (state === "APROBADA") current.aprobadas += 1;
-      else if (state === "OBSERVADA") current.observadas += 1;
-      else if (state === "RECHAZADA") current.rechazadas += 1;
-      else current.pendientes += 1;
-      groups.set(brandKey, current);
-    });
-    return Array.from(groups.values())
-      .map((group) => ({
-        ...group,
-        items: [...group.items].sort((a, b) => String(b.fecha_hora || b.fecha_hora_fmt || "").localeCompare(String(a.fecha_hora || a.fecha_hora_fmt || ""))),
-      }))
-      .sort((a, b) => a.brandLabel.localeCompare(b.brandLabel));
-  }, [filteredSupervisorEvidences]);
+  const groupedSupervisorEvidences = useMemo(() => buildEvidenceGroups(filteredSupervisorEvidences, supEvidenceGroupMode), [filteredSupervisorEvidences, supEvidenceGroupMode]);
+
+  const supervisorEvidenceGroupPageCount = useMemo(() => Math.max(1, Math.ceil(groupedSupervisorEvidences.length / E011_GROUPS_PER_PAGE)), [groupedSupervisorEvidences]);
+  const supervisorEvidenceGroupSafePage = Math.min(supEvidenceGroupPage, supervisorEvidenceGroupPageCount);
+  const pagedSupervisorEvidenceGroups = useMemo(() => {
+    const start = (supervisorEvidenceGroupSafePage - 1) * E011_GROUPS_PER_PAGE;
+    return groupedSupervisorEvidences.slice(start, start + E011_GROUPS_PER_PAGE);
+  }, [groupedSupervisorEvidences, supervisorEvidenceGroupSafePage]);
+  const activeSupervisorEvidenceGroup = useMemo(() => groupedSupervisorEvidences.find((item) => item.brandKey === activeSupEvidenceGroupKey) || groupedSupervisorEvidences[0] || null, [groupedSupervisorEvidences, activeSupEvidenceGroupKey]);
+
+  const clientEvidenceGroups = useMemo(() => buildEvidenceGroups(clientEvidences, clientEvidenceGroupMode), [clientEvidences, clientEvidenceGroupMode]);
+  const clientEvidenceGroupPageCount = useMemo(() => Math.max(1, Math.ceil(clientEvidenceGroups.length / E011_GROUPS_PER_PAGE)), [clientEvidenceGroups]);
+  const clientEvidenceGroupSafePage = Math.min(clientEvidenceGroupPage, clientEvidenceGroupPageCount);
+  const pagedClientEvidenceGroups = useMemo(() => {
+    const start = (clientEvidenceGroupSafePage - 1) * E011_GROUPS_PER_PAGE;
+    return clientEvidenceGroups.slice(start, start + E011_GROUPS_PER_PAGE);
+  }, [clientEvidenceGroups, clientEvidenceGroupSafePage]);
+  const activeClientEvidenceGroup = useMemo(() => clientEvidenceGroups.find((item) => item.brandKey === activeClientEvidenceGroupKey) || clientEvidenceGroups[0] || null, [clientEvidenceGroups, activeClientEvidenceGroupKey]);
 
   const activeViewerSupervisorEvidence = useMemo(() => imageViewerEvidenceId ? filteredSupervisorEvidences.find((item) => item.evidencia_id === imageViewerEvidenceId) || null : null, [filteredSupervisorEvidences, imageViewerEvidenceId]);
-  const activeViewerSupervisorEvidenceIndex = useMemo(() => activeViewerSupervisorEvidence ? filteredSupervisorEvidences.findIndex((item) => item.evidencia_id === activeViewerSupervisorEvidence.evidencia_id) : -1, [filteredSupervisorEvidences, activeViewerSupervisorEvidence]);
+  const activeViewerSupervisorEvidenceSequence = useMemo(() => activeSupervisorEvidenceGroup?.items?.length ? activeSupervisorEvidenceGroup.items : filteredSupervisorEvidences, [activeSupervisorEvidenceGroup, filteredSupervisorEvidences]);
+  const activeViewerSupervisorEvidenceIndex = useMemo(() => activeViewerSupervisorEvidence ? activeViewerSupervisorEvidenceSequence.findIndex((item) => item.evidencia_id === activeViewerSupervisorEvidence.evidencia_id) : -1, [activeViewerSupervisorEvidenceSequence, activeViewerSupervisorEvidence]);
 
   const selectedTeamMember = useMemo(() => supervisorTeam.find((item) => item.promotor_id === selectedTeamPromotorId) || supervisorTeam[0] || null, [supervisorTeam, selectedTeamPromotorId]);
   const selectedAlert = useMemo(() => supervisorAlerts.find((item) => item.alerta_id === selectedAlertId) || supervisorAlerts[0] || null, [supervisorAlerts, selectedAlertId]);
@@ -1799,6 +1871,18 @@ export default function App() {
     if (role !== "supervisor") return;
     setSelectedSupEvidenceIds((prev) => prev.filter((id) => filteredSupervisorEvidences.some((item) => item.evidencia_id === id)));
   }, [filteredSupervisorEvidences, role]);
+
+  useEffect(() => {
+    if (role !== "supervisor") return;
+    setSupEvidenceGroupPage(1);
+    setActiveSupEvidenceGroupKey("");
+  }, [role, supEvidenceGroupMode, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter, supEvidenceOnlyPending]);
+
+  useEffect(() => {
+    if (role !== "cliente") return;
+    setClientEvidenceGroupPage(1);
+    setActiveClientEvidenceGroupKey("");
+  }, [role, clientEvidenceGroupMode, clientFilters.fecha_inicio, clientFilters.fecha_fin, clientFilters.cadena, clientFilters.region, clientFilters.tienda_id, clientFilters.marca_id, clientFilters.tipo_evidencia, clientFilters.decision_supervisor, clientFilters.riesgo]);
 
   useEffect(() => {
     if (role !== "supervisor") return;
@@ -2511,7 +2595,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
   async function runBrandEvidenceReview(brandKey: string, decision: SupervisorDecision) {
     const group = groupedSupervisorEvidences.find((item) => item.brandKey === brandKey);
-    if (!group?.items.length) return setStatusMsg("No hay evidencias visibles en esa marca.");
+    if (!group?.items.length) return setStatusMsg("No hay evidencias visibles en ese grupo.");
     const requiresNote = decision === "OBSERVADA" || decision === "RECHAZADA";
     const prompted = requiresNote ? window.prompt(decision === "OBSERVADA" ? `Comentario general para ${group.brandLabel}:` : `Motivo general de rechazo para ${group.brandLabel}:`, reviewNote || "") : reviewNote;
     if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló el comentario masivo por falta de texto." : "Se canceló el rechazo masivo por falta de motivo.");
@@ -2535,7 +2619,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
 
   function moveSupervisorEvidenceViewer(step: number) {
     if (activeViewerSupervisorEvidenceIndex < 0) return;
-    const next = filteredSupervisorEvidences[activeViewerSupervisorEvidenceIndex + step];
+    const next = activeViewerSupervisorEvidenceSequence[activeViewerSupervisorEvidenceIndex + step];
     if (!next) return;
     setSelectedSupEvidenceId(next.evidencia_id);
     openImageViewer(next.url_foto, next.evidencia_id);
@@ -2726,8 +2810,9 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {role === "cliente" && clientModule === "evidencias" ? (
-          <div className="card">
+          <div className="card e011GroupedEvidenceHub">
             <div className="sectionTitle">Evidencias presentables</div>
+            <div className="contextHint">Primero se muestran grupos de análisis; las fotos se revisan en detalle solo al abrir el grupo o el visor ampliado.</div>
             <div className="filtersRow twoColsFilters">
               <select className="inputLike" value={clientFilters.tipo_evidencia} onChange={(e) => setClientFilters((prev) => ({ ...prev, tipo_evidencia: e.target.value }))}>
                 <option value="">Todos los tipos</option>
@@ -2742,25 +2827,76 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 {clientFilterOptions.riesgos.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
               </select>
             </div>
-            <div className="galleryScroll compactGalleryScroll">
-              <div className="galleryGrid">
-                {clientEvidences.map((item) => (
-                  <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
-                    <div className="galleryBodyCompact">
-                      <div className="galleryTop compactTop">
-                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
-                      </div>
-                      <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre || "", "Marca") })}</div>
-                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                      <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
-                    </div>
-                  </div>
-                ))}
-                {!clientEvidences.length ? <div className="emptyBox">No hay evidencias para mostrar.</div> : null}
-              </div>
+            <div className="e011ModeRow">
+              <span className="e011ModeLabel">Agrupar por</span>
+              {(["marca", "tienda", "estatus"] as EvidenceGroupMode[]).map((mode) => (
+                <button key={mode} className={`e011ModeBtn ${clientEvidenceGroupMode === mode ? "e011ModeBtnActive" : ""}`} onClick={() => setClientEvidenceGroupMode(mode)}>{getEvidenceGroupModeLabel(mode)}</button>
+              ))}
             </div>
+
+            {!clientEvidences.length ? <div className="emptyBox">No hay evidencias para mostrar.</div> : null}
+
+            {clientEvidences.length ? (
+              <>
+                <div className="e011EvidenceBoardHeader">
+                  <div>
+                    <div className="miniTitle">Grupos visibles</div>
+                    <div className="contextHint">{clientEvidenceGroups.length} grupo(s), {clientEvidences.length} evidencia(s). Página {clientEvidenceGroupSafePage} de {clientEvidenceGroupPageCount}.</div>
+                  </div>
+                  <div className="e011Pager">
+                    <button className="actionButton compactBtn" disabled={clientEvidenceGroupSafePage <= 1} onClick={() => setClientEvidenceGroupPage((prev) => Math.max(1, prev - 1))}>‹ Anterior</button>
+                    <button className="actionButton compactBtn" disabled={clientEvidenceGroupSafePage >= clientEvidenceGroupPageCount} onClick={() => setClientEvidenceGroupPage((prev) => Math.min(clientEvidenceGroupPageCount, prev + 1))}>Siguiente ›</button>
+                  </div>
+                </div>
+                <div className="e011GroupBoard">
+                  {pagedClientEvidenceGroups.map((group) => (
+                    <button key={group.brandKey} type="button" className={`e011GroupTile ${activeClientEvidenceGroup?.brandKey === group.brandKey ? "e011GroupTileActive" : ""}`} onClick={() => setActiveClientEvidenceGroupKey(group.brandKey)}>
+                      <div className="e011GroupTileTop">
+                        <div>
+                          <div className="e011GroupKind">{getEvidenceGroupModeLabel(clientEvidenceGroupMode)}</div>
+                          <div className="e011GroupTitle">{group.brandLabel}</div>
+                        </div>
+                        <span className="riskBadge riskNeutral">{group.total}</span>
+                      </div>
+                      <div className="e011MiniCollage">
+                        {group.previewItems.map((item) => <img key={item.evidencia_id} src={item.url_foto} alt={item.tipo_evidencia || "Evidencia"} />)}
+                        {!group.previewItems.length ? <div className="e011EmptyThumb"><ImageIcon size={18} /></div> : null}
+                      </div>
+                      <div className="e011GroupStats">
+                        <span className="riskBadge riskGreen">{group.aprobadas} aprobadas</span>
+                        <span className="riskBadge riskAmber">{group.observadas} observadas</span>
+                        <span className="riskBadge riskRed">{group.rechazadas} rechazadas</span>
+                      </div>
+                      <div className="e011GroupMeta">{group.tiendas.slice(0, 2).join(" · ") || group.brandSubtitle}</div>
+                    </button>
+                  ))}
+                </div>
+
+                {activeClientEvidenceGroup ? (
+                  <div className="e011ReviewWorkspace clientWorkspace">
+                    <div className="e011WorkspaceHeader">
+                      <div>
+                        <div className="miniTitle">{activeClientEvidenceGroup.brandLabel}</div>
+                        <div className="contextHint">{activeClientEvidenceGroup.total} evidencia(s). Se muestran miniaturas compactas; doble clic abre la foto grande.</div>
+                      </div>
+                    </div>
+                    <div className="e011ThumbStrip">
+                      {activeClientEvidenceGroup.items.slice(0, E011_THUMBS_PER_GROUP).map((item) => (
+                        <button key={item.evidencia_id} type="button" className="e011ThumbCard" onClick={() => handleImageTap(item.url_foto)} onDoubleClick={() => openImageViewer(item.url_foto)}>
+                          <img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento} />
+                          <div className="e011ThumbInfo">
+                            <strong>{item.tipo_evidencia || item.tipo_evento}</strong>
+                            <span>{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</span>
+                            <span>{item.fecha_hora_fmt}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    {activeClientEvidenceGroup.items.length > E011_THUMBS_PER_GROUP ? <div className="contextHint">Hay {activeClientEvidenceGroup.items.length - E011_THUMBS_PER_GROUP} evidencia(s) más en este grupo; filtra por tienda, tipo o riesgo para acotar el análisis.</div> : null}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </div>
         ) : null}
 
@@ -3308,15 +3444,15 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {role === "supervisor" && supervisorModule === "evidencias" ? (
-          <div className="card e010ReviewHub">
+          <div className="card e010ReviewHub e011GroupedEvidenceHub">
             <div className="sectionTitle e010PageTitle">Bandeja de revisión</div>
-            <div className="contextHint e010PageSub">Cada foto que llega del equipo debe quedar aprobada, observada o rechazada antes de integrarse a la información que verá el cliente.</div>
+            <div className="contextHint e010PageSub">La bandeja ya no despliega todos los carretes hacia abajo. Primero eliges un grupo de análisis y después revisas sus miniaturas compactas en un solo espacio controlado.</div>
             <div className="e010FlowSteps">
               <div><strong>1</strong><span>Filtrar</span></div>
-              <div><strong>2</strong><span>Agrupar</span></div>
-              <div><strong>3</strong><span>Revisar foto</span></div>
-              <div><strong>4</strong><span>Comentar / autorizar</span></div>
-              <div><strong>5</strong><span>Liberar al cliente</span></div>
+              <div><strong>2</strong><span>Elegir grupo</span></div>
+              <div><strong>3</strong><span>Revisar miniaturas</span></div>
+              <div><strong>4</strong><span>Abrir foto grande</span></div>
+              <div><strong>5</strong><span>Autorizar / comentar</span></div>
             </div>
             <div className="filtersStickyCard">
               <div className="filtersRow filtersRowSupervisorTop">
@@ -3375,6 +3511,13 @@ ${selectedEvidence.fecha_hora_fmt}`);
               <div className="summaryBlock kpiBlock"><Trash2 size={16} /><div className="kpiValue">{supervisorEvidenceSummary.rechazadas}</div><div className="kpiLabel">Rechazadas</div></div>
             </div>
 
+            <div className="e011ModeRow">
+              <span className="e011ModeLabel">Agrupar por</span>
+              {(["marca", "tienda", "promotor", "estatus"] as EvidenceGroupMode[]).map((mode) => (
+                <button key={mode} className={`e011ModeBtn ${supEvidenceGroupMode === mode ? "e011ModeBtnActive" : ""}`} onClick={() => setSupEvidenceGroupMode(mode)}>{getEvidenceGroupModeLabel(mode)}</button>
+              ))}
+            </div>
+
             {!filteredSupervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas con esos filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
 
             {selectedSupEvidenceIds.length > 0 ? (
@@ -3390,83 +3533,96 @@ ${selectedEvidence.fecha_hora_fmt}`);
               </div>
             ) : null}
 
-            <div className="brandGroupList">
-              {groupedSupervisorEvidences.map((group) => (
-                <div className="brandGroupCard" key={group.brandKey}>
-                  <div className="brandGroupHeader">
-                    <div>
-                      <div className="brandGroupTitle">{group.brandLabel}</div>
-                      <div className="brandGroupCounters">
-                        <span className="riskBadge riskNeutral">{group.total} fotos</span>
+            {filteredSupervisorEvidences.length ? (
+              <>
+                <div className="e011EvidenceBoardHeader">
+                  <div>
+                    <div className="miniTitle">Grupos de análisis</div>
+                    <div className="contextHint">{groupedSupervisorEvidences.length} grupo(s), {filteredSupervisorEvidences.length} foto(s). Página {supervisorEvidenceGroupSafePage} de {supervisorEvidenceGroupPageCount}.</div>
+                  </div>
+                  <div className="e011Pager">
+                    <button className="actionButton compactBtn" disabled={supervisorEvidenceGroupSafePage <= 1} onClick={() => setSupEvidenceGroupPage((prev) => Math.max(1, prev - 1))}>‹ Anterior</button>
+                    <button className="actionButton compactBtn" disabled={supervisorEvidenceGroupSafePage >= supervisorEvidenceGroupPageCount} onClick={() => setSupEvidenceGroupPage((prev) => Math.min(supervisorEvidenceGroupPageCount, prev + 1))}>Siguiente ›</button>
+                  </div>
+                </div>
+
+                <div className="e011GroupBoard">
+                  {pagedSupervisorEvidenceGroups.map((group) => (
+                    <button key={group.brandKey} type="button" className={`e011GroupTile ${activeSupervisorEvidenceGroup?.brandKey === group.brandKey ? "e011GroupTileActive" : ""}`} onClick={() => { setActiveSupEvidenceGroupKey(group.brandKey); if (group.items[0]) setSelectedSupEvidenceId(group.items[0].evidencia_id); }}>
+                      <div className="e011GroupTileTop">
+                        <div>
+                          <div className="e011GroupKind">{getEvidenceGroupModeLabel(supEvidenceGroupMode)}</div>
+                          <div className="e011GroupTitle">{group.brandLabel}</div>
+                        </div>
+                        <span className="riskBadge riskNeutral">{group.total}</span>
+                      </div>
+                      <div className="e011MiniCollage">
+                        {group.previewItems.map((item) => <img key={item.evidencia_id} src={item.url_foto} alt={item.tipo_evidencia || "Evidencia"} />)}
+                        {!group.previewItems.length ? <div className="e011EmptyThumb"><ImageIcon size={18} /></div> : null}
+                      </div>
+                      <div className="e011GroupStats">
                         <span className="riskBadge riskNeutral">{group.pendientes} pendientes</span>
                         <span className="riskBadge riskGreen">{group.aprobadas} aprobadas</span>
                         <span className="riskBadge riskAmber">{group.observadas} comentadas</span>
                         <span className="riskBadge riskRed">{group.rechazadas} rechazadas</span>
                       </div>
+                      <div className="e011GroupMeta">{group.tiendas.slice(0, 2).join(" · ") || group.brandSubtitle}</div>
+                    </button>
+                  ))}
+                </div>
+
+                {activeSupervisorEvidenceGroup ? (
+                  <div className="e011ReviewWorkspace">
+                    <div className="e011WorkspaceHeader">
+                      <div>
+                        <div className="miniTitle">Revisión del grupo: {activeSupervisorEvidenceGroup.brandLabel}</div>
+                        <div className="contextHint">{activeSupervisorEvidenceGroup.total} foto(s). Se muestran máximo {E011_THUMBS_PER_GROUP} miniaturas para mantener la pantalla controlada.</div>
+                      </div>
+                      <div className="brandGroupActions e011WorkspaceActions">
+                        <button className="actionButton" onClick={() => selectBrandSupervisorEvidences(activeSupervisorEvidenceGroup.brandKey)}><Check size={16} /><span>Seleccionar grupo</span></button>
+                        <button className="actionButton" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "APROBADA")}><Check size={16} /><span>Aprobar grupo</span></button>
+                        <button className="actionButton" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "OBSERVADA")}><Pencil size={16} /><span>Comentar grupo</span></button>
+                        <button className="actionButton" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "RECHAZADA")}><Trash2 size={16} /><span>Rechazar grupo</span></button>
+                      </div>
                     </div>
-                    <div className="brandGroupActions">
-                      <button className="actionButton" onClick={() => selectBrandSupervisorEvidences(group.brandKey)}><Check size={16} /><span>Seleccionar marca</span></button>
-                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "APROBADA")}><Check size={16} /><span>Aprobar visibles</span></button>
-                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "OBSERVADA")}><Pencil size={16} /><span>Comentar visibles</span></button>
-                      <button className="actionButton" onClick={() => void runBrandEvidenceReview(group.brandKey, "RECHAZADA")}><Trash2 size={16} /><span>Rechazar visibles</span></button>
-                    </div>
-                  </div>
-                  <div className="railScrollFrame">
-                    <div className="reviewRail" aria-label={`Carrete ${group.brandLabel}`}>
-                      {group.items.map((item) => {
+                    <div className="e011ThumbStrip">
+                      {activeSupervisorEvidenceGroup.items.slice(0, E011_THUMBS_PER_GROUP).map((item) => {
                         const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
                         const reviewState = getSupervisorReviewState(item);
                         return (
-                          <div
-                            key={item.evidencia_id}
-                            className={`reviewRailCard reviewRailCardWide ${isSelected ? "reviewRailCardSelected" : ""}`}
-                            onClick={() => { setSelectedSupEvidenceId(item.evidencia_id); }}
-                          >
-                            <div className="reviewRailMedia" onDoubleClick={() => openImageViewer(item.url_foto, item.evidencia_id)}>
-                              <img src={item.url_foto} alt={item.tipo_evidencia} className="img" />
-                              <button
-                                type="button"
-                                className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`}
-                                onClick={(e) => { e.stopPropagation(); toggleSupervisorEvidenceSelection(item.evidencia_id); }}
-                              >
-                                {isSelected ? "✓" : "○"}
-                              </button>
+                          <button key={item.evidencia_id} type="button" className={`e011ThumbCard ${selectedSupEvidenceId === item.evidencia_id ? "e011ThumbCardActive" : ""}`} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)} onDoubleClick={() => openImageViewer(item.url_foto, item.evidencia_id)}>
+                            <div className="e011ThumbImageWrap">
+                              <img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento} />
+                              <span className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`} onClick={(e) => { e.stopPropagation(); toggleSupervisorEvidenceSelection(item.evidencia_id); }}>{isSelected ? "✓" : "○"}</span>
                             </div>
-                            <div className="reviewRailBody reviewRailBodyWide">
-                              <div className="reviewRailTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                              <div className="reviewRailBadges">
-                                <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
-                                {item.fase ? <span className="riskBadge riskNeutral">{item.fase}</span> : null}
-                                <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(reviewState)}</span>
-                              </div>
-                              <div className="reviewRailMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
-                              <div className="reviewRailMeta">{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</div>
-                              <div className="reviewRailMeta">{item.fecha_hora_fmt}</div>
-                              <div className="reviewRailMeta reviewRailDesc">{cleanEvidenceDescription(item.descripcion)}</div>
-                              <div className="quickActionRow">
-                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "APROBADA"); }}><Check size={14} /><span>Aprobar</span></button>
-                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "OBSERVADA"); }}><Pencil size={14} /><span>Comentar</span></button>
-                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); void quickReviewEvidence(item, "RECHAZADA"); }}><Trash2 size={14} /><span>Rechazar</span></button>
-                                <button className="actionButton compactBtn" type="button" onClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto, item.evidencia_id); }}><Eye size={14} /><span>Ver grande</span></button>
-                              </div>
+                            <div className="e011ThumbInfo">
+                              <strong>{item.tipo_evidencia || item.tipo_evento}</strong>
+                              <span>{item.promotor_nombre || item.promotor_id || "Promotor"}</span>
+                              <span>{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</span>
+                              <span>{item.fecha_hora_fmt}</span>
                             </div>
-                          </div>
+                            <div className="e011ThumbBadges">
+                              <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
+                              {item.fase ? <span className="riskBadge riskNeutral">{item.fase}</span> : null}
+                              <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(reviewState)}</span>
+                            </div>
+                          </button>
                         );
                       })}
                     </div>
+                    {activeSupervisorEvidenceGroup.items.length > E011_THUMBS_PER_GROUP ? <div className="contextHint">Hay {activeSupervisorEvidenceGroup.items.length - E011_THUMBS_PER_GROUP} foto(s) más en este grupo. Usa filtros o acciones masivas para acotar sin crear scroll vertical interminable.</div> : null}
                   </div>
-                </div>
-              ))}
-            </div>
-            <div className="contextHint">Ahora la revisión se organiza por marca. Cada marca tiene su propio carrete y acciones masivas visibles.</div>
+                ) : null}
+              </>
+            ) : null}
 
             {selectedSupervisorEvidence ? (
-              <div className="card detailSubcard">
+              <div className="card detailSubcard e011DetailCard">
                 <div className="sectionTitle">Detalle de evidencia</div>
-                <div className="contextHint">Da doble clic sobre cualquier miniatura para abrir el visor ampliado con revisión directa.</div>
+                <div className="contextHint">La foto grande se abre con doble clic desde cualquier miniatura. Aquí se conserva la trazabilidad y la revisión individual.</div>
                 <div className="twoCol">
                   <div className="panel">
-                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.evidencia_id)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
+                    <div className="e011DetailPreview" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.evidencia_id)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
                     <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
                     <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
                     <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
@@ -3695,8 +3851,8 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(1); }}
-                  disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1}
-                  style={{ position: "fixed", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= filteredSupervisorEvidences.length - 1 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
+                  disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1}
+                  style={{ position: "fixed", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
                 >
                   ›
                 </button>
@@ -4253,4 +4409,66 @@ body {
   .tabBtn { padding: 10px 14px; }
   .kpiValue { font-size: 23px; }
 }
+
+/* E011_EVIDENCIAS_AGRUPADAS_SUPERVISOR_CLIENTE -------------------------------
+   La galería deja de ser una lista vertical de carretes. Primero hay tarjetas
+   de grupo paginadas y luego un workspace de revisión con miniaturas compactas.
+*/
+.e011GroupedEvidenceHub { overflow: visible; }
+.e011ModeRow { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.e011ModeLabel { color: var(--e010-muted, #64748b); font-weight: 850; font-size: 12px; margin-right: 4px; }
+.e011ModeBtn { border: 1px solid rgba(15,23,42,.08); background: rgba(255,255,255,.86); color: #334155; border-radius: 999px; padding: 9px 12px; font-weight: 850; cursor: pointer; }
+.e011ModeBtnActive { background: #0f172a; color: white; box-shadow: 0 10px 24px rgba(15,23,42,.16); }
+.e011EvidenceBoardHeader { margin-top: 16px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.e011Pager { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.e011Pager .actionButton:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.e011GroupBoard { margin-top: 12px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.e011GroupTile { width: 100%; border: 1px solid rgba(15,23,42,.08); background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96)); border-radius: 24px; padding: 12px; box-shadow: 0 14px 30px rgba(15,23,42,.06); cursor: pointer; text-align: left; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+.e011GroupTile:hover { transform: translateY(-1px); box-shadow: 0 18px 38px rgba(15,23,42,.10); }
+.e011GroupTileActive { border-color: rgba(109,40,217,.42); outline: 3px solid rgba(109,40,217,.14); }
+.e011GroupTileTop { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.e011GroupKind { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; font-weight: 900; }
+.e011GroupTitle { margin-top: 2px; font-size: 15px; line-height: 1.15; font-weight: 950; color: #0f172a; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 34px; }
+.e011MiniCollage { margin-top: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; height: 54px; overflow: hidden; }
+.e011MiniCollage img, .e011EmptyThumb { width: 100%; height: 54px; object-fit: cover; border-radius: 12px; background: #e2e8f0; display: grid; place-items: center; color: #64748b; }
+.e011GroupStats { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.e011GroupStats .riskBadge { padding: 4px 7px; font-size: 10px; }
+.e011GroupMeta { margin-top: 8px; font-size: 11px; line-height: 1.25; color: #64748b; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 27px; }
+.e011ReviewWorkspace { margin-top: 16px; border: 1px solid rgba(109,40,217,.12); background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(245,243,255,.82)); border-radius: 28px; padding: 14px; box-shadow: 0 16px 36px rgba(15,23,42,.07); }
+.e011WorkspaceHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.e011WorkspaceActions { justify-content: flex-start; }
+.e011ThumbStrip { margin-top: 12px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.e011ThumbCard { border: 1px solid rgba(15,23,42,.08); background: white; border-radius: 18px; padding: 8px; box-shadow: 0 8px 20px rgba(15,23,42,.05); cursor: pointer; text-align: left; min-width: 0; }
+.e011ThumbCardActive { outline: 3px solid rgba(22,163,74,.18); border-color: rgba(22,163,74,.42); }
+.e011ThumbImageWrap { position: relative; height: 82px; border-radius: 14px; overflow: hidden; background: #0f172a; }
+.e011ThumbImageWrap img, .e011ThumbCard > img { width: 100%; height: 82px; object-fit: cover; border-radius: 14px; display: block; background: #0f172a; }
+.e011ThumbCard .selectionPill { right: 6px; top: 6px; width: 26px; height: 26px; font-size: 13px; }
+.e011ThumbInfo { margin-top: 7px; display: grid; gap: 2px; min-width: 0; }
+.e011ThumbInfo strong, .e011ThumbInfo span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e011ThumbInfo strong { font-size: 12px; color: #0f172a; font-weight: 900; }
+.e011ThumbInfo span { font-size: 10.5px; color: #64748b; }
+.e011ThumbBadges { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 5px; }
+.e011ThumbBadges .riskBadge { padding: 4px 6px; font-size: 9.5px; }
+.e011DetailCard { margin-top: 14px; }
+.e011DetailPreview { width: 132px; height: 132px; border-radius: 20px; overflow: hidden; background: #0f172a; margin-bottom: 10px; }
+.clientWorkspace .e011ThumbStrip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1080px) {
+  .e011GroupBoard { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .e011ThumbStrip, .clientWorkspace .e011ThumbStrip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .e011GroupBoard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .e011ThumbStrip, .clientWorkspace .e011ThumbStrip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .e011ThumbImageWrap, .e011ThumbImageWrap img, .e011ThumbCard > img { height: 74px; }
+  .e011WorkspaceHeader { gap: 8px; }
+}
+@media (max-width: 480px) {
+  .e011GroupBoard { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .e011GroupTile { border-radius: 20px; padding: 10px; }
+  .e011GroupTitle { font-size: 13px; min-height: 31px; }
+  .e011MiniCollage { height: 46px; }
+  .e011MiniCollage img, .e011EmptyThumb { height: 46px; border-radius: 10px; }
+  .e011ThumbStrip, .clientWorkspace .e011ThumbStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 `;
