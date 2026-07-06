@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+// E009B_DEMO_INLINE_COMPRESSED_STORAGE: preview local + compresión para almacenamiento inline demo en Sheets.
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -484,7 +485,7 @@ type GalleryAuthorizationResponse = {
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
-const SHEETS_SAFE_PHOTO_CHARS = 47000;
+const SHEETS_SAFE_PHOTO_CHARS = 42000;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
 
@@ -777,6 +778,9 @@ async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEET
     { side: 840, quality: 0.8 },
     { side: 720, quality: 0.76 },
     { side: 640, quality: 0.72 },
+    { side: 560, quality: 0.68 },
+    { side: 480, quality: 0.62 },
+    { side: 420, quality: 0.58 },
   ];
   let last = dataUrl;
   for (const attempt of attempts) {
@@ -900,6 +904,7 @@ export default function App() {
   const [evidenceFilterBrand, setEvidenceFilterBrand] = useState("");
   const [evidenceFilterType, setEvidenceFilterType] = useState("");
   const [evidenceFilterPhase, setEvidenceFilterPhase] = useState("");
+  const localEvidencePreviewsRef = useRef<Record<string, string>>({}); // E009A_LOCAL_PREVIEW_AFTER_REGISTER
 
   const [supervisorModule, setSupervisorModule] = useState<SupervisorModule>("equipo");
   const [supervisorSummary, setSupervisorSummary] = useState<SupervisorSummary>({ promotores: 0, visitasHoy: 0, abiertas: 0, evidenciasHoy: 0, alertas: 0 });
@@ -1153,6 +1158,28 @@ export default function App() {
   }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
 
   const selectedEvidence = useMemo(() => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || null, [filteredOperationalGallery, selectedEvidenceId]);
+
+  function isStoredPhotoUnavailable(value?: string) {
+    const textValue = String(value || "").trim();
+    return !textValue || textValue === "[DRIVE_UPLOAD_FAILED]" || textValue.startsWith("[") || textValue.startsWith("PHOTO_STORAGE:");
+  }
+
+  function rememberLocalEvidencePreviews(entries: Record<string, string>) {
+    const cleanEntries = Object.entries(entries).filter(([id, dataUrl]) => Boolean(id && dataUrl));
+    if (!cleanEntries.length) return;
+    localEvidencePreviewsRef.current = { ...localEvidencePreviewsRef.current, ...Object.fromEntries(cleanEntries) };
+  }
+
+  function withLocalEvidencePreviews<T extends UiEvidence | EvidenceItem>(rows: T[]): T[] {
+    const previewMap = localEvidencePreviewsRef.current;
+    return rows.map((row) => {
+      const localPreview = previewMap[row.evidencia_id];
+      if (localPreview && isStoredPhotoUnavailable(row.url_foto)) {
+        return { ...row, url_foto: localPreview, descripcion: row.descripcion || "Vista previa local" };
+      }
+      return row;
+    });
+  }
 
   useEffect(() => {
     if (role !== "promotor") return;
@@ -1457,7 +1484,7 @@ export default function App() {
 
   async function loadEvidencesToday() {
     const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
-    const rows = (data.evidencias || []).map((item) => ({ ...item, status: item.status || ("ACTIVA" as const) }));
+    const rows = withLocalEvidencePreviews((data.evidencias || []).map((item) => ({ ...item, status: item.status || ("ACTIVA" as const) })));
     const operationalRows = rows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA");
     setAllEvidenceRows(rows);
     if (operationalRows.length && !operationalRows.find((r) => r.evidencia_id === selectedEvidenceId)) setSelectedEvidenceId(operationalRows[0].evidencia_id);
@@ -2224,6 +2251,14 @@ export default function App() {
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
       setSyncing(true);
       const evidenceSource = evidencePhotos.some((photo) => !String(photo.name || "").startsWith("captura-")) ? "GALERIA_AUTORIZADA" : "CAMARA";
+      const localPhotosForPreview = evidencePhotos.map((photo) => ({ ...photo }));
+      const savedVisitId = selectedVisitId;
+      const savedVisit = pendingVisits.find((item) => item.visita_id === savedVisitId);
+      const savedBrandId = evidenceBrandId;
+      const savedBrandLabel = evidenceBrandLabel;
+      const savedEvidenceType = evidenceType;
+      const savedEvidencePhase = evidencePhase;
+      const savedDescription = evidenceDescription.trim();
       queuedPayload = {
         visita_id: selectedVisitId,
         marca_id: evidenceBrandId,
@@ -2232,15 +2267,52 @@ export default function App() {
         fase: evidencePhase,
         descripcion: evidenceDescription.trim(),
         source: evidenceSource,
-        fotos: evidencePhotos.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
+        fotos: localPhotosForPreview.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
       };
       const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", queuedPayload);
+      const createdIds = Array.isArray(result.created) ? result.created.filter(Boolean) : [];
+      if (createdIds.length) {
+        const previewEntries: Record<string, string> = {};
+        createdIds.forEach((id, index) => {
+          const photo = localPhotosForPreview[index] || localPhotosForPreview[0];
+          if (photo?.dataUrl) previewEntries[id] = photo.dataUrl;
+        });
+        rememberLocalEvidencePreviews(previewEntries);
+        const optimisticRows: UiEvidence[] = createdIds.map((id, index) => {
+          const photo = localPhotosForPreview[index] || localPhotosForPreview[0];
+          return {
+            evidencia_id: id,
+            visita_id: savedVisitId,
+            tipo_evento: "EVIDENCIA_OPERATIVA",
+            tipo_evidencia: savedEvidenceType,
+            marca_id: savedBrandId,
+            marca_nombre: savedBrandLabel,
+            riesgo: "PENDIENTE",
+            fecha_hora_fmt: formatDateTimeMaybe(photo?.capturedAt || new Date().toISOString()),
+            fecha_hora: photo?.capturedAt || new Date().toISOString(),
+            url_foto: photo?.dataUrl || "",
+            descripcion: savedDescription || "Vista previa local",
+            tienda_id: savedVisit?.tienda_id || "",
+            tienda_nombre: savedVisit?.tienda_nombre || selectedVisitStoreName || "",
+            tienda_display: savedVisit ? formatStoreDisplay(savedVisit.tienda_id, savedVisit.tienda_nombre) : selectedVisitStoreName,
+            fase: savedEvidencePhase,
+            status: "ACTIVA",
+          };
+        });
+        setAllEvidenceRows((prev) => withLocalEvidencePreviews([...optimisticRows, ...prev.filter((row) => !createdIds.includes(row.evidencia_id))]));
+        setSelectedEvidenceId(createdIds[0]);
+        setPromotorModule("mis_evidencias");
+      }
       setEvidenceType("");
       setEvidencePhase("NA");
       setEvidenceQty(1);
       setEvidenceDescription("");
       setEvidencePhotos([]);
       await loadEvidencesToday();
+      if (createdIds[0]) {
+        setSelectedEvidenceId(createdIds[0]);
+        setPromotorModule("mis_evidencias");
+      }
       if ((result as any).postprocess_warning) {
         setStatusMsg("Evidencia registrada. El análisis quedó programado y puede tardar unos segundos.");
       } else {
