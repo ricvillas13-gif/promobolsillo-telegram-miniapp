@@ -3444,17 +3444,20 @@ ${selectedEvidence.fecha_hora_fmt}`);
         ) : null}
 
         {role === "supervisor" && supervisorModule === "evidencias" ? (
-          <div className="card e010ReviewHub e011GroupedEvidenceHub">
-            <div className="sectionTitle e010PageTitle">Bandeja de revisión</div>
-            <div className="contextHint e010PageSub">La bandeja ya no despliega todos los carretes hacia abajo. Primero eliges un grupo de análisis y después revisas sus miniaturas compactas en un solo espacio controlado.</div>
-            <div className="e010FlowSteps">
-              <div><strong>1</strong><span>Filtrar</span></div>
-              <div><strong>2</strong><span>Elegir grupo</span></div>
-              <div><strong>3</strong><span>Revisar miniaturas</span></div>
-              <div><strong>4</strong><span>Abrir foto grande</span></div>
-              <div><strong>5</strong><span>Autorizar / comentar</span></div>
+          <div className="card e010ReviewHub e011GroupedEvidenceHub e012SupervisorWorkspace">
+            <div className="e012HeaderRow">
+              <div>
+                <div className="sectionTitle e010PageTitle">Bandeja de revisión</div>
+                <div className="contextHint e010PageSub">E012 convierte la bandeja en una mesa de revisión: eliges un grupo compacto, revisas una foto activa, haces zoom si necesitas detalle y tomas acción sin bajar por tres secciones verticales.</div>
+              </div>
+              <div className="e012KpiStrip">
+                <span><strong>{supervisorEvidenceSummary.pendientes}</strong><small>Pendientes</small></span>
+                <span><strong>{supervisorEvidenceSummary.observadas}</strong><small>Comentadas</small></span>
+                <span><strong>{supervisorEvidenceSummary.rechazadas}</strong><small>Rechazadas</small></span>
+              </div>
             </div>
-            <div className="filtersStickyCard">
+
+            <div className="filtersStickyCard e012FiltersCard">
               <div className="filtersRow filtersRowSupervisorTop">
                 <select className="inputLike" value={supEvidencePromotorFilter} onChange={(e) => { setSupEvidencePromotorFilter(e.target.value); setSupEvidenceStoreFilter(""); setSupEvidenceBrandFilter(""); setSupEvidenceTypeFilter(""); setSupEvidencePhaseFilter(""); }}>
                   <option value="">Todos los promotores</option>
@@ -3472,7 +3475,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   {supervisorEvidenceFilterOptions.types.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
               </div>
-              <div className="filtersRow filtersRowSupervisorBottom" style={{ marginTop: 8 }}>
+              <div className="filtersRow filtersRowSupervisorBottom e012FiltersBottom">
                 <select className="inputLike" value={supEvidencePhaseFilter} onChange={(e) => setSupEvidencePhaseFilter(e.target.value)}>
                   <option value="">Todas las fases</option>
                   {supervisorEvidenceFilterOptions.phases.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -3489,183 +3492,137 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   <input type="checkbox" checked={supEvidenceOnlyPending} onChange={(e) => setSupEvidenceOnlyPending(e.target.checked)} />
                   <span>Solo pendientes</span>
                 </label>
+                <button className="actionButton compactBtn" onClick={() => clearSupervisorEvidenceFilters()}><Trash2 size={14} /><span>Limpiar</span></button>
               </div>
-              <div className="selectionToolbar" style={{ marginTop: 10 }}>
-                <div className="selectionToolbarLeft">
-                  <strong>{selectedSupEvidenceIds.length}</strong>
-                  <span>seleccionada(s)</span>
-                </div>
-                <div className="selectionToolbarActions">
-                  <button className="actionButton" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={16} /><span>Seleccionar visibles</span></button>
-                  <button className="actionButton" onClick={() => clearSupervisorEvidenceFilters()}><Trash2 size={16} /><span>Limpiar filtros</span></button>
-                  <button className="actionButton" onClick={() => setSelectedSupEvidenceIds([])}><Trash2 size={16} /><span>Limpiar selección</span></button>
-                </div>
+              <div className="e012BulkBar">
+                <span><strong>{selectedSupEvidenceIds.length}</strong> seleccionada(s)</span>
+                <button className="actionButton compactBtn" onClick={() => selectAllVisibleSupervisorEvidences()}><Check size={14} /><span>Seleccionar visibles</span></button>
+                <button className="actionButton compactBtn" disabled={!selectedSupEvidenceIds.length} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>Aprobar selección</span></button>
+                <button className="actionButton compactBtn" disabled={!selectedSupEvidenceIds.length} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>Comentar selección</span></button>
               </div>
             </div>
 
-            <div className="summaryGrid supervisorSummaryGrid">
-              <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{supervisorEvidenceSummary.total}</div><div className="kpiLabel">Fotos visibles</div></div>
-              <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{supervisorEvidenceSummary.pendientes}</div><div className="kpiLabel">Pendientes</div></div>
-              <div className="summaryBlock kpiBlock"><Check size={16} /><div className="kpiValue">{supervisorEvidenceSummary.aprobadas}</div><div className="kpiLabel">Aprobadas</div></div>
-              <div className="summaryBlock kpiBlock"><Pencil size={16} /><div className="kpiValue">{supervisorEvidenceSummary.observadas}</div><div className="kpiLabel">Comentadas</div></div>
-              <div className="summaryBlock kpiBlock"><Trash2 size={16} /><div className="kpiValue">{supervisorEvidenceSummary.rechazadas}</div><div className="kpiLabel">Rechazadas</div></div>
-            </div>
-
-            <div className="e011ModeRow">
+            <div className="e011ModeRow e012ModeRow">
               <span className="e011ModeLabel">Agrupar por</span>
               {(["marca", "tienda", "promotor", "estatus"] as EvidenceGroupMode[]).map((mode) => (
                 <button key={mode} className={`e011ModeBtn ${supEvidenceGroupMode === mode ? "e011ModeBtnActive" : ""}`} onClick={() => setSupEvidenceGroupMode(mode)}>{getEvidenceGroupModeLabel(mode)}</button>
               ))}
             </div>
 
-            {!filteredSupervisorEvidences.length ? <div className="contextHint">Aún no hay evidencias operativas con esos filtros. En esta vista solo se consideran evidencias operativas; las fotos de asistencia se consultan dentro del expediente de la visita.</div> : null}
-
-            {selectedSupEvidenceIds.length > 0 ? (
-              <div className="traceBox" style={{ marginTop: 12 }}>
-                <div className="traceTitle">Revisión masiva global</div>
-                <label className="fieldLabel" style={{ marginTop: 8 }}>Comentario del lote</label>
-                <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario general para las evidencias seleccionadas" />
-                <div className="actionGrid actionGridButtons">
-                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={16} /><span>Aprobar lote</span></button>
-                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={16} /><span>Comentar lote</span></button>
-                  <button className="actionButton" onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={16} /><span>Rechazar lote</span></button>
-                </div>
-              </div>
-            ) : null}
-
-            {filteredSupervisorEvidences.length ? (
-              <>
-                <div className="e011EvidenceBoardHeader">
-                  <div>
-                    <div className="miniTitle">Grupos de análisis</div>
-                    <div className="contextHint">{groupedSupervisorEvidences.length} grupo(s), {filteredSupervisorEvidences.length} foto(s). Página {supervisorEvidenceGroupSafePage} de {supervisorEvidenceGroupPageCount}.</div>
+            {!filteredSupervisorEvidences.length ? (
+              <div className="emptyBox">No hay evidencias con los filtros actuales.</div>
+            ) : (
+              <div className="e012ReviewGrid">
+                <aside className="e012GroupColumn">
+                  <div className="e012ColumnHeader">
+                    <div>
+                      <div className="miniTitle">Grupos</div>
+                      <div className="contextHint">{groupedSupervisorEvidences.length} grupo(s). Selecciona uno para revisar.</div>
+                    </div>
+                    <div className="e011Pager">
+                      <button className="actionButton compactBtn" disabled={supervisorEvidenceGroupSafePage <= 1} onClick={() => setSupEvidenceGroupPage((p) => Math.max(1, p - 1))}>‹</button>
+                      <span className="contextHint">{supervisorEvidenceGroupSafePage}/{supervisorEvidenceGroupPageCount}</span>
+                      <button className="actionButton compactBtn" disabled={supervisorEvidenceGroupSafePage >= supervisorEvidenceGroupPageCount} onClick={() => setSupEvidenceGroupPage((p) => Math.min(supervisorEvidenceGroupPageCount, p + 1))}>›</button>
+                    </div>
                   </div>
-                  <div className="e011Pager">
-                    <button className="actionButton compactBtn" disabled={supervisorEvidenceGroupSafePage <= 1} onClick={() => setSupEvidenceGroupPage((prev) => Math.max(1, prev - 1))}>‹ Anterior</button>
-                    <button className="actionButton compactBtn" disabled={supervisorEvidenceGroupSafePage >= supervisorEvidenceGroupPageCount} onClick={() => setSupEvidenceGroupPage((prev) => Math.min(supervisorEvidenceGroupPageCount, prev + 1))}>Siguiente ›</button>
-                  </div>
-                </div>
-
-                <div className="e011GroupBoard">
-                  {pagedSupervisorEvidenceGroups.map((group) => (
-                    <button key={group.brandKey} type="button" className={`e011GroupTile ${activeSupervisorEvidenceGroup?.brandKey === group.brandKey ? "e011GroupTileActive" : ""}`} onClick={() => { setActiveSupEvidenceGroupKey(group.brandKey); if (group.items[0]) setSelectedSupEvidenceId(group.items[0].evidencia_id); }}>
-                      <div className="e011GroupTileTop">
-                        <div>
-                          <div className="e011GroupKind">{getEvidenceGroupModeLabel(supEvidenceGroupMode)}</div>
-                          <div className="e011GroupTitle">{group.brandLabel}</div>
+                  <div className="e012GroupList">
+                    {pagedSupervisorEvidenceGroups.map((group) => (
+                      <button key={group.brandKey} type="button" className={`e011GroupTile e012GroupTile ${activeSupervisorEvidenceGroup?.brandKey === group.brandKey ? "e011GroupTileActive" : ""}`} onClick={() => { setActiveSupEvidenceGroupKey(group.brandKey); if (group.items[0]) setSelectedSupEvidenceId(group.items[0].evidencia_id); }}>
+                        <div className="e011GroupTileTop">
+                          <div>
+                            <div className="e011GroupKind">{getEvidenceGroupModeLabel(supEvidenceGroupMode)}</div>
+                            <div className="e011GroupTitle">{group.brandLabel}</div>
+                          </div>
+                          <span className="riskBadge riskNeutral">{group.total}</span>
                         </div>
-                        <span className="riskBadge riskNeutral">{group.total}</span>
-                      </div>
-                      <div className="e011MiniCollage">
-                        {group.previewItems.map((item) => <img key={item.evidencia_id} src={item.url_foto} alt={item.tipo_evidencia || "Evidencia"} />)}
-                        {!group.previewItems.length ? <div className="e011EmptyThumb"><ImageIcon size={18} /></div> : null}
-                      </div>
-                      <div className="e011GroupStats">
-                        <span className="riskBadge riskNeutral">{group.pendientes} pendientes</span>
-                        <span className="riskBadge riskGreen">{group.aprobadas} aprobadas</span>
-                        <span className="riskBadge riskAmber">{group.observadas} comentadas</span>
-                        <span className="riskBadge riskRed">{group.rechazadas} rechazadas</span>
-                      </div>
-                      <div className="e011GroupMeta">{group.tiendas.slice(0, 2).join(" · ") || group.brandSubtitle}</div>
-                    </button>
-                  ))}
-                </div>
+                        <div className="e011MiniCollage e012MiniCollage">
+                          {group.previewItems.map((item) => <img key={item.evidencia_id} src={item.url_foto} alt={item.tipo_evidencia || "Evidencia"} />)}
+                          {!group.previewItems.length ? <div className="e011EmptyThumb"><ImageIcon size={18} /></div> : null}
+                        </div>
+                        <div className="e011GroupStats e012GroupStats">
+                          <span className="riskBadge riskNeutral">{group.pendientes} pend.</span>
+                          <span className="riskBadge riskGreen">{group.aprobadas} ok</span>
+                          <span className="riskBadge riskAmber">{group.observadas} com.</span>
+                          <span className="riskBadge riskRed">{group.rechazadas} rech.</span>
+                        </div>
+                        <div className="e011GroupMeta">{group.tiendas.slice(0, 2).join(" · ") || group.brandSubtitle}</div>
+                      </button>
+                    ))}
+                  </div>
+                </aside>
 
-                {activeSupervisorEvidenceGroup ? (
-                  <div className="e011ReviewWorkspace">
-                    <div className="e011WorkspaceHeader">
-                      <div>
-                        <div className="miniTitle">Revisión del grupo: {activeSupervisorEvidenceGroup.brandLabel}</div>
-                        <div className="contextHint">{activeSupervisorEvidenceGroup.total} foto(s). Se muestran máximo {E011_THUMBS_PER_GROUP} miniaturas para mantener la pantalla controlada.</div>
+                <section className="e012ReviewPanel">
+                  {activeSupervisorEvidenceGroup && selectedSupervisorEvidence ? (
+                    <>
+                      <div className="e012ReviewTop">
+                        <div>
+                          <div className="miniTitle">{activeSupervisorEvidenceGroup.brandLabel}</div>
+                          <div className="contextHint">{activeSupervisorEvidenceGroup.total} foto(s) · revisión individual controlada</div>
+                        </div>
+                        <div className="e012ReviewPills">
+                          <span className={`riskBadge ${getSupervisorReviewClass(selectedSupervisorEvidence)}`}>{getSupervisorReviewLabel(selectedSupervisorEvidence)}</span>
+                          <span className={`riskBadge ${severityClass(selectedSupervisorEvidence.riesgo || "BAJO")}`}>{selectedSupervisorEvidence.riesgo || "Sin riesgo"}</span>
+                          {selectedSupervisorEvidence.fase ? <span className="riskBadge riskNeutral">{selectedSupervisorEvidence.fase}</span> : null}
+                        </div>
+                        <div className="e012GroupQuickActions">
+                          <button className="actionButton compactBtn" onClick={() => selectBrandSupervisorEvidences(activeSupervisorEvidenceGroup.brandKey)}><Check size={14} /><span>Seleccionar grupo</span></button>
+                          <button className="actionButton compactBtn" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "APROBADA")}><Check size={14} /><span>Aprobar grupo</span></button>
+                          <button className="actionButton compactBtn" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "OBSERVADA")}><Pencil size={14} /><span>Comentar grupo</span></button>
+                        </div>
                       </div>
-                      <div className="brandGroupActions e011WorkspaceActions">
-                        <button className="actionButton" onClick={() => selectBrandSupervisorEvidences(activeSupervisorEvidenceGroup.brandKey)}><Check size={16} /><span>Seleccionar grupo</span></button>
-                        <button className="actionButton" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "APROBADA")}><Check size={16} /><span>Aprobar grupo</span></button>
-                        <button className="actionButton" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "OBSERVADA")}><Pencil size={16} /><span>Comentar grupo</span></button>
-                        <button className="actionButton" onClick={() => void runBrandEvidenceReview(activeSupervisorEvidenceGroup.brandKey, "RECHAZADA")}><Trash2 size={16} /><span>Rechazar grupo</span></button>
+
+                      <div className="e012ActiveReviewCard">
+                        <div className="e012ImageStage" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.evidencia_id)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}>
+                          <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia || "Evidencia"} />
+                          <button type="button" className="e012ZoomButton" onClick={(e) => { e.stopPropagation(); openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.evidencia_id); }}><Eye size={15} /> Zoom</button>
+                        </div>
+                        <div className="e012EvidenceInfo">
+                          <div className="e012EvidenceTitle">{selectedSupervisorEvidence.tipo_evidencia || selectedSupervisorEvidence.tipo_evento || "Evidencia"}</div>
+                          <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
+                          <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
+                          <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
+                          {selectedSupervisorEvidence.hallazgos_ai ? <div className="summaryLine">Hallazgo: {selectedSupervisorEvidence.hallazgos_ai}</div> : null}
+                          {selectedSupervisorEvidence.reglas_disparadas ? <div className="summaryLine">Reglas: {selectedSupervisorEvidence.reglas_disparadas}</div> : null}
+                          {supervisorEvidenceAudit.length ? <div className="summaryLine">Historial visible: {supervisorEvidenceAudit.length} movimiento(s)</div> : <div className="summaryLine">Historial: sin movimientos visibles</div>}
+                        </div>
                       </div>
-                    </div>
-                    <div className="e011ThumbStrip">
-                      {activeSupervisorEvidenceGroup.items.slice(0, E011_THUMBS_PER_GROUP).map((item) => {
-                        const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
-                        const reviewState = getSupervisorReviewState(item);
-                        return (
-                          <button key={item.evidencia_id} type="button" className={`e011ThumbCard ${selectedSupEvidenceId === item.evidencia_id ? "e011ThumbCardActive" : ""}`} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)} onDoubleClick={() => openImageViewer(item.url_foto, item.evidencia_id)}>
-                            <div className="e011ThumbImageWrap">
-                              <img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento} />
+
+                      <div className="e012ThumbRail" aria-label="Miniaturas del grupo">
+                        {activeSupervisorEvidenceGroup.items.map((item) => {
+                          const isSelected = selectedSupEvidenceIds.includes(item.evidencia_id);
+                          const reviewState = getSupervisorReviewState(item);
+                          return (
+                            <button key={item.evidencia_id} type="button" className={`e012Thumb ${selectedSupEvidenceId === item.evidencia_id ? "e012ThumbActive" : ""}`} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)} onDoubleClick={() => openImageViewer(item.url_foto, item.evidencia_id)}>
+                              <img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"} />
                               <span className={`selectionPill ${isSelected ? "selectionPillActive" : ""}`} onClick={(e) => { e.stopPropagation(); toggleSupervisorEvidenceSelection(item.evidencia_id); }}>{isSelected ? "✓" : "○"}</span>
-                            </div>
-                            <div className="e011ThumbInfo">
-                              <strong>{item.tipo_evidencia || item.tipo_evento}</strong>
-                              <span>{item.promotor_nombre || item.promotor_id || "Promotor"}</span>
-                              <span>{getStoreDisplayFromItem(item) || item.tienda_nombre || "Tienda"}</span>
-                              <span>{item.fecha_hora_fmt}</span>
-                            </div>
-                            <div className="e011ThumbBadges">
-                              <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
-                              {item.fase ? <span className="riskBadge riskNeutral">{item.fase}</span> : null}
-                              <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(reviewState)}</span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {activeSupervisorEvidenceGroup.items.length > E011_THUMBS_PER_GROUP ? <div className="contextHint">Hay {activeSupervisorEvidenceGroup.items.length - E011_THUMBS_PER_GROUP} foto(s) más en este grupo. Usa filtros o acciones masivas para acotar sin crear scroll vertical interminable.</div> : null}
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-
-            {selectedSupervisorEvidence ? (
-              <div className="card detailSubcard e011DetailCard">
-                <div className="sectionTitle">Detalle de evidencia</div>
-                <div className="contextHint">La foto grande se abre con doble clic desde cualquier miniatura. Aquí se conserva la trazabilidad y la revisión individual.</div>
-                <div className="twoCol">
-                  <div className="panel">
-                    <div className="e011DetailPreview" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto, selectedSupervisorEvidence.evidencia_id)} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto)}><img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia} className="img" /></div>
-                    <div className="summaryLine"><strong>{selectedSupervisorEvidence.promotor_nombre || selectedSupervisorEvidence.promotor_id || "Promotor"}</strong></div>
-                    <div className="summaryLine">{compactMetaLine(selectedSupervisorEvidence)}</div>
-                    <div className="summaryLine">{selectedSupervisorEvidence.fecha_hora_fmt}</div>
-                    <div className="summaryLine">Descripción: {cleanEvidenceDescription(selectedSupervisorEvidence.descripcion)}</div>
-                    {selectedSupervisorEvidence.resultado_ai ? <div className="summaryLine">Resultado AI: <strong>{selectedSupervisorEvidence.resultado_ai}</strong></div> : null}
-                    {selectedSupervisorEvidence.hallazgos_ai ? <div className="summaryLine">Causa detectada: {selectedSupervisorEvidence.hallazgos_ai}</div> : null}
-                    {selectedSupervisorEvidence.reglas_disparadas ? <div className="summaryLine">Reglas activadas: {selectedSupervisorEvidence.reglas_disparadas}</div> : null}
-                    {selectedSupervisorEvidence.score_confianza ? <div className="summaryLine">Confianza estimada: {selectedSupervisorEvidence.score_confianza}</div> : null}
-                  </div>
-                  <div className="panel">
-                    <div className="miniTitle">Revisión individual</div>
-                    <div className="summaryLine">Estatus actual: <span className={`riskBadge ${getSupervisorReviewClass(selectedSupervisorEvidence)}`}>{getSupervisorReviewLabel(selectedSupervisorEvidence)}</span></div>
-                    {(selectedSupervisorEvidence.decision_supervisor || selectedSupervisorEvidence.revisado_por || selectedSupervisorEvidence.fecha_revision || selectedSupervisorEvidence.motivo_revision) ? (
-                      <div className="traceBox">
-                        <div className="traceTitle">Última revisión</div>
-                        {selectedSupervisorEvidence.decision_supervisor ? <div className="summaryLine">Decisión: <strong>{getSupervisorReviewLabel(selectedSupervisorEvidence.decision_supervisor)}</strong></div> : null}
-                        {selectedSupervisorEvidence.revisado_por ? <div className="summaryLine">Revisado por: <strong>{selectedSupervisorEvidence.revisado_por}</strong></div> : null}
-                        {selectedSupervisorEvidence.fecha_revision ? <div className="summaryLine">Fecha revisión: <strong>{formatDateTimeMaybe(selectedSupervisorEvidence.fecha_revision)}</strong></div> : null}
-                        {selectedSupervisorEvidence.motivo_revision ? <div className="summaryLine">Motivo: {selectedSupervisorEvidence.motivo_revision}</div> : null}
+                              <small>{getSupervisorReviewLabel(reviewState)}</small>
+                            </button>
+                          );
+                        })}
                       </div>
-                    ) : null}
-                    <label className="fieldLabel" style={{ marginTop: 10 }}>Decisión</label>
-                    <select className="inputLike" value={reviewDecision} onChange={(e) => setReviewDecision(e.target.value as SupervisorDecision)}>
-                      <option value="APROBADA">APROBADA</option>
-                      <option value="OBSERVADA">COMENTADA</option>
-                      <option value="RECHAZADA">RECHAZADA</option>
-                    </select>
-                    <label className="fieldLabel" style={{ marginTop: 10 }}>Motivo</label>
-                    <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario" />
-                    <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar revisión</span></button>
-                      <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
-                    </div>
-                    <div className="traceBox" style={{ marginTop: 12 }}>
-                      <div className="traceTitle">Historial</div>
-                      {supervisorEvidenceAudit.length ? supervisorEvidenceAudit.map((row, idx) => (
-                        <div key={`${row.audit_id || row.fecha_hora || idx}`} className="summaryLine"><strong>{row.accion || "ACCION"}</strong> · {formatDateTimeMaybe(row.fecha_hora)} · {row.actor_role || ""}{row.actor_id ? ` (${row.actor_id})` : ""}{row.comentario ? ` · ${row.comentario}` : ""}</div>
-                      )) : <div className="summaryLine">Sin historial visible.</div>}
-                    </div>
-                  </div>
-                </div>
+
+                      <div className="e012ActionDock">
+                        <button className="actionButton" onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>Aprobar</span></button>
+                        <button className="actionButton" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>Comentar</span></button>
+                        <button className="actionButton" onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>Rechazar</span></button>
+                        <button className="actionButton" onClick={() => { if (selectedSupervisorEvidence.visita_id) void openVisitExpedient(selectedSupervisorEvidence.visita_id); }}><Eye size={16} /><span>Expediente</span></button>
+                      </div>
+                      <div className="e012ManualReview">
+                        <select className="inputLike" value={reviewDecision} onChange={(e) => setReviewDecision(e.target.value as SupervisorDecision)}>
+                          <option value="APROBADA">APROBADA</option>
+                          <option value="OBSERVADA">COMENTADA</option>
+                          <option value="RECHAZADA">RECHAZADA</option>
+                        </select>
+                        <input className="inputLike" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional o motivo" />
+                        <button className="actionButton" onClick={() => void reviewSelectedEvidence()}><Check size={16} /><span>Guardar decisión</span></button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="emptyBox">Selecciona un grupo para revisar sus fotos.</div>
+                  )}
+                </section>
               </div>
-            ) : null}
+            )}
           </div>
         ) : null}
 
@@ -4469,6 +4426,72 @@ body {
   .e011MiniCollage { height: 46px; }
   .e011MiniCollage img, .e011EmptyThumb { height: 46px; border-radius: 10px; }
   .e011ThumbStrip, .clientWorkspace .e011ThumbStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+
+/* E012_SUPERVISOR_REVIEW_WORKSPACE -----------------------------------------
+   Supervisor deja de tener tres secciones verticales. La bandeja funciona como
+   mesa de revisión: grupos compactos a la izquierda, evidencia activa y acciones
+   a la derecha, con zoom fullscreen para detalle.
+*/
+.e012SupervisorWorkspace { overflow: visible; }
+.e012HeaderRow { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.e012KpiStrip { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.e012KpiStrip span { min-width: 92px; border-radius: 18px; padding: 10px 12px; background: rgba(15,23,42,.05); border: 1px solid rgba(15,23,42,.07); display: grid; gap: 2px; }
+.e012KpiStrip strong { font-size: 20px; line-height: 1; color: #0f172a; }
+.e012KpiStrip small { color: #64748b; font-size: 11px; font-weight: 800; }
+.e012FiltersCard { margin-top: 14px; }
+.e012FiltersBottom { margin-top: 8px; }
+.e012ModeRow { margin-bottom: 12px; }
+.e012ReviewGrid { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 12px; }
+.e012GroupColumn { border: 1px solid rgba(15,23,42,.08); border-radius: 26px; padding: 12px; background: rgba(248,250,252,.78); box-shadow: inset 0 1px 0 rgba(255,255,255,.72); }
+.e012ColumnHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.e012GroupList { display: grid; gap: 9px; max-height: 62vh; overflow: auto; padding-right: 3px; }
+.e012GroupTile { border-radius: 20px; padding: 10px; box-shadow: 0 10px 22px rgba(15,23,42,.05); }
+.e012MiniCollage { height: 44px; margin-top: 8px; }
+.e012MiniCollage img, .e012MiniCollage .e011EmptyThumb { height: 44px; border-radius: 10px; }
+.e012GroupStats { margin-top: 8px; }
+.e012GroupStats .riskBadge { font-size: 9.5px; padding: 3px 6px; }
+.e012ReviewPanel { border: 1px solid rgba(109,40,217,.14); border-radius: 30px; padding: 14px; background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(245,243,255,.82)); box-shadow: 0 18px 40px rgba(15,23,42,.08); position: sticky; top: 96px; }
+.e012ReviewTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.e012ReviewPills { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.e012ActiveReviewCard { display: grid; grid-template-columns: minmax(220px, 44%) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+.e012ImageStage { min-height: 288px; max-height: 46vh; border-radius: 24px; overflow: hidden; position: relative; background: #0f172a; cursor: zoom-in; display: grid; place-items: center; }
+.e012ImageStage img { width: 100%; height: 100%; min-height: 288px; object-fit: contain; display: block; }
+.e012ZoomButton { position: absolute; right: 10px; bottom: 10px; border: 1px solid rgba(255,255,255,.22); background: rgba(15,23,42,.72); color: #fff; border-radius: 999px; padding: 9px 12px; display: inline-flex; gap: 6px; align-items: center; font-weight: 850; cursor: pointer; backdrop-filter: blur(8px); }
+.e012EvidenceInfo { border: 1px solid rgba(15,23,42,.06); border-radius: 22px; background: rgba(255,255,255,.78); padding: 12px; display: grid; gap: 7px; align-content: start; }
+.e012EvidenceTitle { font-size: 18px; font-weight: 950; color: #0f172a; line-height: 1.15; }
+.e012ThumbRail { margin-top: 12px; display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 9px; scroll-snap-type: x proximity; }
+.e012Thumb { flex: 0 0 86px; height: 100px; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; background: white; padding: 5px; position: relative; cursor: pointer; scroll-snap-align: start; box-shadow: 0 8px 18px rgba(15,23,42,.05); }
+.e012ThumbActive { outline: 3px solid rgba(34,197,94,.20); border-color: rgba(34,197,94,.48); }
+.e012Thumb img { width: 100%; height: 64px; object-fit: cover; border-radius: 12px; display: block; background: #0f172a; }
+.e012Thumb small { display: block; margin-top: 4px; font-size: 9px; color: #64748b; font-weight: 850; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e012Thumb .selectionPill { right: 6px; top: 6px; width: 24px; height: 24px; font-size: 12px; }
+.e012ActionDock { margin-top: 10px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; border-top: 1px solid rgba(15,23,42,.07); padding-top: 10px; }
+.e012ActionDock .actionButton { justify-content: center; }
+@media (max-width: 980px) {
+  .e012ReviewGrid { grid-template-columns: 1fr; }
+  .e012GroupList { max-height: none; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; padding-right: 0; }
+  .e012ReviewPanel { position: static; }
+}
+@media (max-width: 640px) {
+  .e012KpiStrip { width: 100%; justify-content: stretch; }
+  .e012KpiStrip span { flex: 1; min-width: 0; }
+  .e012GroupList { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .e012ActiveReviewCard { grid-template-columns: 1fr; }
+  .e012ImageStage, .e012ImageStage img { min-height: 230px; }
+  .e012ActionDock { grid-template-columns: 1fr 1fr; }
+}
+
+.e012BulkBar { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid rgba(15,23,42,.06); padding-top: 9px; }
+.e012BulkBar span { color: #64748b; font-size: 12px; font-weight: 850; margin-right: auto; }
+.e012BulkBar .actionButton:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.e012GroupQuickActions { width: 100%; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.e012ManualReview { margin-top: 10px; display: grid; grid-template-columns: minmax(140px, 180px) 1fr minmax(150px, 190px); gap: 8px; align-items: center; border-top: 1px solid rgba(15,23,42,.07); padding-top: 10px; }
+.e012ManualReview .inputLike { margin: 0; }
+@media (max-width: 640px) {
+  .e012GroupQuickActions { justify-content: flex-start; }
+  .e012ManualReview { grid-template-columns: 1fr; }
 }
 
 `;
