@@ -1,3 +1,4 @@
+// E014_REZGO_RULES_IMAGE_VIEWER_EXIT: reglas REZGO + visor con salida clara.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 // E010_UX_ACTION_FIRST_SUPERVISOR: rediseño UX visual action-first conservando E009B inline demo.
 import { motion } from "framer-motion";
@@ -38,7 +39,7 @@ type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen"
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
 type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "entregables";
 type EvidenceGroupMode = "marca" | "tienda" | "promotor" | "estatus";
-type EvidencePhase = "NA" | "ANTES" | "DESPUES";
+type EvidencePhase = "ESTADO_ACTUAL" | "ANTES" | "DESPUES";
 type CaptureKind = "entrada" | "salida";
 type CameraTarget = "entrada" | "salida" | "evidencia" | "reemplazo";
 type SupervisorDecision = "APROBADA" | "OBSERVADA" | "RECHAZADA";
@@ -635,7 +636,7 @@ function formatPhaseLabel(value?: string) {
   const phase = String(value || "").trim().toUpperCase();
   if (phase === "ANTES") return "Antes";
   if (phase === "DESPUES") return "Después";
-  if (phase === "NA") return "Foto estado actual";
+  if (phase === "ESTADO_ACTUAL" || phase === "ESTADO ACTUAL" || phase === "NA") return "Estado actual";
   return value || "";
 }
 
@@ -968,7 +969,7 @@ export default function App() {
   const [evidenceBrandId, setEvidenceBrandId] = useState("");
   const [evidenceBrandLabel, setEvidenceBrandLabel] = useState("");
   const [evidenceType, setEvidenceType] = useState("");
-  const [evidencePhase, setEvidencePhase] = useState<EvidencePhase>("NA");
+  const [evidencePhase, setEvidencePhase] = useState<EvidencePhase>("ESTADO_ACTUAL");
   const [evidenceQty, setEvidenceQty] = useState(1);
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
@@ -1166,12 +1167,14 @@ export default function App() {
   const openVisits = useMemo(() => pendingVisits.filter((v) => !v.hora_fin), [pendingVisits]);
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
+  const selectedVisitHasNoBrands = Boolean(selectedVisitId && selectedVisitStoreName && availableBrands.length === 0);
+
   const evidenceTypeOptions = useMemo(() => {
     return brandRules
       .filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index)
       .sort((a, b) => Number(a.orden || 999) - Number(b.orden || 999) || String(a.tipo_evidencia).localeCompare(String(b.tipo_evidencia)));
   }, [brandRules]);
-  const evidencePhaseOptions = useMemo(() => ["NA", "ANTES", "DESPUES"] as EvidencePhase[], []);
+  const evidencePhaseOptions = useMemo(() => ["ESTADO_ACTUAL", "ANTES", "DESPUES"] as EvidencePhase[], []);
 
   const pendingEvidenceRows = useMemo<UiEvidence[]>(() => {
     const rows: UiEvidence[] = [];
@@ -1595,7 +1598,7 @@ export default function App() {
       if (!brandId && !brandLabel) {
         setBrandRules([]);
         setEvidenceType("");
-        setEvidencePhase("NA");
+        setEvidencePhase("ESTADO_ACTUAL");
         setEvidenceQty(1);
         return;
       }
@@ -1608,13 +1611,13 @@ export default function App() {
         setEvidenceQty(selectedRule.fotos_requeridas || 1);
       } else {
         setEvidenceType("");
-        setEvidencePhase("NA");
+        setEvidencePhase("ESTADO_ACTUAL");
         setEvidenceQty(1);
       }
     } catch {
       setBrandRules([]);
       setEvidenceType("");
-      setEvidencePhase("NA");
+      setEvidencePhase("ESTADO_ACTUAL");
       setEvidenceQty(1);
     }
   }
@@ -1825,7 +1828,7 @@ export default function App() {
     }
   }, [role]);
 
-  useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("NA"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
+  useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("ESTADO_ACTUAL"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, role]);
@@ -2066,6 +2069,17 @@ export default function App() {
     setImageViewerDragging(false);
     imageViewerTouchRef.current = { distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 };
   }
+
+  useEffect(() => {
+    if (!imageViewerSrc) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeImageViewer();
+      if (event.key === "+" || event.key === "=") zoomImageViewer(imageViewerScale + 0.25);
+      if (event.key === "-" || event.key === "_") zoomImageViewer(imageViewerScale - 0.25);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [imageViewerSrc, imageViewerScale]);
 
   function zoomImageViewer(nextScale: number) {
     const normalized = Math.min(4, Math.max(1, Number(nextScale.toFixed(2))));
@@ -2388,7 +2402,7 @@ export default function App() {
         setPromotorModule("mis_evidencias");
       }
       setEvidenceType("");
-      setEvidencePhase("NA");
+      setEvidencePhase("ESTADO_ACTUAL");
       setEvidenceQty(1);
       setEvidenceDescription("");
       setEvidencePhotos([]);
@@ -2417,7 +2431,7 @@ export default function App() {
           payload: queuedPayload,
         });
         setEvidenceType("");
-        setEvidencePhase("NA");
+        setEvidencePhase("ESTADO_ACTUAL");
         setEvidenceQty(1);
         setEvidenceDescription("");
         setEvidencePhotos([]);
@@ -3059,36 +3073,39 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 {selectedVisitStoreName ? <div className="contextHint">Tienda vinculada: {selectedVisitStoreName}</div> : null}
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
-                <select className="inputLike" value={evidenceBrandId} onChange={(e) => {
+                <select className="inputLike" value={evidenceBrandId} disabled={selectedVisitHasNoBrands} onChange={(e) => {
                   const brand = availableBrands.find((item) => item.marca_id === e.target.value);
                   setEvidenceBrandId(e.target.value);
                   setEvidenceBrandLabel(normalizeBrandLabel(brand?.marca_nombre || "", brand?.marca_id || ""));
                   setEvidenceType("");
-                  setEvidencePhase("NA");
+                  setEvidencePhase("ESTADO_ACTUAL");
                 }}>
-                  <option value="">Selecciona una marca</option>
+                  <option value="">{selectedVisitHasNoBrands ? "Tienda sin marcas activas" : "Selecciona una marca"}</option>
                   {availableBrands.map((brand) => (
                     <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}</option>
                   ))}
                 </select>
+                {selectedVisitHasNoBrands ? (
+                  <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
+                ) : null}
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <select className="inputLike" value={evidenceType} onChange={(e) => {
+                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
                   const nextType = e.target.value;
                   setEvidenceType(nextType);
                   const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
                   if (nextRule) {
                     setEvidenceQty(nextRule.fotos_requeridas || 1);
                   }
-                }} disabled={!evidenceTypeOptions.length}>
-                  <option value="">{evidenceTypeOptions.length ? "Selecciona un tipo" : "Selecciona primero tienda y marca"}</option>
+                }}>
+                  <option value="">{selectedVisitHasNoBrands ? "Sin marcas para capturar" : (evidenceTypeOptions.length ? "Selecciona un tipo" : "Selecciona primero tienda y marca")}</option>
                   {evidenceTypeOptions.map((rule) => (
                     <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>{rule.tipo_evidencia}</option>
                   ))}
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
-                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={!evidenceType}>
+                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !evidenceType}>
                   {evidencePhaseOptions.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
                 </select>
 
@@ -3100,12 +3117,12 @@ ${selectedEvidence.fecha_hora_fmt}`);
                 <label className="fieldLabel">Observación</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
                 <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" onClick={() => void openCamera("evidencia", "environment") }>
+                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
                     <Camera size={16} />
                     Tomar foto
                   </button>
                   {evidenceGalleryAuth.allowed ? (
-                    <button className="secondaryBtn compactBtn" onClick={() => evidenceGalleryInputRef.current?.click()}>
+                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
                       <ImageIcon size={16} />
                       Galería autorizada
                     </button>
@@ -3127,7 +3144,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                     </div>
                   </>
                 ) : null}
-                <button className="primaryBtn mainActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing}>
+                <button className="primaryBtn mainActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !evidenceType}>
                   <Camera size={16} />
                   {syncing ? "Guardando..." : "Registrar evidencia"}
                 </button>
@@ -3723,6 +3740,15 @@ ${selectedEvidence.fecha_hora_fmt}`);
             onTouchMove={handleImageViewerTouchMove as any}
             onTouchEnd={handleImageViewerTouchEnd}
           >
+            <div className="e014ViewerTopbar" onClick={(e) => e.stopPropagation()}>
+              <button type="button" className="e014ViewerClose" onClick={closeImageViewer}>× Cerrar / volver</button>
+              <div className="e014ViewerControls">
+                <button type="button" onClick={() => zoomImageViewer(imageViewerScale - 0.25)}>−</button>
+                <span>{Math.round(imageViewerScale * 100)}%</span>
+                <button type="button" onClick={() => zoomImageViewer(imageViewerScale + 0.25)}>+</button>
+                <button type="button" onClick={() => { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); }}>Ajustar</button>
+              </div>
+            </div>
             {activeViewerSupervisorEvidence ? (
               <>
                 <div
@@ -3742,7 +3768,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
                   onClick={(e) => { e.stopPropagation(); closeImageViewer(); }}
                   style={{ position: "fixed", top: 12, right: 12, zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(15,23,42,0.62)", color: "#fff", padding: "10px 14px", cursor: "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
                 >
-                  Cerrar
+                  Cerrar / volver
                 </button>
                 <button
                   type="button"
@@ -4500,3 +4526,51 @@ body {
 }
 
 `;
+/* E014 - REZGO rules + safe image viewer exit */
+.e014NoBrandBox {
+  margin-top: 10px;
+  border-style: dashed;
+  background: rgba(245, 158, 11, 0.08);
+}
+.e014ViewerTopbar {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  pointer-events: auto;
+}
+.e014ViewerClose, .e014ViewerControls button {
+  border: 1px solid rgba(255,255,255,0.20);
+  background: rgba(15,23,42,0.72);
+  color: #fff;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 900;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.e014ViewerControls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  padding: 6px;
+  background: rgba(15,23,42,0.42);
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  font-weight: 850;
+}
+.e014ViewerControls span { min-width: 48px; text-align: center; }
+@media (max-width: 560px) {
+  .e014ViewerTopbar { align-items: flex-start; }
+  .e014ViewerControls { max-width: 46vw; overflow-x: auto; }
+  .e014ViewerClose { padding: 10px 12px; }
+}
