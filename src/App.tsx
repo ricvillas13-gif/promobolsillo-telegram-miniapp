@@ -1,4 +1,4 @@
-// E014A_IMAGE_VIEWER_PROMOTOR_SAFE_EXIT: corrige visor promotor con controles visibles arriba y abajo.
+// E014B_CANCEL_EVIDENCE_REFRESH: corrige visor promotor con controles visibles arriba y abajo.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 // E010_UX_ACTION_FIRST_SUPERVISOR: rediseño UX visual action-first conservando E009B inline demo.
 import { motion } from "framer-motion";
@@ -2463,24 +2463,29 @@ export default function App() {
   }
 
   async function markEvidenceAsCancelled() {
+    const evidenceToCancel = selectedEvidence;
     try {
-      if (!selectedEvidence) return setStatusMsg("Selecciona una evidencia.");
+      if (!evidenceToCancel) return setStatusMsg("Selecciona una evidencia.");
       const confirmed = typeof window === "undefined" ? true : window.confirm(`¿Realmente deseas anular esta foto?
 
-${getStoreDisplayFromItem(selectedEvidence)}
-${normalizeBrandLabel(selectedEvidence.marca_nombre || "", "Marca")}
-${selectedEvidence.tipo_evidencia}
-${selectedEvidence.fecha_hora_fmt}`);
+${getStoreDisplayFromItem(evidenceToCancel)}
+${normalizeBrandLabel(evidenceToCancel.marca_nombre || "", "Marca")}
+${evidenceToCancel.tipo_evidencia}
+${evidenceToCancel.fecha_hora_fmt}`);
       if (!confirmed) return;
       setStatusMsg("Anulando evidencia...");
       setStatusMsgDuration(7000);
       setSyncing(true);
-      await postJson("/miniapp/promotor/cancel-evidence", { evidencia_id: selectedEvidence.evidencia_id, note: noteDraft || "" });
+      await postJson("/miniapp/promotor/cancel-evidence", { evidencia_id: evidenceToCancel.evidencia_id, note: noteDraft || "" });
       setNoteDraft("");
-      await loadEvidencesToday();
+      // E014B: actualización inmediata para evitar confusión visual.
+      setAllEvidenceRows((prev) => prev.filter((row) => row.evidencia_id !== evidenceToCancel.evidencia_id));
       setSelectedEvidenceId("");
-      setStatusMsg("Evidencia anulada.");
+      closeImageViewer();
+      await loadEvidencesToday();
+      setStatusMsg("Evidencia anulada. La foto se retiró de la vista.");
     } catch (err) {
+      await loadEvidencesToday().catch(() => undefined);
       setStatusMsg(err instanceof Error ? err.message : "No se pudo anular la evidencia.");
     } finally {
       setSyncing(false);
