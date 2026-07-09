@@ -1,4 +1,4 @@
-// E014_REZGO_RULES_IMAGE_VIEWER_EXIT: reglas REZGO + visor con salida clara.
+// E014A_IMAGE_VIEWER_PROMOTOR_SAFE_EXIT: corrige visor promotor con controles visibles arriba y abajo.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 // E010_UX_ACTION_FIRST_SUPERVISOR: rediseño UX visual action-first conservando E009B inline demo.
 import { motion } from "framer-motion";
@@ -3732,6 +3732,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
         {imageViewerSrc ? (
           <div
             className="overlayBackdrop overlayBackdropRich"
+            style={{ paddingTop: 78, paddingBottom: 82, alignItems: "center", justifyItems: "center" }}
             onClick={(e) => { if (e.target === e.currentTarget) closeImageViewer(); }}
             onMouseMove={handleImageViewerMouseMove as any}
             onMouseUp={handleImageViewerMouseUp}
@@ -3740,13 +3741,27 @@ ${selectedEvidence.fecha_hora_fmt}`);
             onTouchMove={handleImageViewerTouchMove as any}
             onTouchEnd={handleImageViewerTouchEnd}
           >
-            <div className="e014ViewerTopbar" onClick={(e) => e.stopPropagation()}>
-              <button type="button" className="e014ViewerClose" onClick={closeImageViewer}>× Cerrar / volver</button>
-              <div className="e014ViewerControls">
-                <button type="button" onClick={() => zoomImageViewer(imageViewerScale - 0.25)}>−</button>
-                <span>{Math.round(imageViewerScale * 100)}%</span>
-                <button type="button" onClick={() => zoomImageViewer(imageViewerScale + 0.25)}>+</button>
-                <button type="button" onClick={() => { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); }}>Ajustar</button>
+            <div
+              className="e014ViewerTopbar"
+              style={{ position: "fixed", top: 10, left: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, pointerEvents: "auto" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="e014ViewerClose"
+                style={{ border: "1px solid rgba(255,255,255,0.24)", background: "rgba(15,23,42,0.88)", color: "#fff", borderRadius: 999, padding: "11px 13px", fontWeight: 900, cursor: "pointer", boxShadow: "0 10px 24px rgba(0,0,0,0.28)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+                onClick={closeImageViewer}
+              >
+                × Cerrar
+              </button>
+              <div
+                className="e014ViewerControls"
+                style={{ display: "flex", alignItems: "center", gap: 6, borderRadius: 999, padding: 5, background: "rgba(15,23,42,0.76)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff", fontWeight: 850, overflowX: "auto", maxWidth: "66vw", boxShadow: "0 10px 24px rgba(0,0,0,0.24)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+              >
+                <button type="button" style={{ minWidth: 38, minHeight: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.20)", background: "rgba(255,255,255,0.10)", color: "#fff", fontWeight: 900 }} onClick={() => zoomImageViewer(imageViewerScale - 0.25)}>−</button>
+                <span style={{ minWidth: 44, textAlign: "center" }}>{Math.round(imageViewerScale * 100)}%</span>
+                <button type="button" style={{ minWidth: 38, minHeight: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.20)", background: "rgba(255,255,255,0.10)", color: "#fff", fontWeight: 900 }} onClick={() => zoomImageViewer(imageViewerScale + 0.25)}>+</button>
+                <button type="button" style={{ minHeight: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.20)", background: "rgba(255,255,255,0.10)", color: "#fff", fontWeight: 900, padding: "0 10px" }} onClick={() => { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); }}>Ajustar</button>
               </div>
             </div>
             {activeViewerSupervisorEvidence ? (
@@ -3794,7 +3809,7 @@ ${selectedEvidence.fecha_hora_fmt}`);
               alt="Vista ampliada"
               className="overlayImage"
               draggable={false}
-              style={{ transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in", transition: imageViewerDragging ? "none" : "transform .12s ease", userSelect: "none" }}
+              style={{ maxWidth: "calc(100vw - 20px)", maxHeight: "calc(100vh - 168px)", objectFit: "contain", transform: `translate(${imageViewerOffset.x}px, ${imageViewerOffset.y}px) scale(${imageViewerScale})`, cursor: imageViewerScale > 1 ? (imageViewerDragging ? "grabbing" : "grab") : "zoom-in", transition: imageViewerDragging ? "none" : "transform .12s ease", userSelect: "none" }}
               onClick={(e) => e.stopPropagation()}
               onWheel={handleImageViewerWheel}
               onMouseDown={handleImageViewerMouseDown}
@@ -3806,6 +3821,19 @@ ${selectedEvidence.fecha_hora_fmt}`);
               onTouchEnd={handleImageViewerTouchEnd}
               onDoubleClick={(e) => { e.stopPropagation(); if (imageViewerScale > 1) { setImageViewerOffset({ x: 0, y: 0 }); zoomImageViewer(1); } else { zoomImageViewer(2); } }}
             />
+
+            <div
+              style={{ position: "fixed", left: 8, right: 8, bottom: 10, zIndex: 200, display: "flex", justifyContent: "center", pointerEvents: "auto" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={closeImageViewer}
+                style={{ width: "min(360px, calc(100vw - 24px))", border: "1px solid rgba(255,255,255,0.22)", background: "rgba(15,23,42,0.90)", color: "#fff", borderRadius: 999, padding: "13px 16px", fontWeight: 900, boxShadow: "0 14px 30px rgba(0,0,0,0.32)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+              >
+                Cerrar imagen y volver
+              </button>
+            </div>
 
             {activeViewerSupervisorEvidence ? (
               <div
@@ -4525,7 +4553,6 @@ body {
   .e013ReviewPosition { order: -1; }
 }
 
-`;
 /* E014 - REZGO rules + safe image viewer exit */
 .e014NoBrandBox {
   margin-top: 10px;
@@ -4574,3 +4601,5 @@ body {
   .e014ViewerControls { max-width: 46vw; overflow-x: auto; }
   .e014ViewerClose { padding: 10px 12px; }
 }
+
+`;
