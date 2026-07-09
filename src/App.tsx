@@ -1,4 +1,5 @@
 // E014E_FIX4_REZGO_LOGO_HEADER_BUILD_OK: corrige export, conserva resumen E014C FIX1 y muestra tagline ASCII marker Pasion por la movilidad.
+// E014F_REGISTRAR_EVIDENCIA_INLINE_LEFT: boton Registrar evidencia con icono y texto en una sola linea, alineado a la izquierda.
 // E014E_FIX2_REZGO_LOGO_HEADER_TAGLINE: logo oficial REZGO con frase visible Pasión por la movilidad. Verifier ASCII marker: Pasion por la movilidad.
 // E014E_FIX1_REZGO_LOGO_HEADER: logo oficial REZGO con frase Pasión por la movilidad.
 // E014_REZGO_RULES_VERIFIER: conserva ESTADO_ACTUAL, tienda en rutero sin marcas activas y tipos de evidencia flexibles.
@@ -3160,18 +3161,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </div>
                   </>
                 ) : null}
-
-<button
-  className="primaryBtn mainActionBtn e014dEvidenceActionBtn"
-  onClick={() => void saveEvidenceFlow()}
-  disabled={syncing || selectedVisitHasNoBrands || !evidenceType}
->
-  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, whiteSpace: "nowrap" }}>
-    <Camera size={16} />
-    <span>{syncing ? "Guardando..." : "Registrar evidencia"}</span>
-  </span>
-</button>
-                
+                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !evidenceType}>
+                  <span className="mainActionTop e014fEvidenceActionTop"><Camera size={16} /><span>{syncing ? "Guardando..." : "Registrar evidencia"}</span></span>
+                </button>
               </div>
             </div>
           </div>
@@ -4178,6 +4170,11 @@ input[type=file] { display: none; }
 .mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 12px 14px; white-space: normal; line-height: 1.15; min-height: 56px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; text-align: left; gap: 4px; overflow: hidden; }
 .mainActionTop { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; min-width: 0; text-align: left; }
 .mainActionTop > span:last-child { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+/* E014F: Registrar evidencia icono + texto en una sola linea y alineado a la izquierda */
+.e014dEvidenceActionBtn { flex-direction: row !important; align-items: center !important; justify-content: flex-start !important; text-align: left !important; gap: 8px !important; }
+.e014dEvidenceActionBtn .e014fEvidenceActionTop { width: 100% !important; justify-content: flex-start !important; flex-wrap: nowrap !important; gap: 8px !important; }
+.e014dEvidenceActionBtn .e014fEvidenceActionTop svg { flex: 0 0 auto !important; }
+.e014dEvidenceActionBtn .e014fEvidenceActionTop > span:last-child { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; word-break: normal !important; overflow-wrap: normal !important; }
 .mainActionSub { display: block; width: 100%; max-width: 100%; font-size: 11px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; padding: 0; text-align: left; }
 .entryActionBtn { background: #4caf50; color: white; }
 .dangerBtn { background: #d32f2f !important; color: white !important; }
