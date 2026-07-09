@@ -3160,10 +3160,18 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </div>
                   </>
                 ) : null}
-                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !evidenceType}>
-                  <Camera size={16} />
-                  {syncing ? "Guardando..." : "Registrar evidencia"}
-                </button>
+
+<button
+  className="primaryBtn mainActionBtn e014dEvidenceActionBtn"
+  onClick={() => void saveEvidenceFlow()}
+  disabled={syncing || selectedVisitHasNoBrands || !evidenceType}
+>
+  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, whiteSpace: "nowrap" }}>
+    <Camera size={16} />
+    <span>{syncing ? "Guardando..." : "Registrar evidencia"}</span>
+  </span>
+</button>
+                
               </div>
             </div>
           </div>
