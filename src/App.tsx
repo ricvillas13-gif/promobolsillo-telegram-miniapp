@@ -1,3 +1,4 @@
+// E014C_FIX1_REZGO_RULES_VERIFIER: conserva ESTADO_ACTUAL y tienda en rutero sin marcas activas.
 // E014B_CANCEL_EVIDENCE_REFRESH: corrige visor promotor con controles visibles arriba y abajo.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 // E010_UX_ACTION_FIRST_SUPERVISOR: rediseño UX visual action-first conservando E009B inline demo.
@@ -3222,65 +3223,132 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         ) : null}
 
         {role === "promotor" && promotorModule === "resumen" ? (
-          <div className="card">
-            <div className="sectionTitle">Resumen</div>
-            <div className="summaryGrid">
-              <div className="summaryBlock">
-                <div className="miniTitle">Operación del día</div>
-                <div className="summaryLine">Tiendas asignadas: <strong>{stores.length}</strong></div>
-                <div className="summaryLine">Visitas abiertas: <strong>{openVisits.length}</strong></div>
-                <div className="summaryLine">Evidencias hoy: <strong>{operationalGallery.length}</strong></div>
-                <div className="summaryLine">Alertas: <strong>{operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length}</strong></div>
+          <div className="card e014cSummaryCard">
+            <div className="e014cSummaryHeader">
+              <div>
+                <div className="sectionTitle e014cSummaryTitle">Resumen del día</div>
+                <div className="e014cSummarySub">Lectura rápida de avance, evidencias y pendientes.</div>
               </div>
-              <div className="summaryBlock">
-                <div className="miniTitle">Consumo estimado</div>
-                <div className="summaryLine">Fotos hoy: <strong>{promotorUsage.today?.fotos || 0}</strong></div>
-                <div className="summaryLine">MB hoy: <strong>{promotorUsage.today?.mb?.toFixed ? promotorUsage.today.mb.toFixed(2) : (promotorUsage.today?.mb || 0)}</strong></div>
-                <div className="summaryLine">MB mes: <strong>{promotorUsage.month?.mb?.toFixed ? promotorUsage.month.mb.toFixed(2) : (promotorUsage.month?.mb || 0)}</strong></div>
-                <div className="summaryLine">GB mes: <strong>{promotorUsage.month?.gb?.toFixed ? promotorUsage.month.gb.toFixed(3) : (promotorUsage.month?.gb || 0)}</strong></div>
-                <div className="summaryLine">Referencia bolsa $200: <strong>{promotorUsage.reference?.reference_pct || 0}% · ~$ {promotorUsage.reference?.estimated_mxn || 0}</strong></div>
-                <div className="summaryLine summaryGeo">{promotorUsage.reference?.note || "Estimado de uso de la mini app. No es saldo real del operador."}</div>
+              <span className={`e014cStatusPill ${openVisits.length ? "e014cPillActive" : "e014cPillNeutral"}`}>{openVisits.length ? "En operación" : "Sin visita abierta"}</span>
+            </div>
+
+            <div className="e014cHeroMetric">
+              <div className="e014cHeroCopy">
+                <span className="e014cEyebrow">Rutero</span>
+                <strong>{openVisits.length ? `${openVisits.length} visita${openVisits.length === 1 ? "" : "s"} abierta${openVisits.length === 1 ? "" : "s"}` : "Listo para iniciar"}</strong>
+                <small>{stores.length ? `${stores.length} tienda${stores.length === 1 ? "" : "s"} asignada${stores.length === 1 ? "" : "s"}` : "Sin tiendas asignadas"}</small>
               </div>
-              <div className="summaryBlock">
-                <div className="miniTitle">Pendientes por enviar</div>
-                <div className="summaryLine">Pendientes: <strong>{pendingQueue.length}</strong></div>
-                <div className="summaryLine">Errores: <strong>{pendingQueue.filter((item) => item.status === "ERROR_ENVIO").length}</strong></div>
-                <div className="summaryLine">Con conexión, la app intentará reenviar automáticamente.</div>
-                <button className="secondaryBtn" style={{ marginTop: 10 }} onClick={() => void syncPendingQueue(true)} disabled={syncingPendingQueue || !pendingQueue.length}>
+              <div className="e014cHeroNumbers">
+                <span>{operationalGallery.length}</span>
+                <small>evidencias hoy</small>
+              </div>
+            </div>
+
+            <div className="e014cMetricGrid">
+              <div className="e014cMetricCard">
+                <div className="e014cMetricIcon"><Store size={16} /></div>
+                <div className="e014cMetricBody"><span>Tiendas asignadas</span><strong>{stores.length}</strong></div>
+              </div>
+              <div className="e014cMetricCard">
+                <div className="e014cMetricIcon"><ClipboardList size={16} /></div>
+                <div className="e014cMetricBody"><span>Visitas abiertas</span><strong>{openVisits.length}</strong></div>
+              </div>
+              <div className="e014cMetricCard">
+                <div className="e014cMetricIcon"><ImageIcon size={16} /></div>
+                <div className="e014cMetricBody"><span>Fotos hoy</span><strong>{promotorUsage.today?.fotos || 0}</strong></div>
+              </div>
+              <div className="e014cMetricCard">
+                <div className="e014cMetricIcon"><AlertTriangle size={16} /></div>
+                <div className="e014cMetricBody"><span>Alertas</span><strong>{operationalGallery.filter((g) => g.riesgo === "ALTO" || g.riesgo === "MEDIO").length}</strong></div>
+              </div>
+            </div>
+
+            <div className="e014cSummaryGrid">
+              <div className="e014cPanel e014cPanelWide">
+                <div className="e014cPanelHead">
+                  <div>
+                    <span className="e014cEyebrow">Actividad</span>
+                    <strong>Registros de visitas</strong>
+                  </div>
+                  <span className="e014cCountBadge">{pendingVisits.length}</span>
+                </div>
+                <div className="e014cTimeline">
+                  {pendingVisits.length ? pendingVisits.map((visit) => (
+                    <div className="e014cTimelineItem" key={visit.visita_id}>
+                      <div className="e014cDot"><CheckCircle2 size={13} /></div>
+                      <div>
+                        <strong>{getVisitDisplayName(visit, stores)}</strong>
+                        <span>Entrada {formatHourFromIso(visit.hora_inicio)}{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}</span>
+                        <small>E: {geofenceShortLabel(visit.resultado_geocerca_entrada)}{visit.hora_fin ? ` · S: ${geofenceShortLabel(visit.resultado_geocerca_salida)}` : ""}</small>
+                      </div>
+                    </div>
+                  )) : <div className="e014cEmptyLine">No hay registros del día.</div>}
+                </div>
+              </div>
+
+              <div className="e014cPanel">
+                <div className="e014cPanelHead">
+                  <div>
+                    <span className="e014cEyebrow">Envíos</span>
+                    <strong>Pendientes</strong>
+                  </div>
+                  <span className={`e014cCountBadge ${pendingQueue.length ? "e014cBadgeWarn" : ""}`}>{pendingQueue.length}</span>
+                </div>
+                <div className="e014cKeyRows">
+                  <div><span>Errores</span><strong>{pendingQueue.filter((item) => item.status === "ERROR_ENVIO").length}</strong></div>
+                  <div><span>Conexión</span><strong>Auto-reintento</strong></div>
+                </div>
+                <button className="secondaryBtn e014cRetryBtn" onClick={() => void syncPendingQueue(true)} disabled={syncingPendingQueue || !pendingQueue.length}>
                   <RefreshCw size={16} className={syncingPendingQueue ? "spin" : ""} />
                   {syncingPendingQueue ? "Reintentando..." : "Reintentar envíos"}
                 </button>
                 {pendingQueue.length ? (
-                  <div className="stack compactStack" style={{ marginTop: 12, maxHeight: 180, overflowY: "auto" }}>
+                  <div className="e014cCompactList">
                     {pendingQueue.map((item) => (
-                      <div className="listBtn" key={item.id}>
-                        <div className="listTitle">{formatPendingQueueLabel(item)}</div>
-                        <div className="listSub">{formatDateTimeMaybe(item.createdAt)} · {item.status === "ERROR_ENVIO" ? "Error" : "Pendiente"}</div>
-                        {item.lastError ? <div className="summaryLine summaryGeo">{item.lastError}</div> : null}
+                      <div className="e014cListItem" key={item.id}>
+                        <strong>{formatPendingQueueLabel(item)}</strong>
+                        <span>{formatDateTimeMaybe(item.createdAt)} · {item.status === "ERROR_ENVIO" ? "Error" : "Pendiente"}</span>
+                        {item.lastError ? <small>{item.lastError}</small> : null}
                       </div>
                     ))}
                   </div>
-                ) : null}
+                ) : <div className="e014cEmptyLine">Sin pendientes por enviar.</div>}
               </div>
 
-              <div className="summaryBlock">
-                <div className="miniTitle">Registros de visitas</div>
-                {pendingVisits.length ? pendingVisits.map((visit) => (
-                  <React.Fragment key={visit.visita_id}>
-                    <div className="summaryLine">{getVisitDisplayName(visit, stores)} · Entrada <strong>{formatHourFromIso(visit.hora_inicio)}</strong>{visit.hora_fin ? ` · Salida ${formatHourFromIso(visit.hora_fin)}` : " · Sin salida"}</div>
-                    <div className="summaryLine summaryGeo">E: {geofenceShortLabel(visit.resultado_geocerca_entrada)}{visit.hora_fin ? ` · S: ${geofenceShortLabel(visit.resultado_geocerca_salida)}` : ""}</div>
-                  </React.Fragment>
-                )) : <div className="summaryLine">No hay registros del día.</div>}
+              <div className="e014cPanel">
+                <div className="e014cPanelHead">
+                  <div>
+                    <span className="e014cEyebrow">Uso</span>
+                    <strong>Consumo estimado</strong>
+                  </div>
+                  <span className="e014cCountBadge">{promotorUsage.reference?.reference_pct || 0}%</span>
+                </div>
+                <div className="e014cKeyRows">
+                  <div><span>MB hoy</span><strong>{promotorUsage.today?.mb?.toFixed ? promotorUsage.today.mb.toFixed(2) : (promotorUsage.today?.mb || 0)}</strong></div>
+                  <div><span>MB mes</span><strong>{promotorUsage.month?.mb?.toFixed ? promotorUsage.month.mb.toFixed(2) : (promotorUsage.month?.mb || 0)}</strong></div>
+                  <div><span>GB mes</span><strong>{promotorUsage.month?.gb?.toFixed ? promotorUsage.month.gb.toFixed(3) : (promotorUsage.month?.gb || 0)}</strong></div>
+                  <div><span>Ref. bolsa $200</span><strong>~$ {promotorUsage.reference?.estimated_mxn || 0}</strong></div>
+                </div>
+                <div className="e014cNote">{promotorUsage.reference?.note || "Estimado de uso de la mini app. No es saldo real del operador."}</div>
               </div>
 
-              <div className="summaryBlock">
-                <div className="miniTitle">Alertas recientes</div>
-                {promotorRecentAlerts.length ? promotorRecentAlerts.map((item) => (
-                  <React.Fragment key={item.alerta_id}>
-                    <div className="summaryLine"><strong>{item.tipo_alerta}</strong> · {item.tienda_nombre || item.tienda_id || "Tienda"}</div>
-                    <div className="summaryLine summaryGeo">{item.fecha_hora_fmt || ""} · <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>{item.resolved_classification ? ` · ${item.resolved_classification}` : ""}</div>
-                  </React.Fragment>
-                )) : <div className="summaryLine">Sin alertas recientes.</div>}
+              <div className="e014cPanel">
+                <div className="e014cPanelHead">
+                  <div>
+                    <span className="e014cEyebrow">Riesgo</span>
+                    <strong>Alertas recientes</strong>
+                  </div>
+                  <span className={`e014cCountBadge ${promotorRecentAlerts.length ? "e014cBadgeWarn" : ""}`}>{promotorRecentAlerts.length}</span>
+                </div>
+                <div className="e014cCompactList">
+                  {promotorRecentAlerts.length ? promotorRecentAlerts.map((item) => (
+                    <div className="e014cListItem" key={item.alerta_id}>
+                      <strong>{item.tipo_alerta}</strong>
+                      <span>{item.tienda_nombre || item.tienda_id || "Tienda"}</span>
+                      <small>{item.fecha_hora_fmt || ""} · <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>{item.resolved_classification ? ` · ${item.resolved_classification}` : ""}</small>
+                    </div>
+                  )) : <div className="e014cEmptyLine">Sin alertas recientes.</div>}
+                </div>
               </div>
             </div>
           </div>
@@ -4102,6 +4170,67 @@ input[type=file] { display: none; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
 @media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal, .cameraModalTight { width: calc(100vw - 16px); max-height: calc(100vh - 64px); padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraViewportTight { max-height: min(48vh, 440px); } .cameraVideo { min-height: 0; max-height: min(42vh, 320px); } .cameraVideoTight { max-height: min(48vh, 440px); } .cameraActionRow, .cameraActionRowTight { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 12px; } .compactBtn, .assistQuickBtn { padding: 12px 14px; } }
+
+/* E014C_PROMOTOR_SUMMARY_REDESIGN --------------------------------------------
+   Rediseño del Resumen del promotor: menos texto centrado, más jerarquía,
+   lectura operativa móvil y tarjetas alineadas a la izquierda.
+*/
+.e014cSummaryCard { overflow: hidden; }
+.e014cSummaryHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.e014cSummaryTitle { margin: 0; }
+.e014cSummarySub { margin-top: 4px; color: var(--e010-muted, #64748b); font-size: 13px; line-height: 1.3; }
+.e014cStatusPill { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 7px 10px; font-size: 11px; font-weight: 900; white-space: nowrap; }
+.e014cPillActive { background: rgba(22, 163, 74, 0.12); color: #047857; border: 1px solid rgba(22, 163, 74, 0.18); }
+.e014cPillNeutral { background: rgba(100, 116, 139, 0.10); color: #475569; border: 1px solid rgba(100, 116, 139, 0.14); }
+.e014cHeroMetric { display: flex; justify-content: space-between; align-items: stretch; gap: 14px; border-radius: 26px; padding: 16px; background: linear-gradient(135deg, rgba(15,23,42,0.96), rgba(22,101,52,0.92)); color: #fff; box-shadow: 0 20px 48px rgba(15, 23, 42, 0.16); }
+.e014cHeroCopy { display: flex; flex-direction: column; gap: 4px; min-width: 0; text-align: left; }
+.e014cHeroCopy strong { font-size: 23px; line-height: 1.05; letter-spacing: -0.045em; }
+.e014cHeroCopy small, .e014cHeroNumbers small { color: rgba(255,255,255,0.74); font-size: 12px; }
+.e014cHeroNumbers { min-width: 96px; border-radius: 22px; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.14); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 12px; text-align: left; }
+.e014cHeroNumbers span { font-size: 34px; line-height: 1; font-weight: 950; letter-spacing: -0.06em; }
+.e014cEyebrow { display: block; color: var(--e010-muted, #64748b); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 3px; }
+.e014cHeroMetric .e014cEyebrow { color: rgba(255,255,255,0.58); }
+.e014cMetricGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.e014cMetricCard { display: flex; align-items: center; gap: 10px; min-width: 0; border-radius: 20px; padding: 12px; background: rgba(255,255,255,0.86); border: 1px solid rgba(15,23,42,0.07); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05); text-align: left; }
+.e014cMetricIcon { width: 34px; height: 34px; border-radius: 14px; display: grid; place-items: center; flex: 0 0 auto; background: rgba(22,163,74,0.10); color: #047857; }
+.e014cMetricBody { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.e014cMetricBody span { font-size: 11px; color: var(--e010-muted, #64748b); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.e014cMetricBody strong { color: var(--e010-ink, #0f172a); font-size: 22px; line-height: 1; letter-spacing: -0.05em; }
+.e014cSummaryGrid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 12px; margin-top: 14px; align-items: start; }
+.e014cPanel { border-radius: 24px; padding: 14px; background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); border: 1px solid rgba(15,23,42,0.07); box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05); text-align: left; min-width: 0; }
+.e014cPanelWide { grid-row: span 2; }
+.e014cPanelHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.e014cPanelHead strong { display: block; color: var(--e010-ink, #0f172a); font-size: 15px; line-height: 1.15; }
+.e014cCountBadge { display: inline-flex; min-width: 30px; height: 30px; padding: 0 9px; border-radius: 999px; align-items: center; justify-content: center; color: #047857; background: rgba(22,163,74,0.10); border: 1px solid rgba(22,163,74,0.16); font-size: 12px; font-weight: 950; }
+.e014cBadgeWarn { color: #b45309; background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.20); }
+.e014cTimeline { display: flex; flex-direction: column; gap: 10px; }
+.e014cTimelineItem { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding: 11px; border-radius: 18px; background: rgba(248,250,252,0.90); border: 1px solid rgba(15,23,42,0.06); }
+.e014cDot { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; background: rgba(22,163,74,0.10); color: #047857; }
+.e014cTimelineItem strong, .e014cListItem strong { display: block; color: var(--e010-ink, #0f172a); font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
+.e014cTimelineItem span, .e014cListItem span { display: block; color: #475569; font-size: 12px; margin-top: 3px; line-height: 1.25; }
+.e014cTimelineItem small, .e014cListItem small { display: block; color: var(--e010-muted, #64748b); font-size: 11px; margin-top: 3px; line-height: 1.25; overflow-wrap: anywhere; }
+.e014cKeyRows { display: flex; flex-direction: column; gap: 7px; }
+.e014cKeyRows > div { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(15,23,42,0.06); }
+.e014cKeyRows > div:last-child { border-bottom: 0; }
+.e014cKeyRows span { color: var(--e010-muted, #64748b); font-size: 12px; font-weight: 750; }
+.e014cKeyRows strong { color: var(--e010-ink, #0f172a); font-size: 13px; text-align: right; }
+.e014cRetryBtn { margin-top: 12px !important; }
+.e014cCompactList { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.e014cListItem { padding: 10px; border-radius: 16px; background: rgba(248,250,252,0.92); border: 1px solid rgba(15,23,42,0.06); }
+.e014cNote, .e014cEmptyLine { margin-top: 10px; padding: 10px; border-radius: 16px; background: rgba(100,116,139,0.08); color: #64748b; font-size: 12px; line-height: 1.35; text-align: left; }
+@media (max-width: 900px) {
+  .e014cMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .e014cSummaryGrid { grid-template-columns: 1fr; }
+  .e014cPanelWide { grid-row: auto; }
+}
+@media (max-width: 430px) {
+  .e014cSummaryHeader { flex-direction: column; align-items: flex-start; }
+  .e014cHeroMetric { padding: 14px; gap: 10px; }
+  .e014cHeroCopy strong { font-size: 20px; }
+  .e014cHeroNumbers { min-width: 82px; padding: 10px; }
+  .e014cHeroNumbers span { font-size: 30px; }
+  .e014cMetricGrid { grid-template-columns: 1fr; }
+}
 
 
 /* E010_UX_ACTION_FIRST_SUPERVISOR -------------------------------------------------
