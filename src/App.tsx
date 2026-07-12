@@ -1,3 +1,4 @@
+// E017_PROMOTOR_OPTIMIZACION_REGISTRO_EVIDENCIA: reduce peso de foto, evita refresco bloqueante despues de registrar evidencia y mejora mensajes de guardado.
 // E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN: filtros Hoy/Semana/Rango, Observar->Comentar, resumen/detalle supervisor visual.
 // E015_PROMOTOR_MARCA_FUERA_SERVICIO: permite justificar marca fuera de servicio por visita en version promotor.
 // E014E_FIX4_REZGO_LOGO_HEADER_BUILD_OK: corrige export, conserva resumen E014C FIX1 y muestra tagline ASCII marker Pasion por la movilidad.
@@ -516,7 +517,7 @@ type GalleryAuthorizationResponse = {
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
-const SHEETS_SAFE_PHOTO_CHARS = 42000;
+const SHEETS_SAFE_PHOTO_CHARS = 32000;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
 
@@ -924,18 +925,16 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
 }
 
 async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+  // E017: para piloto, priorizamos velocidad de envío y carga estable en Sheets.
+  // Se arranca desde tamaños más ligeros para evitar payloads grandes en cada registro.
   const attempts = [
-    { side: 1440, quality: 0.92 },
-    { side: 1280, quality: 0.9 },
-    { side: 1180, quality: 0.88 },
-    { side: 1080, quality: 0.86 },
-    { side: 960, quality: 0.84 },
-    { side: 840, quality: 0.8 },
-    { side: 720, quality: 0.76 },
-    { side: 640, quality: 0.72 },
-    { side: 560, quality: 0.68 },
+    { side: 840, quality: 0.78 },
+    { side: 720, quality: 0.74 },
+    { side: 640, quality: 0.70 },
+    { side: 560, quality: 0.66 },
     { side: 480, quality: 0.62 },
     { side: 420, quality: 0.58 },
+    { side: 360, quality: 0.54 },
   ];
   let last = dataUrl;
   for (const attempt of attempts) {
@@ -2495,6 +2494,8 @@ export default function App() {
       if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
       setSyncing(true);
+      setStatusMsgDuration(7000);
+      setStatusMsg("Guardando evidencia... puedes continuar cuando veas la confirmación.");
       const evidenceSource = evidencePhotos.some((photo) => !String(photo.name || "").startsWith("captura-")) ? "GALERIA_AUTORIZADA" : "CAMARA";
       const localPhotosForPreview = evidencePhotos.map((photo) => ({ ...photo }));
       const savedVisitId = selectedVisitId;
@@ -2553,15 +2554,17 @@ export default function App() {
       setEvidenceQty(1);
       setEvidenceDescription("");
       setEvidencePhotos([]);
-      await loadEvidencesToday();
+      // E017: ya mostramos las nuevas evidencias con vista previa local.
+      // Evitamos bloquear al promotor esperando un refresco completo de Sheets.
+      window.setTimeout(() => { void loadEvidencesToday().catch(() => undefined); }, 1200);
       if (createdIds[0]) {
         setSelectedEvidenceId(createdIds[0]);
         setPromotorModule("mis_evidencias");
       }
       if ((result as any).postprocess_warning) {
-        setStatusMsg("Evidencia registrada. El análisis quedó programado y puede tardar unos segundos.");
+        setStatusMsg("Evidencia registrada. Puedes continuar capturando; el análisis seguirá en segundo plano.");
       } else {
-        setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
+        setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada; una foto quedó optimizada para Sheets." : "Evidencia registrada. Puedes continuar con la siguiente captura.");
       }
     } catch (err) {
       if (shouldQueueSubmission(err) && queuedPayload) {
