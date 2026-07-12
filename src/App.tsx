@@ -419,6 +419,32 @@ type SupervisorEvidencesResponse = {
   evidences?: EvidenceItem[];
 };
 
+type SupervisorOutOfServiceItem = {
+  registro_id: string;
+  fecha_hora?: string;
+  fecha_hora_fmt?: string;
+  visita_id?: string;
+  promotor_id?: string;
+  promotor_nombre?: string;
+  external_id?: string;
+  tienda_id?: string;
+  tienda_nombre?: string;
+  tienda_display?: string;
+  marca_id?: string;
+  marca_nombre?: string;
+  motivo?: string;
+  comentario?: string;
+  lat?: string;
+  lon?: string;
+  accuracy?: string;
+  estatus?: string;
+};
+
+type SupervisorOutOfServiceResponse = {
+  ok: boolean;
+  rows?: SupervisorOutOfServiceItem[];
+};
+
 type EvidenceAuditRow = {
   audit_id?: string;
   fecha_hora?: string;
@@ -678,6 +704,10 @@ function ymdFromAnyDateValue(value?: string) {
 }
 
 function getEvidenceYmd(item?: EvidenceItem | null) {
+  return ymdFromAnyDateValue(item?.fecha_hora || item?.fecha_hora_fmt || "");
+}
+
+function getOutOfServiceYmd(item?: SupervisorOutOfServiceItem | null) {
   return ymdFromAnyDateValue(item?.fecha_hora || item?.fecha_hora_fmt || "");
 }
 
@@ -1097,6 +1127,8 @@ export default function App() {
   const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
   const [selectedSupEvidenceIds, setSelectedSupEvidenceIds] = useState<string[]>([]);
   const [supervisorEvidenceAudit, setSupervisorEvidenceAudit] = useState<EvidenceAuditRow[]>([]);
+  const [supervisorOutOfServiceRows, setSupervisorOutOfServiceRows] = useState<SupervisorOutOfServiceItem[]>([]);
+  const [supReviewContentFilter, setSupReviewContentFilter] = useState<"evidencias" | "fuera" | "todo">("evidencias");
   const [supEvidencePromotorFilter, setSupEvidencePromotorFilter] = useState("");
   const [supEvidenceStoreFilter, setSupEvidenceStoreFilter] = useState("");
   const [supEvidenceBrandFilter, setSupEvidenceBrandFilter] = useState("");
@@ -1163,6 +1195,13 @@ export default function App() {
   const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const supervisorQueueTopRef = useRef<HTMLDivElement | null>(null);
+  const supervisorQueueBottomRef = useRef<HTMLDivElement | null>(null);
+  const supervisorReviewDetailRef = useRef<HTMLElement | null>(null);
+  const promotorListTopRef = useRef<HTMLDivElement | null>(null);
+  const promotorListBottomRef = useRef<HTMLDivElement | null>(null);
+  const promotorDetailRef = useRef<HTMLDivElement | null>(null);
+  const promotorGalleryScrollRef = useRef<HTMLDivElement | null>(null);
   const lastImageTapRef = useRef<{ src: string; at: number }>({ src: "", at: 0 });
   const imageViewerTouchRef = useRef<{ distance: number; startScale: number; dragging: boolean; dragStartX: number; dragStartY: number; originX: number; originY: number }>({ distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 });
   const attendancePhotoRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1212,6 +1251,7 @@ export default function App() {
         void loadSupervisorTeam();
         void loadSupervisorAlerts();
         void loadSupervisorEvidences();
+        void loadSupervisorOutOfService();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -1443,6 +1483,17 @@ export default function App() {
     supEvidenceStatusFilter,
     supEvidenceOnlyPending,
   ]);
+
+  const filteredSupervisorOutOfServiceRows = useMemo(() => supervisorOutOfServiceRows.filter((item) => {
+    const itemYmd = getOutOfServiceYmd(item);
+    const byDate = !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
+    const byPromotor = !supEvidencePromotorFilter || item.promotor_id === supEvidencePromotorFilter;
+    const byStore = !supEvidenceStoreFilter || (item.tienda_display || item.tienda_nombre || item.tienda_id || "") === supEvidenceStoreFilter;
+    const byBrand = !supEvidenceBrandFilter || (item.marca_nombre || item.marca_id || "") === supEvidenceBrandFilter;
+    return byDate && byPromotor && byStore && byBrand;
+  }), [supervisorOutOfServiceRows, supervisorDateBounds, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter]);
+
+  const supervisorReviewVisibleCount = filteredSupervisorEvidences.length + (supReviewContentFilter !== "evidencias" ? filteredSupervisorOutOfServiceRows.length : 0);
 
   const supervisorEvidenceFilterOptions = useMemo(() => {
     const dateRows = visibleSupervisorEvidencesBase.filter((item) => {
@@ -1791,6 +1842,13 @@ export default function App() {
     if (!rows.length) setSelectedSupEvidenceId("");
   }
 
+  async function loadSupervisorOutOfService() {
+    const data = await postJson<SupervisorOutOfServiceResponse>("/miniapp/supervisor/out-of-service", {
+      promotor_id: supEvidencePromotorFilter,
+    });
+    setSupervisorOutOfServiceRows(data.rows || []);
+  }
+
   async function openVisitExpedient(visitaId: string) {
     if (!visitaId) return;
     try {
@@ -1922,6 +1980,7 @@ export default function App() {
       void loadSupervisorTeam();
       void loadSupervisorAlerts();
       void loadSupervisorEvidences();
+      void loadSupervisorOutOfService();
     }
     if (role === "cliente") {
       void loadClientBootstrap();
@@ -1937,7 +1996,7 @@ export default function App() {
   useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("ESTADO_ACTUAL"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
-  useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, role]);
+  useEffect(() => { if (role === "supervisor") { void loadSupervisorEvidences(); void loadSupervisorOutOfService(); } }, [supEvidencePromotorFilter, role]);
   useEffect(() => {
     if (role !== "supervisor") return;
     void loadSupervisorDayRoute(selectedTeamPromotorId);
@@ -2789,6 +2848,65 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     setSupEvidenceDateEnd(localYmd());
   }
 
+  function scrollElementIntoView(ref: { current: HTMLElement | HTMLDivElement | null }, block: ScrollLogicalPosition = "start") {
+    ref.current?.scrollIntoView({ behavior: "smooth", block });
+  }
+
+  function scrollHorizontalRefToEnd(ref: { current: HTMLDivElement | null }) {
+    const node = ref.current;
+    if (!node) return;
+    node.scrollTo({ left: node.scrollWidth, behavior: "smooth" });
+  }
+
+  function scrollHorizontalRefToStart(ref: { current: HTMLDivElement | null }) {
+    const node = ref.current;
+    if (!node) return;
+    node.scrollTo({ left: 0, behavior: "smooth" });
+  }
+
+  function focusSupervisorEvidence(item: EvidenceItem) {
+    setSelectedSupEvidenceId(item.evidencia_id);
+    window.setTimeout(() => scrollElementIntoView(supervisorReviewDetailRef, "start"), 40);
+  }
+
+  function focusPromotorEvidence(item: EvidenceItem) {
+    setSelectedEvidenceId(item.evidencia_id);
+    if (promotorModule !== "mis_evidencias") setPromotorModule("mis_evidencias");
+    window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
+  }
+
+  async function refreshCurrentRoleData() {
+    try {
+      setSyncing(true);
+      if (role === "promotor") {
+        await loadPromotorDashboard();
+        await loadEvidencesToday();
+      }
+      if (role === "supervisor") {
+        await loadSupervisorDashboard();
+        await loadSupervisorTeam();
+        await loadSupervisorAlerts();
+        await loadSupervisorEvidences();
+        await loadSupervisorOutOfService();
+      }
+      if (role === "cliente") {
+        await loadClientBootstrap();
+        await loadClientFilterOptions();
+        await loadClientDashboard();
+        await loadClientStores();
+        await loadClientEvidences();
+        await loadClientIncidents();
+        await loadClientDeliverables();
+        if (selectedClientStoreId) await loadClientStoreDetail(selectedClientStoreId);
+      }
+      setStatusMsg("Información actualizada.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   function moveSupervisorEvidenceViewer(step: number) {
     if (activeViewerSupervisorEvidenceIndex < 0) return;
     const next = activeViewerSupervisorEvidenceSequence[activeViewerSupervisorEvidenceIndex + step];
@@ -2961,6 +3079,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="panel">
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
+                  <div ref={promotorListTopRef} className="e018ScrollAnchor" />
                   {clientStores.map((item) => (
                     <button key={item.tienda_id} className={`listBtn ${selectedClientStoreId === item.tienda_id ? "listBtnGreen" : ""}`} onClick={() => setSelectedClientStoreId(item.tienda_id)}>
                       <div className="listTitle">{item.tienda_nombre}</div>
@@ -3337,7 +3456,10 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
         {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card">
-            <div className="sectionTitle">Mis evidencias</div>
+            <div className="e018SectionHeader">
+              <div className="sectionTitle">Mis evidencias</div>
+              <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Actualizando..." : "Recargar"}</span></button>
+            </div>
             <div className="filtersRow">
               <select className="inputLike" value={evidenceFilterStore} onChange={(e) => { setEvidenceFilterStore(e.target.value); setEvidenceFilterBrand(""); setEvidenceFilterType(""); setEvidenceFilterPhase(""); }}>
                 <option value="">Todas las tiendas</option>
@@ -3361,16 +3483,23 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
                   {filteredOperationalGallery.map((item) => (
-                    <button key={item.evidencia_id} onClick={() => setSelectedEvidenceId(item.evidencia_id)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
+                    <button key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
                       <div className="listTitle">{getStoreDisplayFromItem(item) || "Visita activa"}</div>
                       <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
                     </button>
                   ))}
                   {!filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
+                  <div ref={promotorListBottomRef} className="e018ScrollAnchor" />
                 </div>
+                {filteredOperationalGallery.length > 12 ? (
+                  <div className="e018MiniNavRow">
+                    <button type="button" onClick={() => scrollElementIntoView(promotorListTopRef, "start")}>↑ Inicio</button>
+                    <button type="button" onClick={() => scrollElementIntoView(promotorListBottomRef, "end")}>↓ Final</button>
+                  </div>
+                ) : null}
               </div>
-              <div className="panel">
-                <div className="miniTitle">Acciones</div>
+              <div className="panel" ref={promotorDetailRef}>
+                <div className="miniTitle">Detalle útil</div>
                 {selectedEvidence ? (
                   <>
                     <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
@@ -3760,13 +3889,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="e013TopBar">
               <div>
                 <div className="sectionTitle e010PageTitle">Revisar evidencias</div>
-                <div className="contextHint e013Sub">Cola simple: abre una foto, revisa con zoom y decide. Sin galería larga, sin grupos visibles y sin paneles extra.</div>
+                <div className="contextHint e013Sub">Cola rápida: toca una tarjeta para ir directo al detalle útil, revisar la foto y aplicar acción.</div>
               </div>
               <div className="e013CounterStrip">
-                <span><strong>{filteredSupervisorEvidences.length}</strong><small>En cola</small></span>
+                <span><strong>{filteredSupervisorEvidences.length}</strong><small>Evidencias</small></span>
+                <span><strong>{filteredSupervisorOutOfServiceRows.length}</strong><small>Sin servicio</small></span>
                 <span><strong>{supervisorEvidenceSummary.pendientes}</strong><small>Pendientes</small></span>
                 <span><strong>{supervisorEvidenceSummary.observadas + supervisorEvidenceSummary.rechazadas}</strong><small>Con acción</small></span>
               </div>
+              <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Actualizando..." : "Recargar"}</span></button>
             </div>
 
             <div className="e016DateFilterBar">
@@ -3774,6 +3905,11 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "semana" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("semana")}>Semana</button>
               <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "rango" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("rango")}>Rango</button>
               <span className="e016DateLabel">Mostrando: {supervisorDateBounds.label}</span>
+            </div>
+            <div className="e018ReviewModeBar">
+              <button type="button" className={`e016DateChip ${supReviewContentFilter === "evidencias" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("evidencias")}>Evidencias</button>
+              <button type="button" className={`e016DateChip ${supReviewContentFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("fuera")}>Sin servicio</button>
+              <button type="button" className={`e016DateChip ${supReviewContentFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("todo")}>Todo</button>
             </div>
             {supEvidenceDatePreset === "rango" ? (
               <div className="e016RangeRow">
@@ -3809,17 +3945,19 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               </div>
             </details>
 
-            {!filteredSupervisorEvidences.length ? (
-              <div className="emptyBox">No hay evidencias pendientes con los filtros actuales.</div>
+            {!supervisorReviewVisibleCount ? (
+              <div className="emptyBox">No hay registros pendientes con los filtros actuales.</div>
             ) : (
               <div className="e013QueueLayout">
                 <aside className="e013QueueList" aria-label="Cola de evidencias por revisar">
-                  {filteredSupervisorEvidences.map((item) => (
-                    <button key={item.evidencia_id} type="button" className={`e013QueueItem ${selectedSupEvidenceId === item.evidencia_id ? "e013QueueItemActive" : ""}`} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)}>
+                  <div ref={supervisorQueueTopRef} className="e018ScrollAnchor" />
+                  {supReviewContentFilter !== "fuera" ? filteredSupervisorEvidences.map((item) => (
+                    <button key={item.evidencia_id} type="button" className={`e013QueueItem ${selectedSupEvidenceId === item.evidencia_id ? "e013QueueItemActive" : ""}`} onClick={() => focusSupervisorEvidence(item)}>
                       <div className="e013MiniPhoto"><img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"} /></div>
                       <div className="e013QueueText">
                         <div className="e013QueueTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {normalizeBrandLabel(String(item.marca_nombre || item.marca_id || ""), "Marca")}</div>
-                        <div className="e013QueueMeta">{item.promotor_nombre || item.promotor_id || "Promotor"} · {item.fecha_hora_fmt || "Sin hora"}</div>
+                        <div className="e013QueueMeta e018QueueMetaName">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                        <div className="e013QueueMeta e018QueueMetaDate">{item.fecha_hora_fmt || "Sin hora"}</div>
                         <div className="e013QueueMeta">{item.tipo_evidencia || item.tipo_evento || "Evidencia"}{item.fase ? ` · ${item.fase}` : ""}</div>
                         <div className="e013QueueBadges">
                           <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(item)}</span>
@@ -3828,10 +3966,21 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       </div>
                       <span className="e013ReviewCta">Revisar</span>
                     </button>
-                  ))}
+                  )) : null}
+                  {supReviewContentFilter !== "evidencias" ? filteredSupervisorOutOfServiceRows.map((item) => (
+                    <div key={item.registro_id} className="e018OutServiceCard">
+                      <div className="e018OutServiceTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {item.marca_nombre || item.marca_id || "Marca"}</div>
+                      <div className="e018OutServiceMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                      <div className="e018OutServiceMeta">{item.fecha_hora_fmt || item.fecha_hora || "Sin fecha"}</div>
+                      <div className="e018OutServiceReason">Fuera de servicio · {item.motivo || "Sin motivo"}</div>
+                      {item.comentario ? <div className="e018OutServiceComment">Comentario: {item.comentario}</div> : null}
+                      {item.visita_id ? <button type="button" className="actionButton compactBtn" onClick={() => void openVisitExpedient(item.visita_id || "")}><Eye size={14} /><span>Ver visita</span></button> : null}
+                    </div>
+                  )) : null}
+                  <div ref={supervisorQueueBottomRef} className="e018ScrollAnchor" />
                 </aside>
 
-                <section className="e013ReviewFocus" aria-label="Revisión de evidencia seleccionada">
+                <section ref={supervisorReviewDetailRef} className="e013ReviewFocus" aria-label="Revisión de evidencia seleccionada">
                   {selectedSupervisorEvidence ? (
                     <>
                       <div className="e013ReviewHeader">
@@ -3884,16 +4033,28 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </section>
               </div>
             )}
+            {supervisorReviewVisibleCount > 12 ? (
+              <div className="e018FloatingNav" aria-label="Navegación rápida de revisión">
+                <button type="button" onClick={() => scrollElementIntoView(supervisorQueueTopRef, "start")}>↑ Inicio</button>
+                <button type="button" onClick={() => scrollElementIntoView(supervisorQueueBottomRef, "end")}>↓ Final</button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {role === "promotor" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
           <div className="card">
-            <div className="sectionTitle">Galería de evidencias</div>
-            <div className="galleryScroll">
+            <div className="e018SectionHeader">
+              <div className="sectionTitle">Galería de evidencias</div>
+              <div className="e018MiniNavRow e018MiniNavRowInline">
+                <button type="button" onClick={() => scrollHorizontalRefToStart(promotorGalleryScrollRef)}>← Inicio</button>
+                <button type="button" onClick={() => scrollHorizontalRefToEnd(promotorGalleryScrollRef)}>Final →</button>
+              </div>
+            </div>
+            <div className="galleryScroll" ref={promotorGalleryScrollRef}>
               <div className="galleryGrid">
                 {filteredOperationalGallery.slice(0, 30).map((item) => (
-                  <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
+                  <button type="button" className="galleryCard galleryCardCompact e018GalleryCardBtn" key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)}>
+                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto); }} /></div>
                     <div className="galleryBodyCompact">
                       <div className="galleryTop compactTop">
                         <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
@@ -3903,7 +4064,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       <div className="galleryDate">{item.fecha_hora_fmt}</div>
                       <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -4151,38 +4312,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
-          <button className="secondaryBtn footerBtn" onClick={() => {
-            void (async () => {
-              try {
-                setSyncing(true);
-                if (role === "promotor") {
-                  await loadPromotorDashboard();
-                  await loadEvidencesToday();
-                }
-                if (role === "supervisor") {
-                  await loadSupervisorDashboard();
-                  await loadSupervisorTeam();
-                  await loadSupervisorAlerts();
-                  await loadSupervisorEvidences();
-                }
-                if (role === "cliente") {
-                  await loadClientBootstrap();
-                  await loadClientFilterOptions();
-                  await loadClientDashboard();
-                  await loadClientStores();
-                  await loadClientEvidences();
-                  await loadClientIncidents();
-                  await loadClientDeliverables();
-                  if (selectedClientStoreId) await loadClientStoreDetail(selectedClientStoreId);
-                }
-                setStatusMsg("Información actualizada.");
-              } catch (err) {
-                setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
-              } finally {
-                setSyncing(false);
-              }
-            })();
-          }} disabled={syncing || !!error}>
+          <button className="secondaryBtn footerBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}>
             <RefreshCw size={16} />
             {syncing ? "Sincronizando..." : "Recargar"}
           </button>
@@ -4957,6 +5087,31 @@ body {
   .e013DecisionDock { grid-template-columns: 1fr; }
   .e013ReviewHeader { grid-template-columns: 1fr; }
   .e013ReviewPosition { order: -1; }
+}
+
+
+/* E018 - navegación rápida y detalle útil común promotor/supervisor */
+.e018SectionHeader { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.e018TopRefreshBtn { width: auto; min-width: 132px; margin-top: 0; justify-content: center; }
+.e018ReviewModeBar { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.e018ScrollAnchor { width: 1px; height: 1px; pointer-events: none; }
+.e018QueueMetaName, .e018QueueMetaDate { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+.e018FloatingNav { position: fixed; right: 14px; bottom: 86px; z-index: 58; display: grid; gap: 8px; }
+.e018FloatingNav button, .e018MiniNavRow button { border: 1px solid rgba(15,23,42,.10); background: rgba(255,255,255,.94); color: #0f172a; border-radius: 999px; padding: 9px 12px; font-weight: 950; box-shadow: 0 10px 22px rgba(15,23,42,.12); cursor: pointer; }
+.e018MiniNavRow { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.e018MiniNavRowInline { margin-top: 0; }
+.e018GalleryCardBtn { text-align: left; cursor: pointer; }
+.e018OutServiceCard { border: 1px solid rgba(245,158,11,.24); background: rgba(255,251,235,.86); border-radius: 20px; padding: 12px; display: grid; gap: 6px; box-shadow: 0 8px 20px rgba(15,23,42,.045); }
+.e018OutServiceTitle { color: #0f172a; font-weight: 950; font-size: 13px; line-height: 1.25; }
+.e018OutServiceMeta { color: #64748b; font-size: 12px; font-weight: 800; line-height: 1.25; }
+.e018OutServiceReason { color: #92400e; background: rgba(245,158,11,.12); border-radius: 12px; padding: 7px 9px; font-size: 12px; font-weight: 900; }
+.e018OutServiceComment { color: #7c2d12; font-size: 12px; line-height: 1.35; }
+@media (max-width: 640px) {
+  .e018TopRefreshBtn { width: 100%; }
+  .e018FloatingNav { right: 10px; bottom: 78px; }
+  .e018FloatingNav button { padding: 8px 10px; font-size: 12px; }
+  .e018SectionHeader { align-items: stretch; }
+  .e018MiniNavRowInline { width: 100%; justify-content: space-between; }
 }
 
 /* E014 - REZGO rules + safe image viewer exit */
