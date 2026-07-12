@@ -1,3 +1,15 @@
+// E019_PROMOTOR_SUPERVISOR_FLUIDEZ_REVISION_Y_SIN_SERVICIO: entrada mas fluida, fuera de servicio bajo solicitud, mis evidencias con Sin servicio, aprobacion con estado visible, consulta de aprobadas y seleccion masiva visible.
+// E018B_PROMOTOR_SUPERVISOR_NAVEGACION_DETALLE_UTIL_CONFIRMADO: marcador visible para verificar en GitHub; incluye recargar arriba, Inicio/Final, fecha completa, detalle útil y filtro Sin servicio.
+// E017_PROMOTOR_OPTIMIZACION_REGISTRO_EVIDENCIA: reduce peso de foto, evita refresco bloqueante despues de registrar evidencia y mejora mensajes de guardado.
+// E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN: filtros Hoy/Semana/Rango, Observar->Comentar, resumen/detalle supervisor visual.
+// E015_PROMOTOR_MARCA_FUERA_SERVICIO: permite justificar marca fuera de servicio por visita en version promotor.
+// E014E_FIX4_REZGO_LOGO_HEADER_BUILD_OK: corrige export, conserva resumen E014C FIX1 y muestra tagline ASCII marker Pasion por la movilidad.
+// E014F_REGISTRAR_EVIDENCIA_INLINE_LEFT: boton Registrar evidencia con icono y texto en una sola linea, alineado a la izquierda.
+// E014E_FIX2_REZGO_LOGO_HEADER_TAGLINE: logo oficial REZGO con frase visible Pasión por la movilidad. Verifier ASCII marker: Pasion por la movilidad.
+// E014E_FIX1_REZGO_LOGO_HEADER: logo oficial REZGO con frase Pasión por la movilidad.
+// E014_REZGO_RULES_VERIFIER: conserva ESTADO_ACTUAL, tienda en rutero sin marcas activas y tipos de evidencia flexibles.
+// E014C_FIX1_PROMOTOR_SUMMARY_REDESIGN_VERIFIER: conserva Promotor > Resumen layout operativo.
+// E014C_FIX1_REZGO_RULES_VERIFIER: conserva ESTADO_ACTUAL y tienda en rutero sin marcas activas.
 // E014B_CANCEL_EVIDENCE_REFRESH: corrige visor promotor con controles visibles arriba y abajo.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 // E010_UX_ACTION_FIRST_SUPERVISOR: rediseño UX visual action-first conservando E009B inline demo.
@@ -162,6 +174,17 @@ type ReplaceEvidenceResponse = {
   warning?: string;
 };
 
+type MarcaFueraServicioItem = {
+  registro_id?: string;
+  fecha_hora?: string;
+  visita_id?: string;
+  tienda_id?: string;
+  marca_id: string;
+  motivo?: string;
+  comentario?: string;
+  estatus?: string;
+};
+
 type EvidenceContextResponse = {
   ok: boolean;
   visita?: {
@@ -171,6 +194,13 @@ type EvidenceContextResponse = {
     tienda_display?: string;
   };
   marcas?: Array<{ marca_id: string; marca_nombre: string }>;
+  marcas_fuera_servicio?: MarcaFueraServicioItem[];
+};
+
+type MarcaFueraServicioResponse = {
+  ok: boolean;
+  message?: string;
+  row?: MarcaFueraServicioItem;
 };
 
 type EvidenceRulesResponse = {
@@ -391,6 +421,37 @@ type SupervisorEvidencesResponse = {
   evidences?: EvidenceItem[];
 };
 
+type SupervisorOutOfServiceItem = {
+  registro_id: string;
+  fecha_hora?: string;
+  fecha_hora_fmt?: string;
+  visita_id?: string;
+  promotor_id?: string;
+  promotor_nombre?: string;
+  external_id?: string;
+  tienda_id?: string;
+  tienda_nombre?: string;
+  tienda_display?: string;
+  marca_id?: string;
+  marca_nombre?: string;
+  motivo?: string;
+  comentario?: string;
+  lat?: string;
+  lon?: string;
+  accuracy?: string;
+  estatus?: string;
+};
+
+type SupervisorOutOfServiceResponse = {
+  ok: boolean;
+  rows?: SupervisorOutOfServiceItem[];
+};
+
+type PromotorOutOfServiceResponse = {
+  ok: boolean;
+  rows?: SupervisorOutOfServiceItem[];
+};
+
 type EvidenceAuditRow = {
   audit_id?: string;
   fecha_hora?: string;
@@ -489,7 +550,7 @@ type GalleryAuthorizationResponse = {
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
-const SHEETS_SAFE_PHOTO_CHARS = 42000;
+const SHEETS_SAFE_PHOTO_CHARS = 32000;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
 
@@ -611,6 +672,50 @@ function formatDateTimeMaybe(iso?: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+
+// E016: utilidades de periodo para filtros del supervisor.
+function localYmd(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function startOfWeekMondayYmd(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return localYmd(d);
+}
+
+function endOfWeekSundayYmd(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? 0 : 7 - day;
+  d.setDate(d.getDate() + diff);
+  return localYmd(d);
+}
+
+function ymdFromAnyDateValue(value?: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const direct = raw.match(/(20\d{2}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  const mx = raw.match(/(\d{2})\/(\d{2})\/(20\d{2})/);
+  if (mx) return `${mx[3]}-${mx[2]}-${mx[1]}`;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "" : localYmd(d);
+}
+
+function getEvidenceYmd(item?: EvidenceItem | null) {
+  return ymdFromAnyDateValue(item?.fecha_hora || item?.fecha_hora_fmt || "");
+}
+
+function getOutOfServiceYmd(item?: SupervisorOutOfServiceItem | null) {
+  return ymdFromAnyDateValue(item?.fecha_hora || item?.fecha_hora_fmt || "");
 }
 
 function extractStoreDeterminant(value?: string) {
@@ -857,18 +962,16 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
 }
 
 async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+  // E017: para piloto, priorizamos velocidad de envío y carga estable en Sheets.
+  // Se arranca desde tamaños más ligeros para evitar payloads grandes en cada registro.
   const attempts = [
-    { side: 1440, quality: 0.92 },
-    { side: 1280, quality: 0.9 },
-    { side: 1180, quality: 0.88 },
-    { side: 1080, quality: 0.86 },
-    { side: 960, quality: 0.84 },
-    { side: 840, quality: 0.8 },
-    { side: 720, quality: 0.76 },
-    { side: 640, quality: 0.72 },
-    { side: 560, quality: 0.68 },
+    { side: 840, quality: 0.78 },
+    { side: 720, quality: 0.74 },
+    { side: 640, quality: 0.70 },
+    { side: 560, quality: 0.66 },
     { side: 480, quality: 0.62 },
     { side: 420, quality: 0.58 },
+    { side: 360, quality: 0.54 },
   ];
   let last = dataUrl;
   for (const attempt of attempts) {
@@ -919,6 +1022,17 @@ function getCurrentLocation() {
   });
 }
 
+const marcaFueraServicioMotivos = [
+  "Sin servicio vigente",
+  "Visita no corresponde esta semana",
+  "Marca de visita quincenal",
+  "Sin exhibición",
+  "Producto retirado",
+  "Sin inventario / sin presencia",
+  "No autorizado por tienda",
+  "Otro",
+];
+
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
   { key: "asistencia", label: "Inicio" },
   { key: "evidencias", label: "Capturar" },
@@ -940,6 +1054,10 @@ const clientTabs: Array<{ key: ClientModule; label: string }> = [
   { key: "incidencias", label: "Incidencias" },
   { key: "entregables", label: "Entregables" },
 ];
+
+// E014E_FIX3_EXPORT_AND_STYLE_FIX: corrige export default function App y estilos del header/boton.
+// E014E_REZGO_LOGO_HEADER: Logo oficial REZGO + frase Pasión por la movilidad.
+const REZGO_HORIZONTAL_LOGO_E014E = "data:image/jpeg;base64,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";
 
 export default function App() {
   const tg = getTelegramWebApp();
@@ -974,10 +1092,16 @@ export default function App() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
   const [availableBrands, setAvailableBrands] = useState<Array<{ marca_id: string; marca_nombre: string }>>([]);
+  const [brandsOutOfService, setBrandsOutOfService] = useState<Record<string, MarcaFueraServicioItem>>({});
+  const [showOutOfServicePanel, setShowOutOfServicePanel] = useState(false);
+  const [outOfServiceReason, setOutOfServiceReason] = useState("Marca de visita quincenal");
+  const [outOfServiceComment, setOutOfServiceComment] = useState("");
   const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean; orden?: number; obligatoria?: boolean; observaciones?: string }>>([]);
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
   const [allEvidenceRows, setAllEvidenceRows] = useState<UiEvidence[]>([]);
+  const [promotorOutOfServiceRows, setPromotorOutOfServiceRows] = useState<SupervisorOutOfServiceItem[]>([]);
+  const [promotorEvidenceViewFilter, setPromotorEvidenceViewFilter] = useState<"fotos" | "fuera" | "todo">("fotos");
   const [promotorUsage, setPromotorUsage] = useState<PromotorUsageSummary>({});
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
@@ -1013,14 +1137,20 @@ export default function App() {
   const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
   const [selectedSupEvidenceIds, setSelectedSupEvidenceIds] = useState<string[]>([]);
   const [supervisorEvidenceAudit, setSupervisorEvidenceAudit] = useState<EvidenceAuditRow[]>([]);
+  const [supervisorOutOfServiceRows, setSupervisorOutOfServiceRows] = useState<SupervisorOutOfServiceItem[]>([]);
+  const [supReviewContentFilter, setSupReviewContentFilter] = useState<"evidencias" | "fuera" | "todo">("evidencias");
   const [supEvidencePromotorFilter, setSupEvidencePromotorFilter] = useState("");
   const [supEvidenceStoreFilter, setSupEvidenceStoreFilter] = useState("");
   const [supEvidenceBrandFilter, setSupEvidenceBrandFilter] = useState("");
   const [supEvidenceTypeFilter, setSupEvidenceTypeFilter] = useState("");
   const [supEvidencePhaseFilter, setSupEvidencePhaseFilter] = useState("");
   const [supEvidenceRiskFilter, setSupEvidenceRiskFilter] = useState("");
-  const [supEvidenceStatusFilter, setSupEvidenceStatusFilter] = useState("");
+  const [supEvidenceStatusFilter, setSupEvidenceStatusFilter] = useState("PENDIENTE");
   const [supEvidenceOnlyPending, setSupEvidenceOnlyPending] = useState(false);
+  const [reviewActionInProgress, setReviewActionInProgress] = useState<SupervisorDecision | null>(null);
+  const [supEvidenceDatePreset, setSupEvidenceDatePreset] = useState<"hoy" | "semana" | "rango">("hoy");
+  const [supEvidenceDateStart, setSupEvidenceDateStart] = useState(localYmd());
+  const [supEvidenceDateEnd, setSupEvidenceDateEnd] = useState(localYmd());
   const [supEvidenceGroupMode, setSupEvidenceGroupMode] = useState<EvidenceGroupMode>("marca");
   const [activeSupEvidenceGroupKey, setActiveSupEvidenceGroupKey] = useState("");
   const [supEvidenceGroupPage, setSupEvidenceGroupPage] = useState(1);
@@ -1076,6 +1206,13 @@ export default function App() {
   const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const supervisorQueueTopRef = useRef<HTMLDivElement | null>(null);
+  const supervisorQueueBottomRef = useRef<HTMLDivElement | null>(null);
+  const supervisorReviewDetailRef = useRef<HTMLElement | null>(null);
+  const promotorListTopRef = useRef<HTMLDivElement | null>(null);
+  const promotorListBottomRef = useRef<HTMLDivElement | null>(null);
+  const promotorDetailRef = useRef<HTMLDivElement | null>(null);
+  const promotorGalleryScrollRef = useRef<HTMLDivElement | null>(null);
   const lastImageTapRef = useRef<{ src: string; at: number }>({ src: "", at: 0 });
   const imageViewerTouchRef = useRef<{ distance: number; startScale: number; dragging: boolean; dragStartX: number; dragStartY: number; originX: number; originY: number }>({ distance: 0, startScale: 1, dragging: false, dragStartX: 0, dragStartY: 0, originX: 0, originY: 0 });
   const attendancePhotoRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1125,6 +1262,7 @@ export default function App() {
         void loadSupervisorTeam();
         void loadSupervisorAlerts();
         void loadSupervisorEvidences();
+        void loadSupervisorOutOfService();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -1168,6 +1306,16 @@ export default function App() {
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
   const selectedVisitHasNoBrands = Boolean(selectedVisitId && selectedVisitStoreName && availableBrands.length === 0);
+  const selectedBrandOutOfService = evidenceBrandId ? brandsOutOfService[evidenceBrandId] : null;
+  const promotorOutOfServiceVisibleRows = useMemo(() => {
+    return promotorOutOfServiceRows.filter((item) => {
+      const storeLabel = item.tienda_display || item.tienda_nombre || item.tienda_id || "";
+      const brandLabel = item.marca_nombre || item.marca_id || "";
+      const byStore = !evidenceFilterStore || storeLabel === evidenceFilterStore;
+      const byBrand = !evidenceFilterBrand || brandLabel === evidenceFilterBrand;
+      return byStore && byBrand;
+    });
+  }, [promotorOutOfServiceRows, evidenceFilterStore, evidenceFilterBrand]);
 
   const evidenceTypeOptions = useMemo(() => {
     return brandRules
@@ -1323,9 +1471,17 @@ export default function App() {
 
   const supervisorPromotorOptions = useMemo(() => supervisorTeam.map((item) => ({ id: item.promotor_id, nombre: item.nombre })), [supervisorTeam]);
 
-  const visibleSupervisorEvidencesBase = useMemo(() => supervisorEvidences.filter((item) => getSupervisorReviewState(item) !== "APROBADA"), [supervisorEvidences]);
+  const visibleSupervisorEvidencesBase = useMemo(() => supervisorEvidences, [supervisorEvidences]);
+
+  const supervisorDateBounds = useMemo(() => {
+    if (supEvidenceDatePreset === "semana") return { start: startOfWeekMondayYmd(), end: endOfWeekSundayYmd(), label: "Semana actual" };
+    if (supEvidenceDatePreset === "rango") return { start: supEvidenceDateStart, end: supEvidenceDateEnd || supEvidenceDateStart, label: `${supEvidenceDateStart || "Inicio"} a ${supEvidenceDateEnd || "Fin"}` };
+    return { start: localYmd(), end: localYmd(), label: "Hoy" };
+  }, [supEvidenceDatePreset, supEvidenceDateStart, supEvidenceDateEnd]);
 
   const filteredSupervisorEvidences = useMemo(() => visibleSupervisorEvidencesBase.filter((item) => {
+    const itemYmd = getEvidenceYmd(item);
+    const byDate = !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
     const byPromotor = !supEvidencePromotorFilter || item.promotor_id === supEvidencePromotorFilter;
     const byStore = !supEvidenceStoreFilter || getStoreDisplayFromItem(item) === supEvidenceStoreFilter;
     const byBrand = !supEvidenceBrandFilter || normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter;
@@ -1334,9 +1490,10 @@ export default function App() {
     const byRisk = !supEvidenceRiskFilter || (item.riesgo || "") === supEvidenceRiskFilter;
     const byStatus = !supEvidenceStatusFilter || getSupervisorReviewState(item) === supEvidenceStatusFilter;
     const byPending = !supEvidenceOnlyPending || isSupervisorPendingEvidence(item);
-    return byPromotor && byStore && byBrand && byType && byPhase && byRisk && byStatus && byPending;
+    return byDate && byPromotor && byStore && byBrand && byType && byPhase && byRisk && byStatus && byPending;
   }), [
     visibleSupervisorEvidencesBase,
+    supervisorDateBounds,
     supEvidencePromotorFilter,
     supEvidenceStoreFilter,
     supEvidenceBrandFilter,
@@ -1347,8 +1504,23 @@ export default function App() {
     supEvidenceOnlyPending,
   ]);
 
+  const filteredSupervisorOutOfServiceRows = useMemo(() => supervisorOutOfServiceRows.filter((item) => {
+    const itemYmd = getOutOfServiceYmd(item);
+    const byDate = !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
+    const byPromotor = !supEvidencePromotorFilter || item.promotor_id === supEvidencePromotorFilter;
+    const byStore = !supEvidenceStoreFilter || (item.tienda_display || item.tienda_nombre || item.tienda_id || "") === supEvidenceStoreFilter;
+    const byBrand = !supEvidenceBrandFilter || (item.marca_nombre || item.marca_id || "") === supEvidenceBrandFilter;
+    return byDate && byPromotor && byStore && byBrand;
+  }), [supervisorOutOfServiceRows, supervisorDateBounds, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter]);
+
+  const supervisorReviewVisibleCount = filteredSupervisorEvidences.length + (supReviewContentFilter !== "evidencias" ? filteredSupervisorOutOfServiceRows.length : 0);
+
   const supervisorEvidenceFilterOptions = useMemo(() => {
-    const promotorRows = supEvidencePromotorFilter ? visibleSupervisorEvidencesBase.filter((item) => item.promotor_id === supEvidencePromotorFilter) : visibleSupervisorEvidencesBase;
+    const dateRows = visibleSupervisorEvidencesBase.filter((item) => {
+      const itemYmd = getEvidenceYmd(item);
+      return !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
+    });
+    const promotorRows = supEvidencePromotorFilter ? dateRows.filter((item) => item.promotor_id === supEvidencePromotorFilter) : dateRows;
     const storeRows = supEvidenceStoreFilter ? promotorRows.filter((item) => getStoreDisplayFromItem(item) === supEvidenceStoreFilter) : promotorRows;
     const brandRows = supEvidenceBrandFilter ? storeRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter) : storeRows;
     const typeRows = supEvidenceTypeFilter ? brandRows.filter((item) => (item.tipo_evidencia || "") === supEvidenceTypeFilter) : brandRows;
@@ -1363,6 +1535,7 @@ export default function App() {
     };
   }, [
     visibleSupervisorEvidencesBase,
+    supervisorDateBounds,
     supEvidencePromotorFilter,
     supEvidenceStoreFilter,
     supEvidenceBrandFilter,
@@ -1507,6 +1680,7 @@ export default function App() {
       if (synced) {
         await loadPromotorDashboard();
         await loadEvidencesToday();
+        await loadPromotorOutOfService();
         await loadPromotorRecentAlerts();
         if (showStatus) {
           setStatusMsgDuration(7000);
@@ -1566,9 +1740,15 @@ export default function App() {
     if (!operationalRows.length) setSelectedEvidenceId("");
   }
 
+  async function loadPromotorOutOfService() {
+    const data = await postJson<PromotorOutOfServiceResponse>("/miniapp/promotor/out-of-service-today", {});
+    setPromotorOutOfServiceRows(data.rows || []);
+  }
+
   async function loadEvidenceContext(visitaId: string) {
     if (!visitaId) {
       setAvailableBrands([]);
+      setBrandsOutOfService({});
       setBrandRules([]);
       setSelectedVisitStoreName("");
       return;
@@ -1577,18 +1757,21 @@ export default function App() {
     if (isLocalVisitId(visitaId) && offlineVisit) {
       const cachedBrands = storeBrandsCache[offlineVisit.tienda_id] || [];
       setAvailableBrands(cachedBrands);
+      setBrandsOutOfService({});
       setSelectedVisitStoreName(getVisitDisplayName(offlineVisit, stores));
       return;
     }
     try {
       const ctx = await postJson<EvidenceContextResponse>("/miniapp/promotor/evidence-context", { visita_id: visitaId });
       setAvailableBrands(ctx.marcas || []);
+      setBrandsOutOfService(Object.fromEntries((ctx.marcas_fuera_servicio || []).filter((item) => item.marca_id).map((item) => [item.marca_id, item])));
       setSelectedVisitStoreName(ctx.visita?.tienda_display || ctx.visita?.tienda_nombre || "");
       if (ctx.visita?.tienda_id && ctx.marcas?.length) {
         setStoreBrandsCache((prev) => ({ ...prev, [ctx.visita!.tienda_id]: ctx.marcas || [] }));
       }
     } catch {
       setAvailableBrands([]);
+      setBrandsOutOfService({});
       setSelectedVisitStoreName("");
     }
   }
@@ -1683,6 +1866,13 @@ export default function App() {
     setSupervisorEvidences(rows);
     if (rows.length && !rows.find((row) => row.evidencia_id === selectedSupEvidenceId)) setSelectedSupEvidenceId(rows[0].evidencia_id);
     if (!rows.length) setSelectedSupEvidenceId("");
+  }
+
+  async function loadSupervisorOutOfService() {
+    const data = await postJson<SupervisorOutOfServiceResponse>("/miniapp/supervisor/out-of-service", {
+      promotor_id: supEvidencePromotorFilter,
+    });
+    setSupervisorOutOfServiceRows(data.rows || []);
   }
 
   async function openVisitExpedient(visitaId: string) {
@@ -1807,6 +1997,7 @@ export default function App() {
     if (role === "promotor") {
       void loadPromotorDashboard();
       void loadEvidencesToday();
+      void loadPromotorOutOfService();
       void loadPromotorRecentAlerts();
       void loadRulesForBrand("", "");
       void syncPendingQueue(false);
@@ -1816,6 +2007,7 @@ export default function App() {
       void loadSupervisorTeam();
       void loadSupervisorAlerts();
       void loadSupervisorEvidences();
+      void loadSupervisorOutOfService();
     }
     if (role === "cliente") {
       void loadClientBootstrap();
@@ -1831,7 +2023,7 @@ export default function App() {
   useEffect(() => { if (role === "promotor") { setEvidenceBrandId(""); setEvidenceBrandLabel(""); setEvidenceType(""); setEvidencePhase("ESTADO_ACTUAL"); void loadEvidenceContext(selectedVisitId); } }, [selectedVisitId, role]);
   useEffect(() => { if (role === "promotor") void loadRulesForBrand(evidenceBrandId, evidenceBrandLabel); }, [evidenceBrandId, evidenceBrandLabel, role]);
   useEffect(() => { if (role === "supervisor") void loadSupervisorAlerts(); }, [alertStatusFilter, alertSeverityFilter, alertPromotorFilter]);
-  useEffect(() => { if (role === "supervisor") void loadSupervisorEvidences(); }, [supEvidencePromotorFilter, role]);
+  useEffect(() => { if (role === "supervisor") { void loadSupervisorEvidences(); void loadSupervisorOutOfService(); } }, [supEvidencePromotorFilter, role]);
   useEffect(() => {
     if (role !== "supervisor") return;
     void loadSupervisorDayRoute(selectedTeamPromotorId);
@@ -1894,8 +2086,7 @@ export default function App() {
     if (supEvidenceTypeFilter && !supervisorEvidenceFilterOptions.types.includes(supEvidenceTypeFilter)) setSupEvidenceTypeFilter("");
     if (supEvidencePhaseFilter && !supervisorEvidenceFilterOptions.phases.includes(supEvidencePhaseFilter)) setSupEvidencePhaseFilter("");
     if (supEvidenceRiskFilter && !supervisorEvidenceFilterOptions.risks.includes(supEvidenceRiskFilter)) setSupEvidenceRiskFilter("");
-    if (supEvidenceStatusFilter && !supervisorEvidenceFilterOptions.statuses.includes(supEvidenceStatusFilter)) setSupEvidenceStatusFilter("");
-  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter]);
+  }, [role, supervisorEvidenceFilterOptions, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter]);
 
   useEffect(() => {
     if (role !== "cliente") return;
@@ -2242,6 +2433,8 @@ export default function App() {
       const selectedStoreLabel = selectedStore ? formatStoreDisplay(selectedStore.tienda_id, selectedStore.nombre_tienda) : "la tienda seleccionada";
       if (typeof window !== "undefined" && !window.confirm(`¿Deseas registrar entrada en ${selectedStoreLabel}?`)) return;
       setSyncing(true);
+      setStatusMsgDuration(7000);
+      setStatusMsg("Registrando entrada... estamos validando geocerca y guardando la visita.");
       queuedPayload = {
         tienda_id: selectedStoreId,
         lat: entryLocation.lat,
@@ -2258,8 +2451,22 @@ export default function App() {
       setEntryPhoto(null);
       setExitLocation(null);
       setExitPhoto(null);
-      await loadPromotorDashboard();
-      await loadEvidencesToday();
+      const optimisticVisit: VisitItem = {
+        visita_id: response.visita_id,
+        tienda_id: response.tienda_id,
+        tienda_nombre: response.tienda_nombre,
+        tienda_display: response.tienda_display,
+        hora_inicio: response.started_at,
+        hora_fin: "",
+        estado_visita: "ABIERTA",
+      };
+      setVisits((prev) => [optimisticVisit, ...prev.filter((visit) => visit.visita_id !== response.visita_id)]);
+      setSelectedVisitId(response.visita_id);
+      window.setTimeout(() => {
+        void loadPromotorDashboard().catch(() => undefined);
+        void loadEvidencesToday().catch(() => undefined);
+        void loadPromotorOutOfService().catch(() => undefined);
+      }, 1000);
     } catch (err) {
       if (shouldQueueSubmission(err) && selectedStoreId && entryLocation && entryPhoto && queuedPayload) {
         const selectedStore = stores.find((store) => store.tienda_id === selectedStoreId);
@@ -2339,15 +2546,59 @@ export default function App() {
     }
   }
 
+  async function markSelectedBrandOutOfService() {
+    try {
+      if (!selectedVisitId) return setStatusMsg("Selecciona una visita activa.");
+      if (!evidenceBrandId) return setStatusMsg("Selecciona una marca.");
+      if (!outOfServiceReason.trim()) return setStatusMsg("Selecciona el motivo de fuera de servicio.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
+      const brandLabel = evidenceBrandLabel || availableBrands.find((item) => item.marca_id === evidenceBrandId)?.marca_nombre || evidenceBrandId;
+      if (typeof window !== "undefined" && !window.confirm(`¿Marcar ${brandLabel} como fuera de servicio en esta visita?`)) return;
+      setSyncing(true);
+      let geo: Partial<LocationCapture> = {};
+      try {
+        geo = await getCurrentLocation();
+      } catch {
+        geo = {};
+      }
+      const response = await postJson<MarcaFueraServicioResponse>("/miniapp/promotor/marca-fuera-servicio", {
+        visita_id: selectedVisitId,
+        marca_id: evidenceBrandId,
+        motivo: outOfServiceReason.trim(),
+        comentario: outOfServiceComment.trim(),
+        lat: geo.lat ?? "",
+        lon: geo.lon ?? "",
+        accuracy: geo.accuracy ?? "",
+      });
+      const row = response.row || { marca_id: evidenceBrandId, motivo: outOfServiceReason.trim(), comentario: outOfServiceComment.trim(), estatus: "ACTIVA" };
+      setBrandsOutOfService((prev) => ({ ...prev, [evidenceBrandId]: row }));
+      setEvidencePhotos([]);
+      setEvidenceType("");
+      setEvidenceDescription("");
+      setOutOfServiceComment("");
+      setShowOutOfServicePanel(false);
+      setStatusMsg("Marca marcada fuera de servicio para esta visita. No contará como evidencia pendiente de esta marca.");
+      await loadEvidenceContext(selectedVisitId);
+      await loadPromotorOutOfService().catch(() => undefined);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo marcar la marca fuera de servicio.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function saveEvidenceFlow() {
     let queuedPayload: Record<string, unknown> | null = null;
     try {
       if (!selectedVisitId) return setStatusMsg("Selecciona una visita activa.");
       if (!evidenceBrandLabel.trim()) return setStatusMsg("Selecciona una marca.");
+      if (selectedBrandOutOfService) return setStatusMsg("Esta marca ya fue marcada fuera de servicio para esta visita.");
       if (!evidenceType.trim()) return setStatusMsg("Selecciona o escribe el tipo de evidencia.");
       if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
       setSyncing(true);
+      setStatusMsgDuration(7000);
+      setStatusMsg("Guardando evidencia... puedes continuar cuando veas la confirmación.");
       const evidenceSource = evidencePhotos.some((photo) => !String(photo.name || "").startsWith("captura-")) ? "GALERIA_AUTORIZADA" : "CAMARA";
       const localPhotosForPreview = evidencePhotos.map((photo) => ({ ...photo }));
       const savedVisitId = selectedVisitId;
@@ -2406,15 +2657,17 @@ export default function App() {
       setEvidenceQty(1);
       setEvidenceDescription("");
       setEvidencePhotos([]);
-      await loadEvidencesToday();
+      // E017: ya mostramos las nuevas evidencias con vista previa local.
+      // Evitamos bloquear al promotor esperando un refresco completo de Sheets.
+      window.setTimeout(() => { void loadEvidencesToday().catch(() => undefined); }, 1200);
       if (createdIds[0]) {
         setSelectedEvidenceId(createdIds[0]);
         setPromotorModule("mis_evidencias");
       }
       if ((result as any).postprocess_warning) {
-        setStatusMsg("Evidencia registrada. El análisis quedó programado y puede tardar unos segundos.");
+        setStatusMsg("Evidencia registrada. Puedes continuar capturando; el análisis seguirá en segundo plano.");
       } else {
-        setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada, pero al menos una foto no cupo completa en Sheets." : "Evidencia registrada correctamente.");
+        setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "Evidencia registrada; una foto quedó optimizada para Sheets." : "Evidencia registrada. Puedes continuar con la siguiente captura.");
       }
     } catch (err) {
       if (shouldQueueSubmission(err) && queuedPayload) {
@@ -2537,6 +2790,10 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         return setStatusMsg(decision === "OBSERVADA" ? "Agrega un comentario para comentar la evidencia." : "Agrega un motivo para rechazar la evidencia.");
       }
       const visibleIds = filteredSupervisorEvidences.map((item) => item.evidencia_id);
+      const actionLabel = decision === "APROBADA" ? "Aprobando evidencia..." : decision === "OBSERVADA" ? "Comentando evidencia..." : "Rechazando evidencia...";
+      setReviewActionInProgress(decision);
+      setStatusMsgDuration(7000);
+      setStatusMsg(evidenceIds.length > 1 ? `${actionLabel} (${evidenceIds.length})` : actionLabel);
       const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
       const focusIndex = focusId ? visibleIds.indexOf(focusId) : -1;
       const nextId = options?.autoAdvance && focusIndex >= 0 ? (visibleIds[focusIndex + 1] || visibleIds[focusIndex - 1] || "") : "";
@@ -2560,11 +2817,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
       } else if (options?.focusEvidenceId && imageViewerEvidenceId === options.focusEvidenceId) {
         closeImageViewer();
       }
-      const decisionLabel = decision === "OBSERVADA" ? "comentadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
+      const decisionLabel = decision === "OBSERVADA" ? "observadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
       setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decisionLabel}.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión.");
     } finally {
+      setReviewActionInProgress(null);
       setSyncing(false);
     }
   }
@@ -2620,7 +2878,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló el comentario masivo por falta de texto." : "Se canceló el rechazo masivo por falta de motivo.");
     setSelectedSupEvidenceId(group.items[0].evidencia_id);
     await applyEvidenceReviewBatch(group.items.map((item) => item.evidencia_id), decision, String(prompted || ""), {
-      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision === "OBSERVADA" ? "comentadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas"}.`,
+      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision === "OBSERVADA" ? "observadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas"}.`,
       focusEvidenceId: group.items[0].evidencia_id,
     });
   }
@@ -2632,8 +2890,71 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     setSupEvidenceTypeFilter("");
     setSupEvidencePhaseFilter("");
     setSupEvidenceRiskFilter("");
-    setSupEvidenceStatusFilter("");
+    setSupEvidenceStatusFilter("PENDIENTE");
     setSupEvidenceOnlyPending(false);
+    setSupEvidenceDatePreset("hoy");
+    setSupEvidenceDateStart(localYmd());
+    setSupEvidenceDateEnd(localYmd());
+  }
+
+  function scrollElementIntoView(ref: { current: HTMLElement | HTMLDivElement | null }, block: ScrollLogicalPosition = "start") {
+    ref.current?.scrollIntoView({ behavior: "smooth", block });
+  }
+
+  function scrollHorizontalRefToEnd(ref: { current: HTMLDivElement | null }) {
+    const node = ref.current;
+    if (!node) return;
+    node.scrollTo({ left: node.scrollWidth, behavior: "smooth" });
+  }
+
+  function scrollHorizontalRefToStart(ref: { current: HTMLDivElement | null }) {
+    const node = ref.current;
+    if (!node) return;
+    node.scrollTo({ left: 0, behavior: "smooth" });
+  }
+
+  function focusSupervisorEvidence(item: EvidenceItem) {
+    setSelectedSupEvidenceId(item.evidencia_id);
+    window.setTimeout(() => scrollElementIntoView(supervisorReviewDetailRef, "start"), 40);
+  }
+
+  function focusPromotorEvidence(item: EvidenceItem) {
+    setSelectedEvidenceId(item.evidencia_id);
+    if (promotorModule !== "mis_evidencias") setPromotorModule("mis_evidencias");
+    window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
+  }
+
+  async function refreshCurrentRoleData() {
+    try {
+      setSyncing(true);
+      if (role === "promotor") {
+        await loadPromotorDashboard();
+        await loadEvidencesToday();
+        await loadPromotorOutOfService();
+      }
+      if (role === "supervisor") {
+        await loadSupervisorDashboard();
+        await loadSupervisorTeam();
+        await loadSupervisorAlerts();
+        await loadSupervisorEvidences();
+        await loadSupervisorOutOfService();
+      }
+      if (role === "cliente") {
+        await loadClientBootstrap();
+        await loadClientFilterOptions();
+        await loadClientDashboard();
+        await loadClientStores();
+        await loadClientEvidences();
+        await loadClientIncidents();
+        await loadClientDeliverables();
+        if (selectedClientStoreId) await loadClientStoreDetail(selectedClientStoreId);
+      }
+      setStatusMsg("Información actualizada.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
+    } finally {
+      setSyncing(false);
+    }
   }
 
   function moveSupervisorEvidenceViewer(step: number) {
@@ -2678,8 +2999,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
       <div className="shell">
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
-            <div className="heroLogoBlock">
-              <div className="brandWord">REZGO</div>
+            <div className="heroLogoBlock heroLogoBlockE014E">
+              <img className="rezgoLogoE014E" src={REZGO_HORIZONTAL_LOGO_E014E} alt="REZGO" />
+              <div className="rezgoTaglineE014E" data-tagline="Pasion por la movilidad" aria-label="Pasión por la movilidad">Pasión por la movilidad</div>
             </div>
             <div className="heroTitleBlock heroTitleBlockWide">
               <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : role === "cliente" ? <>Consulta<br />cliente</> : role === "promotor" ? <>Operación<br />del promotor</> : <>Acceso<br />no configurado</>}</div>
@@ -2807,6 +3129,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="panel">
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
+                  <div ref={promotorListTopRef} className="e018ScrollAnchor" />
                   {clientStores.map((item) => (
                     <button key={item.tienda_id} className={`listBtn ${selectedClientStoreId === item.tienda_id ? "listBtnGreen" : ""}`} onClick={() => setSelectedClientStoreId(item.tienda_id)}>
                       <div className="listTitle">{item.tienda_nombre}</div>
@@ -3084,18 +3407,56 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                   setEvidenceBrandLabel(normalizeBrandLabel(brand?.marca_nombre || "", brand?.marca_id || ""));
                   setEvidenceType("");
                   setEvidencePhase("ESTADO_ACTUAL");
+                  setShowOutOfServicePanel(false);
                 }}>
                   <option value="">{selectedVisitHasNoBrands ? "Tienda sin marcas activas" : "Selecciona una marca"}</option>
                   {availableBrands.map((brand) => (
-                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}</option>
+                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}{brandsOutOfService[brand.marca_id] ? " · Fuera de servicio" : ""}</option>
                   ))}
                 </select>
                 {selectedVisitHasNoBrands ? (
                   <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
                 ) : null}
 
+                {evidenceBrandId ? (
+                  <div className="outOfServiceBox">
+                    {selectedBrandOutOfService ? (
+                      <>
+                        <div className="outOfServiceTitle">Marca fuera de servicio en esta visita</div>
+                        <div className="outOfServiceText">Motivo: {selectedBrandOutOfService.motivo || "Sin motivo"}</div>
+                        {selectedBrandOutOfService.comentario ? <div className="outOfServiceText">Comentario: {selectedBrandOutOfService.comentario}</div> : null}
+                      </>
+                    ) : (
+                      <>
+                        {!showOutOfServicePanel ? (
+                          <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(true)}>
+                            <ShieldAlert size={16} />
+                            Marcar marca fuera de servicio
+                          </button>
+                        ) : (
+                          <>
+                            <div className="outOfServiceTitle">Marca fuera de servicio</div>
+                            <div className="outOfServiceText">Usa esta opción solo cuando la marca no deba atenderse en esta visita.</div>
+                            <select className="inputLike" value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
+                              {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
+                            </select>
+                            <input className="inputLike" style={{ marginTop: 8 }} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
+                            <div className="e019OutServiceActions">
+                              <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => void markSelectedBrandOutOfService()}>
+                                <ShieldAlert size={16} />
+                                Confirmar sin servicio
+                              </button>
+                              <button className="actionButton compactBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(false)}>Cancelar</button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
+                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
                   const nextType = e.target.value;
                   setEvidenceType(nextType);
                   const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
@@ -3110,7 +3471,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
-                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !evidenceType}>
+                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
                   {evidencePhaseOptions.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
                 </select>
 
@@ -3119,15 +3480,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               </div>
 
               <div className="panel">
-                <label className="fieldLabel">Observación</label>
+                <label className="fieldLabel">Comentario</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
                 <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
+                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
                     <Camera size={16} />
                     Tomar foto
                   </button>
                   {evidenceGalleryAuth.allowed ? (
-                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
+                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
                       <ImageIcon size={16} />
                       Galería autorizada
                     </button>
@@ -3149,9 +3510,8 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </div>
                   </>
                 ) : null}
-                <button className="primaryBtn mainActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !evidenceType}>
-                  <Camera size={16} />
-                  {syncing ? "Guardando..." : "Registrar evidencia"}
+                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
+                  <span className="mainActionTop e014fEvidenceActionTop"><Camera size={16} /><span>{syncing ? "Guardando..." : "Registrar evidencia"}</span></span>
                 </button>
               </div>
             </div>
@@ -3160,7 +3520,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
         {role === "promotor" && promotorModule === "mis_evidencias" ? (
           <div className="card">
-            <div className="sectionTitle">Mis evidencias</div>
+            <div className="e018SectionHeader">
+              <div className="sectionTitle">Mis evidencias</div>
+              <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Recargar"}</span></button>
+            </div>
+            <div className="e018ReviewModeBar e019PromotorModeBar">
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("fotos")}>Fotos</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("fuera")}>Sin servicio</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("todo")}>Todo</button>
+            </div>
             <div className="filtersRow">
               <select className="inputLike" value={evidenceFilterStore} onChange={(e) => { setEvidenceFilterStore(e.target.value); setEvidenceFilterBrand(""); setEvidenceFilterType(""); setEvidenceFilterPhase(""); }}>
                 <option value="">Todas las tiendas</option>
@@ -3183,17 +3551,34 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="panel">
                 <div className="miniTitle">Listado</div>
                 <div className="stack compactStack">
-                  {filteredOperationalGallery.map((item) => (
-                    <button key={item.evidencia_id} onClick={() => setSelectedEvidenceId(item.evidencia_id)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
+                  <div ref={promotorListTopRef} className="e018ScrollAnchor" />
+                  {promotorEvidenceViewFilter !== "fuera" ? filteredOperationalGallery.map((item) => (
+                    <button key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
                       <div className="listTitle">{getStoreDisplayFromItem(item) || "Visita activa"}</div>
                       <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
                     </button>
-                  ))}
-                  {!filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
+                  )) : null}
+                  {promotorEvidenceViewFilter !== "fotos" ? promotorOutOfServiceVisibleRows.map((item) => (
+                    <div key={item.registro_id} className="listBtn e019OutServiceListItem">
+                      <div className="listTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"}</div>
+                      <div className="listSub">Sin servicio · {item.marca_nombre || item.marca_id || "Marca"}</div>
+                      <div className="summaryLine">Motivo: <strong>{item.motivo || "Sin motivo"}</strong></div>
+                      {item.comentario ? <div className="summaryLine">Comentario: {item.comentario}</div> : null}
+                    </div>
+                  )) : null}
+                  {promotorEvidenceViewFilter !== "fuera" && !filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
+                  {promotorEvidenceViewFilter !== "fotos" && !promotorOutOfServiceVisibleRows.length ? <div className="emptyBox">No hay marcas sin servicio registradas con esos filtros.</div> : null}
+                  <div ref={promotorListBottomRef} className="e018ScrollAnchor" />
                 </div>
+                {(filteredOperationalGallery.length + promotorOutOfServiceVisibleRows.length) > 12 ? (
+                  <div className="e018MiniNavRow">
+                    <button type="button" onClick={() => scrollElementIntoView(promotorListTopRef, "start")}>↑ Inicio</button>
+                    <button type="button" onClick={() => scrollElementIntoView(promotorListBottomRef, "end")}>↓ Final</button>
+                  </div>
+                ) : null}
               </div>
-              <div className="panel">
-                <div className="miniTitle">Acciones</div>
+              <div className="panel" ref={promotorDetailRef}>
+                <div className="miniTitle">Detalle útil</div>
                 {selectedEvidence ? (
                   <>
                     <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
@@ -3211,7 +3596,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <input ref={replaceGalleryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void handleGallerySelection("replace", e.target.files)} />
                     <div className="authTraceBox">Galería reemplazo: <strong>{galleryReasonLabel(replaceGalleryAuth)}</strong></div>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
-                    <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe una observación" />
+                    <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe un comentario" />
                   </>
                 ) : (
                   <div className="emptyBox">Selecciona una evidencia.</div>
@@ -3354,27 +3739,43 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         ) : null}
 
         {role === "supervisor" && supervisorModule === "resumen" ? (
-          <div className="card">
-            <div className="sectionTitle">Resumen supervisor</div>
-            <div className="summaryGrid">
-              <div className="summaryBlock kpiBlock"><Users size={16} /><div className="kpiValue">{supervisorSummary.promotores}</div><div className="kpiLabel">Promotores</div></div>
-              <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{supervisorSummary.visitasHoy}</div><div className="kpiLabel">Visitas hoy</div></div>
-              <div className="summaryBlock kpiBlock"><Store size={16} /><div className="kpiValue">{supervisorSummary.abiertas}</div><div className="kpiLabel">Abiertas</div></div>
-              <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{supervisorSummary.evidenciasHoy}</div><div className="kpiLabel">Evidencias</div></div>
-              <div className="summaryBlock kpiBlock"><ShieldAlert size={16} /><div className="kpiValue">{supervisorSummary.alertas}</div><div className="kpiLabel">Alertas</div></div>
-            </div>
-            <div className="twoCol" style={{ marginTop: 12 }}>
-              <div className="panel">
-                <div className="miniTitle">Consumo aproximado</div>
-                <div className="summaryLine">Fotos hoy: <strong>{supervisorUsage.today?.fotos || 0}</strong></div>
-                <div className="summaryLine">MB hoy: <strong>{supervisorUsage.today?.mb?.toFixed ? supervisorUsage.today.mb.toFixed(2) : (supervisorUsage.today?.mb || 0)}</strong></div>
-                <div className="summaryLine">MB mes: <strong>{supervisorUsage.month?.mb?.toFixed ? supervisorUsage.month.mb.toFixed(2) : (supervisorUsage.month?.mb || 0)}</strong></div>
+          <div className="card e016SupervisorSummaryCard">
+            <div className="e014cSummaryHeader">
+              <div>
+                <div className="sectionTitle e014cSummaryTitle">Resumen supervisor</div>
+                <div className="e014cSummarySub">Lectura ejecutiva de operación, evidencias y pendientes.</div>
               </div>
-              <div className="panel">
-                <div className="miniTitle">Pendientes de cierre</div>
-                <div className="summaryLine">Visitas abiertas: <strong>{supervisorPendingClose.open_visits || 0}</strong></div>
-                <div className="summaryLine">Alertas abiertas: <strong>{supervisorPendingClose.open_alerts || 0}</strong></div>
-                <div className="summaryLine">Revisiones pendientes: <strong>{supervisorPendingClose.pending_reviews || 0}</strong></div>
+              <span className={`e014cStatusPill ${supervisorPendingClose.open_visits ? "e014cPillActive" : "e014cPillNeutral"}`}>{supervisorPendingClose.open_visits ? "Con visitas abiertas" : "Cierre al día"}</span>
+            </div>
+            <div className="e014cHeroMetric e016SupervisorHero">
+              <div className="e014cHeroCopy">
+                <span className="e014cEyebrow">Operación del día</span>
+                <strong>{supervisorSummary.visitasHoy} visita{supervisorSummary.visitasHoy === 1 ? "" : "s"}</strong>
+                <small>{supervisorSummary.promotores} promotor{supervisorSummary.promotores === 1 ? "" : "es"} · {supervisorSummary.evidenciasHoy} evidencias</small>
+              </div>
+              <div className="e014cHeroNumbers">
+                <span>{supervisorPendingClose.pending_reviews || 0}</span>
+                <small>por revisar</small>
+              </div>
+            </div>
+            <div className="e014cMetricGrid e016SupervisorMetricGrid">
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><Users size={16} /></div><div className="e014cMetricBody"><span>Promotores</span><strong>{supervisorSummary.promotores}</strong></div></div>
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><ClipboardList size={16} /></div><div className="e014cMetricBody"><span>Visitas hoy</span><strong>{supervisorSummary.visitasHoy}</strong></div></div>
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><Store size={16} /></div><div className="e014cMetricBody"><span>Abiertas</span><strong>{supervisorSummary.abiertas}</strong></div></div>
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><ShieldAlert size={16} /></div><div className="e014cMetricBody"><span>Alertas</span><strong>{supervisorSummary.alertas}</strong></div></div>
+            </div>
+            <div className="e016InfoGrid">
+              <div className="e016InfoPanel">
+                <div className="e016PanelTitle">Consumo aproximado</div>
+                <div className="e016InfoLine"><span>Fotos hoy</span><strong>{supervisorUsage.today?.fotos || 0}</strong></div>
+                <div className="e016InfoLine"><span>MB hoy</span><strong>{supervisorUsage.today?.mb?.toFixed ? supervisorUsage.today.mb.toFixed(2) : (supervisorUsage.today?.mb || 0)}</strong></div>
+                <div className="e016InfoLine"><span>MB mes</span><strong>{supervisorUsage.month?.mb?.toFixed ? supervisorUsage.month.mb.toFixed(2) : (supervisorUsage.month?.mb || 0)}</strong></div>
+              </div>
+              <div className="e016InfoPanel">
+                <div className="e016PanelTitle">Pendientes de cierre</div>
+                <div className="e016InfoLine"><span>Visitas abiertas</span><strong>{supervisorPendingClose.open_visits || 0}</strong></div>
+                <div className="e016InfoLine"><span>Alertas abiertas</span><strong>{supervisorPendingClose.open_alerts || 0}</strong></div>
+                <div className="e016InfoLine"><span>Revisiones pendientes</span><strong>{supervisorPendingClose.pending_reviews || 0}</strong></div>
               </div>
             </div>
           </div>
@@ -3409,17 +3810,27 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Detalle</div>
                 {selectedTeamMember ? (
                   <>
-                    <div className="summaryLine"><strong>{selectedTeamMember.nombre}</strong></div>
-                    <div className="summaryLine">Región: {selectedTeamMember.region || "-"}</div>
-                    <div className="summaryLine">Visitas hoy: <strong>{selectedTeamMember.visitas_hoy}</strong></div>
-                    <div className="summaryLine">Abiertas: <strong>{selectedTeamMember.visitas_abiertas}</strong></div>
-                    <div className="summaryLine">Evidencias hoy: <strong>{selectedTeamMember.evidencias_hoy}</strong></div>
-                    <div className="summaryLine">Alertas abiertas: <strong>{selectedTeamMember.alertas_abiertas}</strong></div>
-                    <div className="summaryLine">Última tienda: {selectedTeamMember.ultima_tienda_display || selectedTeamMember.ultima_tienda || "-"}</div>
-                    <div className="summaryLine">Última entrada: {formatHourFromIso(selectedTeamMember.ultima_entrada)}</div>
-                    <div className="summaryLine">Última salida: {selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</div>
-                    <div className="summaryLine">Estatus: <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span></div>
-                    <div className="actionGrid actionGridButtons">
+                    <div className="e016DetailHero">
+                      <div>
+                        <div className="e016DetailEyebrow">Promotor</div>
+                        <div className="e016DetailTitle">{selectedTeamMember.nombre}</div>
+                        <div className="e016DetailSub">Región: {selectedTeamMember.region || "-"}</div>
+                      </div>
+                      <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span>
+                    </div>
+                    <div className="e016MiniMetricGrid">
+                      <div><span>Visitas</span><strong>{selectedTeamMember.visitas_hoy}</strong></div>
+                      <div><span>Abiertas</span><strong>{selectedTeamMember.visitas_abiertas}</strong></div>
+                      <div><span>Evidencias</span><strong>{selectedTeamMember.evidencias_hoy}</strong></div>
+                      <div><span>Alertas</span><strong>{selectedTeamMember.alertas_abiertas}</strong></div>
+                    </div>
+                    <div className="e016InfoPanel e016ActivityPanel">
+                      <div className="e016PanelTitle">Última actividad</div>
+                      <div className="e016InfoLine"><span>Tienda</span><strong>{selectedTeamMember.ultima_tienda_display || selectedTeamMember.ultima_tienda || "-"}</strong></div>
+                      <div className="e016InfoLine"><span>Entrada</span><strong>{formatHourFromIso(selectedTeamMember.ultima_entrada)}</strong></div>
+                      <div className="e016InfoLine"><span>Salida</span><strong>{selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</strong></div>
+                    </div>
+                    <div className="actionGrid actionGridButtons e016ActionGrid">
                       <button className="actionButton" onClick={() => { setSupEvidencePromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("evidencias"); }}><ImageIcon size={16} /><span>Ver evidencias</span></button>
                       <button className="actionButton" onClick={() => { setAlertPromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("alertas"); }}><ShieldAlert size={16} /><span>Ver alertas</span></button>
                       <button className="actionButton" onClick={() => setStatusMsg(supervisorDayRoute.length ? "Selecciona una visita del día abajo." : "Este promotor no tiene visitas del día.")}><Eye size={16} /><span>Ver visitas</span></button>
@@ -3503,12 +3914,20 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Detalle</div>
                 {selectedAlert ? (
                   <>
-                    <div className="summaryLine"><strong>{selectedAlert.promotor_nombre || selectedAlert.promotor_id}</strong></div>
-                    <div className="summaryLine">Tienda: {selectedAlert.tienda_display || selectedAlert.tienda_nombre || selectedAlert.tienda_id || "-"}</div>
-                    <div className="summaryLine">Tipo: {selectedAlert.tipo_alerta}</div>
-                    <div className="summaryLine">Fecha: {selectedAlert.fecha_hora_fmt}</div>
-                    <div className="summaryLine">Canal: {selectedAlert.canal_notificacion || "-"}</div>
-                    <div className="summaryLine">Descripción: {selectedAlert.descripcion || "-"}</div>
+                    <div className="e016DetailHero">
+                      <div>
+                        <div className="e016DetailEyebrow">Alerta</div>
+                        <div className="e016DetailTitle">{selectedAlert.promotor_nombre || selectedAlert.promotor_id}</div>
+                        <div className="e016DetailSub">{selectedAlert.tienda_display || selectedAlert.tienda_nombre || selectedAlert.tienda_id || "Tienda"}</div>
+                      </div>
+                      <div className="e016BadgeStack"><span className={`riskBadge ${severityClass(selectedAlert.severidad)}`}>{selectedAlert.severidad}</span><span className={`riskBadge ${statusClass(selectedAlert.status)}`}>{selectedAlert.status}</span></div>
+                    </div>
+                    <div className="e016InfoPanel e016ActivityPanel">
+                      <div className="e016InfoLine"><span>Tipo</span><strong>{selectedAlert.tipo_alerta}</strong></div>
+                      <div className="e016InfoLine"><span>Fecha</span><strong>{selectedAlert.fecha_hora_fmt}</strong></div>
+                      <div className="e016InfoLine"><span>Canal</span><strong>{selectedAlert.canal_notificacion || "-"}</strong></div>
+                    </div>
+                    <div className="e016DescriptionBox">{selectedAlert.descripcion || "Sin descripción"}</div>
                     {(selectedAlert.photo_url || selectedAlert.url_foto) ? <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedAlert.photo_url || selectedAlert.url_foto || "")} onClick={() => handleImageTap(selectedAlert.photo_url || selectedAlert.url_foto || "")}><img src={selectedAlert.photo_url || selectedAlert.url_foto} alt={selectedAlert.tipo_alerta} className="img" /></div> : null}
                     {selectedAlert.hallazgos_ai ? <div className="summaryLine">Causa detectada: {selectedAlert.hallazgos_ai}</div> : null}
                     <div className="geoRow">
@@ -3549,14 +3968,41 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="e013TopBar">
               <div>
                 <div className="sectionTitle e010PageTitle">Revisar evidencias</div>
-                <div className="contextHint e013Sub">Cola simple: abre una foto, revisa con zoom y decide. Sin galería larga, sin grupos visibles y sin paneles extra.</div>
+                <div className="contextHint e013Sub">Cola rápida: toca una tarjeta para ir directo al detalle útil, revisar la foto y aplicar acción.</div>
               </div>
               <div className="e013CounterStrip">
-                <span><strong>{filteredSupervisorEvidences.length}</strong><small>En cola</small></span>
+                <span><strong>{filteredSupervisorEvidences.length}</strong><small>Evidencias</small></span>
+                <span><strong>{filteredSupervisorOutOfServiceRows.length}</strong><small>Sin servicio</small></span>
                 <span><strong>{supervisorEvidenceSummary.pendientes}</strong><small>Pendientes</small></span>
                 <span><strong>{supervisorEvidenceSummary.observadas + supervisorEvidenceSummary.rechazadas}</strong><small>Con acción</small></span>
               </div>
+              <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Recargar"}</span></button>
             </div>
+
+            <div className="e016DateFilterBar">
+              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "hoy" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("hoy")}>Hoy</button>
+              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "semana" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("semana")}>Semana</button>
+              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "rango" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("rango")}>Rango</button>
+              <span className="e016DateLabel">Mostrando: {supervisorDateBounds.label}</span>
+            </div>
+            <div className="e018ReviewModeBar">
+              <button type="button" className={`e016DateChip ${supReviewContentFilter === "evidencias" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("evidencias")}>Evidencias</button>
+              <button type="button" className={`e016DateChip ${supReviewContentFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("fuera")}>Sin servicio</button>
+              <button type="button" className={`e016DateChip ${supReviewContentFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("todo")}>Todo</button>
+            </div>
+            <div className="e019StatusModeBar">
+              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "PENDIENTE" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("PENDIENTE"); setSupEvidenceOnlyPending(false); }}>Pendientes</button>
+              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "APROBADA" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("APROBADA"); setSupEvidenceOnlyPending(false); }}>Aprobadas</button>
+              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "OBSERVADA" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("OBSERVADA"); setSupEvidenceOnlyPending(false); }}>Comentadas</button>
+              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "RECHAZADA" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("RECHAZADA"); setSupEvidenceOnlyPending(false); }}>Rechazadas</button>
+              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "" && !supEvidenceOnlyPending ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter(""); setSupEvidenceOnlyPending(false); }}>Todo</button>
+            </div>
+            {supEvidenceDatePreset === "rango" ? (
+              <div className="e016RangeRow">
+                <input className="inputLike" type="date" value={supEvidenceDateStart} onChange={(e) => setSupEvidenceDateStart(e.target.value)} />
+                <input className="inputLike" type="date" value={supEvidenceDateEnd} onChange={(e) => setSupEvidenceDateEnd(e.target.value)} />
+              </div>
+            ) : null}
 
             <details className="e013FiltersDrawer">
               <summary>Filtros opcionales</summary>
@@ -3585,29 +4031,57 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               </div>
             </details>
 
-            {!filteredSupervisorEvidences.length ? (
-              <div className="emptyBox">No hay evidencias pendientes con los filtros actuales.</div>
+            {supReviewContentFilter !== "fuera" && filteredSupervisorEvidences.length ? (
+              <div className="e019BatchBar">
+                <div className="e019BatchInfo"><strong>{selectedSupEvidenceIds.length}</strong> seleccionada(s)</div>
+                <button type="button" className="actionButton compactBtn" onClick={() => selectedSupEvidenceIds.length === filteredSupervisorEvidences.length ? setSelectedSupEvidenceIds([]) : selectAllVisibleSupervisorEvidences()}>{selectedSupEvidenceIds.length === filteredSupervisorEvidences.length ? "Limpiar selección" : "Seleccionar visibles"}</button>
+                <button type="button" className="actionButton compactBtn e013Approve" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar selección"}</span></button>
+                <button type="button" className="actionButton compactBtn e013Comment" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar selección"}</span></button>
+                <button type="button" className="actionButton compactBtn e013Reject" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={14} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar selección"}</span></button>
+              </div>
+            ) : null}
+            {reviewActionInProgress ? <div className="e019ActionNotice"><RefreshCw className="spin" size={15} /> Aplicando revisión, espera un momento...</div> : null}
+
+            {!supervisorReviewVisibleCount ? (
+              <div className="emptyBox">No hay registros pendientes con los filtros actuales.</div>
             ) : (
               <div className="e013QueueLayout">
                 <aside className="e013QueueList" aria-label="Cola de evidencias por revisar">
-                  {filteredSupervisorEvidences.map((item) => (
-                    <button key={item.evidencia_id} type="button" className={`e013QueueItem ${selectedSupEvidenceId === item.evidencia_id ? "e013QueueItemActive" : ""}`} onClick={() => setSelectedSupEvidenceId(item.evidencia_id)}>
+                  <div ref={supervisorQueueTopRef} className="e018ScrollAnchor" />
+                  {supReviewContentFilter !== "fuera" ? filteredSupervisorEvidences.map((item) => (
+                    <button key={item.evidencia_id} type="button" className={`e013QueueItem ${selectedSupEvidenceId === item.evidencia_id ? "e013QueueItemActive" : ""}`} onClick={() => focusSupervisorEvidence(item)}>
                       <div className="e013MiniPhoto"><img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"} /></div>
                       <div className="e013QueueText">
                         <div className="e013QueueTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {normalizeBrandLabel(String(item.marca_nombre || item.marca_id || ""), "Marca")}</div>
-                        <div className="e013QueueMeta">{item.promotor_nombre || item.promotor_id || "Promotor"} · {item.fecha_hora_fmt || "Sin hora"}</div>
+                        <div className="e013QueueMeta e018QueueMetaName">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                        <div className="e013QueueMeta e018QueueMetaDate">{item.fecha_hora_fmt || "Sin hora"}</div>
                         <div className="e013QueueMeta">{item.tipo_evidencia || item.tipo_evento || "Evidencia"}{item.fase ? ` · ${item.fase}` : ""}</div>
                         <div className="e013QueueBadges">
                           <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(item)}</span>
                           <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
                         </div>
                       </div>
+                      <label className="e019SelectPill" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selectedSupEvidenceIds.includes(item.evidencia_id)} onChange={() => toggleSupervisorEvidenceSelection(item.evidencia_id)} />
+                        Seleccionar
+                      </label>
                       <span className="e013ReviewCta">Revisar</span>
                     </button>
-                  ))}
+                  )) : null}
+                  {supReviewContentFilter !== "evidencias" ? filteredSupervisorOutOfServiceRows.map((item) => (
+                    <div key={item.registro_id} className="e018OutServiceCard">
+                      <div className="e018OutServiceTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {item.marca_nombre || item.marca_id || "Marca"}</div>
+                      <div className="e018OutServiceMeta">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
+                      <div className="e018OutServiceMeta">{item.fecha_hora_fmt || item.fecha_hora || "Sin fecha"}</div>
+                      <div className="e018OutServiceReason">Fuera de servicio · {item.motivo || "Sin motivo"}</div>
+                      {item.comentario ? <div className="e018OutServiceComment">Comentario: {item.comentario}</div> : null}
+                      {item.visita_id ? <button type="button" className="actionButton compactBtn" onClick={() => void openVisitExpedient(item.visita_id || "")}><Eye size={14} /><span>Ver visita</span></button> : null}
+                    </div>
+                  )) : null}
+                  <div ref={supervisorQueueBottomRef} className="e018ScrollAnchor" />
                 </aside>
 
-                <section className="e013ReviewFocus" aria-label="Revisión de evidencia seleccionada">
+                <section ref={supervisorReviewDetailRef} className="e013ReviewFocus" aria-label="Revisión de evidencia seleccionada">
                   {selectedSupervisorEvidence ? (
                     <>
                       <div className="e013ReviewHeader">
@@ -3646,12 +4120,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         </div>
                       ) : null}
 
-                      <input className="inputLike e013CommentInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional para observar o rechazar" />
+                      <input className="inputLike e013CommentInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional para comentar o rechazar" />
 
                       <div className="e013DecisionDock">
-                        <button className="actionButton e013Approve" onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>Aprobar</span></button>
-                        <button className="actionButton e013Comment" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>Observar</span></button>
-                        <button className="actionButton e013Reject" onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>Rechazar</span></button>
+                        <button className="actionButton e013Approve" disabled={!!reviewActionInProgress} onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar"}</span></button>
+                        <button className="actionButton e013Comment" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar"}</span></button>
+                        <button className="actionButton e013Reject" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar"}</span></button>
                       </div>
                     </>
                   ) : (
@@ -3660,16 +4134,28 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </section>
               </div>
             )}
+            {supervisorReviewVisibleCount > 12 ? (
+              <div className="e018FloatingNav" aria-label="Navegación rápida de revisión">
+                <button type="button" onClick={() => scrollElementIntoView(supervisorQueueTopRef, "start")}>↑ Inicio</button>
+                <button type="button" onClick={() => scrollElementIntoView(supervisorQueueBottomRef, "end")}>↓ Final</button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {role === "promotor" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
           <div className="card">
-            <div className="sectionTitle">Galería de evidencias</div>
-            <div className="galleryScroll">
+            <div className="e018SectionHeader">
+              <div className="sectionTitle">Galería de evidencias</div>
+              <div className="e018MiniNavRow e018MiniNavRowInline">
+                <button type="button" onClick={() => scrollHorizontalRefToStart(promotorGalleryScrollRef)}>← Inicio</button>
+                <button type="button" onClick={() => scrollHorizontalRefToEnd(promotorGalleryScrollRef)}>Final →</button>
+              </div>
+            </div>
+            <div className="galleryScroll" ref={promotorGalleryScrollRef}>
               <div className="galleryGrid">
                 {filteredOperationalGallery.slice(0, 30).map((item) => (
-                  <div className="galleryCard galleryCardCompact" key={item.evidencia_id}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={() => openImageViewer(item.url_foto)} onClick={(e) => { e.stopPropagation(); handleImageTap(item.url_foto); }} /></div>
+                  <button type="button" className="galleryCard galleryCardCompact e018GalleryCardBtn" key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)}>
+                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto); }} /></div>
                     <div className="galleryBodyCompact">
                       <div className="galleryTop compactTop">
                         <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
@@ -3679,7 +4165,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       <div className="galleryDate">{item.fecha_hora_fmt}</div>
                       <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -3927,38 +4413,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 {statusMsg ? <div className="statusBar">{statusMsg}</div> : null}
 
         <div className="footerActions">
-          <button className="secondaryBtn footerBtn" onClick={() => {
-            void (async () => {
-              try {
-                setSyncing(true);
-                if (role === "promotor") {
-                  await loadPromotorDashboard();
-                  await loadEvidencesToday();
-                }
-                if (role === "supervisor") {
-                  await loadSupervisorDashboard();
-                  await loadSupervisorTeam();
-                  await loadSupervisorAlerts();
-                  await loadSupervisorEvidences();
-                }
-                if (role === "cliente") {
-                  await loadClientBootstrap();
-                  await loadClientFilterOptions();
-                  await loadClientDashboard();
-                  await loadClientStores();
-                  await loadClientEvidences();
-                  await loadClientIncidents();
-                  await loadClientDeliverables();
-                  if (selectedClientStoreId) await loadClientStoreDetail(selectedClientStoreId);
-                }
-                setStatusMsg("Información actualizada.");
-              } catch (err) {
-                setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
-              } finally {
-                setSyncing(false);
-              }
-            })();
-          }} disabled={syncing || !!error}>
+          <button className="secondaryBtn footerBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}>
             <RefreshCw size={16} />
             {syncing ? "Sincronizando..." : "Recargar"}
           </button>
@@ -3991,6 +4446,17 @@ input[type=file] { display: none; }
 .heroSplit { justify-content: space-between; align-items: center; gap: 12px; }
 .heroLogoBlock { display: flex; align-items: center; min-width: 0; }
 .brandWord { font-size: 22px; line-height: 1; font-weight: 900; letter-spacing: 0.02em; color: #43a047; }
+/* E014E: Logo oficial REZGO en encabezado */
+.heroLogoBlockE014E { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; max-width: min(56%, 360px); }
+.rezgoLogoE014E { display: block; width: min(210px, 44vw); max-height: 46px; object-fit: contain; object-position: left center; border: 0; background: transparent; }
+.rezgoTaglineE014E { font-size: 10px; line-height: 1.1; color: #78909c; font-weight: 700; letter-spacing: 0.01em; padding-left: 2px; margin-top: 1px; }
+@media (max-width: 420px) {
+  .heroLogoBlockE014E { max-width: 52%; }
+  .rezgoLogoE014E { width: min(174px, 48vw); max-height: 38px; }
+  .rezgoTaglineE014E { font-size: 9px; }
+  .heroTitleBlockWide { min-width: 150px; width: 45%; }
+}
+
 .heroTitleBlock { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; margin-left: auto; overflow: hidden; }
 .heroTitleBlockWide { width: min(240px, 48%); min-width: 190px; }
 .heroTitle { font-size: 14px; line-height: 1.05; font-weight: 800; color: #263238; }
@@ -4146,8 +4612,17 @@ input[type=file] { display: none; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
 .authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 11px; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
 .mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 12px 14px; white-space: normal; line-height: 1.15; min-height: 56px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; text-align: left; gap: 4px; overflow: hidden; }
+.outOfServiceBox { margin-top: 10px; padding: 12px; border: 1px solid rgba(245, 158, 11, .35); border-radius: 16px; background: rgba(255, 247, 237, .78); display: grid; gap: 8px; }
+.outOfServiceTitle { font-weight: 900; color: #7c2d12; font-size: .92rem; }
+.outOfServiceText { color: #7c2d12; font-size: .84rem; line-height: 1.35; }
+.outOfServiceBtn { width: 100%; justify-content: flex-start; margin-top: 2px; border-color: rgba(245, 158, 11, .5); background: rgba(255, 255, 255, .75); }
 .mainActionTop { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; min-width: 0; text-align: left; }
 .mainActionTop > span:last-child { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+/* E014F: Registrar evidencia icono + texto en una sola linea y alineado a la izquierda */
+.e014dEvidenceActionBtn { flex-direction: row !important; align-items: center !important; justify-content: flex-start !important; text-align: left !important; gap: 8px !important; }
+.e014dEvidenceActionBtn .e014fEvidenceActionTop { width: 100% !important; justify-content: flex-start !important; flex-wrap: nowrap !important; gap: 8px !important; }
+.e014dEvidenceActionBtn .e014fEvidenceActionTop svg { flex: 0 0 auto !important; }
+.e014dEvidenceActionBtn .e014fEvidenceActionTop > span:last-child { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; word-break: normal !important; overflow-wrap: normal !important; }
 .mainActionSub { display: block; width: 100%; max-width: 100%; font-size: 11px; font-weight: 700; opacity: 0.96; overflow-wrap: anywhere; word-break: break-word; padding: 0; text-align: left; }
 .entryActionBtn { background: #4caf50; color: white; }
 .dangerBtn { background: #d32f2f !important; color: white !important; }
@@ -4167,7 +4642,36 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
-@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
+
+	/* E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN */
+	.e016SupervisorSummaryCard { padding: 16px; }
+	.e016SupervisorHero { margin-top: 14px; }
+	.e016SupervisorMetricGrid { margin-top: 12px; }
+	.e016InfoGrid { margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+	.e016InfoPanel { border-radius: 16px; padding: 12px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.92)); border: 1px solid rgba(38,50,56,.08); box-shadow: inset 0 1px 0 rgba(255,255,255,.72); }
+	.e016PanelTitle { font-size: 12px; font-weight: 900; color: #263238; margin-bottom: 8px; letter-spacing: .01em; }
+	.e016InfoLine { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 7px 0; border-top: 1px solid rgba(38,50,56,.06); color: #607d8b; font-size: 12px; text-align: left; }
+	.e016InfoLine:first-of-type { border-top: 0; }
+	.e016InfoLine strong { color: #263238; text-align: right; overflow-wrap: anywhere; }
+	.e016DetailHero { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 16px; background: linear-gradient(135deg, rgba(232,245,233,.92), rgba(255,255,255,.96)); border: 1px solid rgba(76,175,80,.18); text-align: left; }
+	.e016DetailEyebrow { font-size: 10px; font-weight: 900; color: #2e7d32; text-transform: uppercase; letter-spacing: .08em; }
+	.e016DetailTitle { margin-top: 3px; font-size: 16px; line-height: 1.2; font-weight: 900; color: #263238; }
+	.e016DetailSub { margin-top: 5px; color: #607d8b; font-size: 12px; font-weight: 700; }
+	.e016MiniMetricGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+	.e016MiniMetricGrid > div { border-radius: 14px; padding: 10px; background: rgba(255,255,255,.96); border: 1px solid rgba(38,50,56,.08); text-align: left; }
+	.e016MiniMetricGrid span { display: block; color: #607d8b; font-size: 11px; font-weight: 800; }
+	.e016MiniMetricGrid strong { display: block; margin-top: 4px; color: #263238; font-size: 22px; font-weight: 900; }
+	.e016ActivityPanel { margin-top: 10px; }
+	.e016ActionGrid { margin-top: 10px; }
+	.e016BadgeStack { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+	.e016DescriptionBox { margin: 10px 0; padding: 11px 12px; border-radius: 14px; background: rgba(239,246,255,.76); border: 1px solid rgba(96,125,139,.12); color: #455a64; font-size: 13px; line-height: 1.35; text-align: left; }
+	.e016DateFilterBar { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+	.e016DateChip { flex: 0 0 auto; border: 1px solid rgba(38,50,56,.08); background: rgba(255,255,255,.96); color: #455a64; border-radius: 999px; padding: 9px 13px; font-weight: 900; cursor: pointer; }
+	.e016DateChipActive { background: #4caf50; color: #fff; border-color: rgba(76,175,80,.58); box-shadow: 0 8px 18px rgba(76,175,80,.18); }
+	.e016DateLabel { flex: 0 0 auto; color: #607d8b; font-size: 12px; font-weight: 800; padding: 0 4px; }
+	.e016RangeRow { margin-top: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid, .e016InfoGrid, .e016RangeRow { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal, .cameraModalTight { width: calc(100vw - 16px); max-height: calc(100vh - 64px); padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraViewportTight { max-height: min(48vh, 440px); } .cameraVideo { min-height: 0; max-height: min(42vh, 320px); } .cameraVideoTight { max-height: min(48vh, 440px); } .cameraActionRow, .cameraActionRowTight { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 12px; } .compactBtn, .assistQuickBtn { padding: 12px 14px; } }
 
 /* E014C_PROMOTOR_SUMMARY_REDESIGN --------------------------------------------
@@ -4686,6 +5190,31 @@ body {
   .e013ReviewPosition { order: -1; }
 }
 
+
+/* E018 - navegación rápida y detalle útil común promotor/supervisor */
+.e018SectionHeader { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.e018TopRefreshBtn { width: auto; min-width: 132px; margin-top: 0; justify-content: center; }
+.e018ReviewModeBar { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.e018ScrollAnchor { width: 1px; height: 1px; pointer-events: none; }
+.e018QueueMetaName, .e018QueueMetaDate { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+.e018FloatingNav { position: fixed; right: 14px; bottom: 86px; z-index: 58; display: grid; gap: 8px; }
+.e018FloatingNav button, .e018MiniNavRow button { border: 1px solid rgba(15,23,42,.10); background: rgba(255,255,255,.94); color: #0f172a; border-radius: 999px; padding: 9px 12px; font-weight: 950; box-shadow: 0 10px 22px rgba(15,23,42,.12); cursor: pointer; }
+.e018MiniNavRow { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.e018MiniNavRowInline { margin-top: 0; }
+.e018GalleryCardBtn { text-align: left; cursor: pointer; }
+.e018OutServiceCard { border: 1px solid rgba(245,158,11,.24); background: rgba(255,251,235,.86); border-radius: 20px; padding: 12px; display: grid; gap: 6px; box-shadow: 0 8px 20px rgba(15,23,42,.045); }
+.e018OutServiceTitle { color: #0f172a; font-weight: 950; font-size: 13px; line-height: 1.25; }
+.e018OutServiceMeta { color: #64748b; font-size: 12px; font-weight: 800; line-height: 1.25; }
+.e018OutServiceReason { color: #92400e; background: rgba(245,158,11,.12); border-radius: 12px; padding: 7px 9px; font-size: 12px; font-weight: 900; }
+.e018OutServiceComment { color: #7c2d12; font-size: 12px; line-height: 1.35; }
+@media (max-width: 640px) {
+  .e018TopRefreshBtn { width: 100%; }
+  .e018FloatingNav { right: 10px; bottom: 78px; }
+  .e018FloatingNav button { padding: 8px 10px; font-size: 12px; }
+  .e018SectionHeader { align-items: stretch; }
+  .e018MiniNavRowInline { width: 100%; justify-content: space-between; }
+}
+
 /* E014 - REZGO rules + safe image viewer exit */
 .e014NoBrandBox {
   margin-top: 10px;
@@ -4734,5 +5263,16 @@ body {
   .e014ViewerControls { max-width: 46vw; overflow-x: auto; }
   .e014ViewerClose { padding: 10px 12px; }
 }
+
+/* E019 - fluidez, sin servicio y revisión masiva visible */
+.e019OutServiceActions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 10px; align-items: center; }
+.e019PromotorModeBar, .e019StatusModeBar { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 12px; }
+.e019OutServiceListItem { border: 1px solid rgba(249,115,22,0.18); background: rgba(255,247,237,0.72); text-align: left; }
+.e019BatchBar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px; border: 1px solid rgba(15,23,42,0.08); border-radius: 18px; background: rgba(255,255,255,0.86); margin: 10px 0 14px; }
+.e019BatchInfo { padding: 8px 10px; border-radius: 999px; background: rgba(15,23,42,0.06); color: #334155; font-weight: 800; }
+.e019ActionNotice { display: flex; align-items: center; gap: 8px; padding: 11px 13px; margin: 8px 0 12px; border-radius: 16px; background: rgba(236,253,245,0.95); border: 1px solid rgba(34,197,94,0.22); color: #166534; font-weight: 900; }
+.e019SelectPill { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 7px 9px; border-radius: 999px; background: rgba(15,23,42,0.05); color: #475569; font-size: 11px; font-weight: 900; cursor: pointer; }
+.e019SelectPill input { width: 14px; height: 14px; accent-color: #4caf50; }
+@media (max-width: 760px) { .e019OutServiceActions { grid-template-columns: 1fr; } .e019BatchBar .actionButton, .e019BatchBar .compactBtn { width: 100%; justify-content: center; } }
 
 `;
