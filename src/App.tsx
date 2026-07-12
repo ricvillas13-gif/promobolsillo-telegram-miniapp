@@ -1,3 +1,4 @@
+// E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN: filtros Hoy/Semana/Rango, Observar->Comentar, resumen/detalle supervisor visual.
 // E015_PROMOTOR_MARCA_FUERA_SERVICIO: permite justificar marca fuera de servicio por visita en version promotor.
 // E014E_FIX4_REZGO_LOGO_HEADER_BUILD_OK: corrige export, conserva resumen E014C FIX1 y muestra tagline ASCII marker Pasion por la movilidad.
 // E014F_REGISTRAR_EVIDENCIA_INLINE_LEFT: boton Registrar evidencia con icono y texto en una sola linea, alineado a la izquierda.
@@ -639,6 +640,46 @@ function formatDateTimeMaybe(iso?: string) {
   });
 }
 
+
+// E016: utilidades de periodo para filtros del supervisor.
+function localYmd(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function startOfWeekMondayYmd(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return localYmd(d);
+}
+
+function endOfWeekSundayYmd(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? 0 : 7 - day;
+  d.setDate(d.getDate() + diff);
+  return localYmd(d);
+}
+
+function ymdFromAnyDateValue(value?: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const direct = raw.match(/(20\d{2}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  const mx = raw.match(/(\d{2})\/(\d{2})\/(20\d{2})/);
+  if (mx) return `${mx[3]}-${mx[2]}-${mx[1]}`;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "" : localYmd(d);
+}
+
+function getEvidenceYmd(item?: EvidenceItem | null) {
+  return ymdFromAnyDateValue(item?.fecha_hora || item?.fecha_hora_fmt || "");
+}
+
 function extractStoreDeterminant(value?: string) {
   const match = String(value || "").trim().match(/(\d+)\s*$/);
   return match ? match[1] : "";
@@ -1065,6 +1106,9 @@ export default function App() {
   const [supEvidenceRiskFilter, setSupEvidenceRiskFilter] = useState("");
   const [supEvidenceStatusFilter, setSupEvidenceStatusFilter] = useState("");
   const [supEvidenceOnlyPending, setSupEvidenceOnlyPending] = useState(false);
+  const [supEvidenceDatePreset, setSupEvidenceDatePreset] = useState<"hoy" | "semana" | "rango">("hoy");
+  const [supEvidenceDateStart, setSupEvidenceDateStart] = useState(localYmd());
+  const [supEvidenceDateEnd, setSupEvidenceDateEnd] = useState(localYmd());
   const [supEvidenceGroupMode, setSupEvidenceGroupMode] = useState<EvidenceGroupMode>("marca");
   const [activeSupEvidenceGroupKey, setActiveSupEvidenceGroupKey] = useState("");
   const [supEvidenceGroupPage, setSupEvidenceGroupPage] = useState(1);
@@ -1370,7 +1414,15 @@ export default function App() {
 
   const visibleSupervisorEvidencesBase = useMemo(() => supervisorEvidences.filter((item) => getSupervisorReviewState(item) !== "APROBADA"), [supervisorEvidences]);
 
+  const supervisorDateBounds = useMemo(() => {
+    if (supEvidenceDatePreset === "semana") return { start: startOfWeekMondayYmd(), end: endOfWeekSundayYmd(), label: "Semana actual" };
+    if (supEvidenceDatePreset === "rango") return { start: supEvidenceDateStart, end: supEvidenceDateEnd || supEvidenceDateStart, label: `${supEvidenceDateStart || "Inicio"} a ${supEvidenceDateEnd || "Fin"}` };
+    return { start: localYmd(), end: localYmd(), label: "Hoy" };
+  }, [supEvidenceDatePreset, supEvidenceDateStart, supEvidenceDateEnd]);
+
   const filteredSupervisorEvidences = useMemo(() => visibleSupervisorEvidencesBase.filter((item) => {
+    const itemYmd = getEvidenceYmd(item);
+    const byDate = !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
     const byPromotor = !supEvidencePromotorFilter || item.promotor_id === supEvidencePromotorFilter;
     const byStore = !supEvidenceStoreFilter || getStoreDisplayFromItem(item) === supEvidenceStoreFilter;
     const byBrand = !supEvidenceBrandFilter || normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter;
@@ -1379,9 +1431,10 @@ export default function App() {
     const byRisk = !supEvidenceRiskFilter || (item.riesgo || "") === supEvidenceRiskFilter;
     const byStatus = !supEvidenceStatusFilter || getSupervisorReviewState(item) === supEvidenceStatusFilter;
     const byPending = !supEvidenceOnlyPending || isSupervisorPendingEvidence(item);
-    return byPromotor && byStore && byBrand && byType && byPhase && byRisk && byStatus && byPending;
+    return byDate && byPromotor && byStore && byBrand && byType && byPhase && byRisk && byStatus && byPending;
   }), [
     visibleSupervisorEvidencesBase,
+    supervisorDateBounds,
     supEvidencePromotorFilter,
     supEvidenceStoreFilter,
     supEvidenceBrandFilter,
@@ -1393,7 +1446,11 @@ export default function App() {
   ]);
 
   const supervisorEvidenceFilterOptions = useMemo(() => {
-    const promotorRows = supEvidencePromotorFilter ? visibleSupervisorEvidencesBase.filter((item) => item.promotor_id === supEvidencePromotorFilter) : visibleSupervisorEvidencesBase;
+    const dateRows = visibleSupervisorEvidencesBase.filter((item) => {
+      const itemYmd = getEvidenceYmd(item);
+      return !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
+    });
+    const promotorRows = supEvidencePromotorFilter ? dateRows.filter((item) => item.promotor_id === supEvidencePromotorFilter) : dateRows;
     const storeRows = supEvidenceStoreFilter ? promotorRows.filter((item) => getStoreDisplayFromItem(item) === supEvidenceStoreFilter) : promotorRows;
     const brandRows = supEvidenceBrandFilter ? storeRows.filter((item) => normalizeBrandLabel(item.marca_nombre || "", "Marca") === supEvidenceBrandFilter) : storeRows;
     const typeRows = supEvidenceTypeFilter ? brandRows.filter((item) => (item.tipo_evidencia || "") === supEvidenceTypeFilter) : brandRows;
@@ -1408,6 +1465,7 @@ export default function App() {
     };
   }, [
     visibleSupervisorEvidencesBase,
+    supervisorDateBounds,
     supEvidencePromotorFilter,
     supEvidenceStoreFilter,
     supEvidenceBrandFilter,
@@ -2649,7 +2707,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
       } else if (options?.focusEvidenceId && imageViewerEvidenceId === options.focusEvidenceId) {
         closeImageViewer();
       }
-      const decisionLabel = decision === "OBSERVADA" ? "comentadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
+      const decisionLabel = decision === "OBSERVADA" ? "observadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
       setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decisionLabel}.`);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión.");
@@ -2709,7 +2767,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     if (requiresNote && !String(prompted || "").trim()) return setStatusMsg(decision === "OBSERVADA" ? "Se canceló el comentario masivo por falta de texto." : "Se canceló el rechazo masivo por falta de motivo.");
     setSelectedSupEvidenceId(group.items[0].evidencia_id);
     await applyEvidenceReviewBatch(group.items.map((item) => item.evidencia_id), decision, String(prompted || ""), {
-      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision === "OBSERVADA" ? "comentadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas"}.`,
+      successMessage: `${group.items.length} evidencia(s) de ${group.brandLabel} ${decision === "OBSERVADA" ? "observadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas"}.`,
       focusEvidenceId: group.items[0].evidencia_id,
     });
   }
@@ -2723,6 +2781,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     setSupEvidenceRiskFilter("");
     setSupEvidenceStatusFilter("");
     setSupEvidenceOnlyPending(false);
+    setSupEvidenceDatePreset("hoy");
+    setSupEvidenceDateStart(localYmd());
+    setSupEvidenceDateEnd(localYmd());
   }
 
   function moveSupervisorEvidenceViewer(step: number) {
@@ -3233,7 +3294,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               </div>
 
               <div className="panel">
-                <label className="fieldLabel">Observación</label>
+                <label className="fieldLabel">Comentario</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
                 <div className="captureGrid" style={{ marginTop: 12 }}>
                   <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
@@ -3324,7 +3385,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <input ref={replaceGalleryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void handleGallerySelection("replace", e.target.files)} />
                     <div className="authTraceBox">Galería reemplazo: <strong>{galleryReasonLabel(replaceGalleryAuth)}</strong></div>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
-                    <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe una observación" />
+                    <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe un comentario" />
                   </>
                 ) : (
                   <div className="emptyBox">Selecciona una evidencia.</div>
@@ -3467,27 +3528,43 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         ) : null}
 
         {role === "supervisor" && supervisorModule === "resumen" ? (
-          <div className="card">
-            <div className="sectionTitle">Resumen supervisor</div>
-            <div className="summaryGrid">
-              <div className="summaryBlock kpiBlock"><Users size={16} /><div className="kpiValue">{supervisorSummary.promotores}</div><div className="kpiLabel">Promotores</div></div>
-              <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{supervisorSummary.visitasHoy}</div><div className="kpiLabel">Visitas hoy</div></div>
-              <div className="summaryBlock kpiBlock"><Store size={16} /><div className="kpiValue">{supervisorSummary.abiertas}</div><div className="kpiLabel">Abiertas</div></div>
-              <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{supervisorSummary.evidenciasHoy}</div><div className="kpiLabel">Evidencias</div></div>
-              <div className="summaryBlock kpiBlock"><ShieldAlert size={16} /><div className="kpiValue">{supervisorSummary.alertas}</div><div className="kpiLabel">Alertas</div></div>
-            </div>
-            <div className="twoCol" style={{ marginTop: 12 }}>
-              <div className="panel">
-                <div className="miniTitle">Consumo aproximado</div>
-                <div className="summaryLine">Fotos hoy: <strong>{supervisorUsage.today?.fotos || 0}</strong></div>
-                <div className="summaryLine">MB hoy: <strong>{supervisorUsage.today?.mb?.toFixed ? supervisorUsage.today.mb.toFixed(2) : (supervisorUsage.today?.mb || 0)}</strong></div>
-                <div className="summaryLine">MB mes: <strong>{supervisorUsage.month?.mb?.toFixed ? supervisorUsage.month.mb.toFixed(2) : (supervisorUsage.month?.mb || 0)}</strong></div>
+          <div className="card e016SupervisorSummaryCard">
+            <div className="e014cSummaryHeader">
+              <div>
+                <div className="sectionTitle e014cSummaryTitle">Resumen supervisor</div>
+                <div className="e014cSummarySub">Lectura ejecutiva de operación, evidencias y pendientes.</div>
               </div>
-              <div className="panel">
-                <div className="miniTitle">Pendientes de cierre</div>
-                <div className="summaryLine">Visitas abiertas: <strong>{supervisorPendingClose.open_visits || 0}</strong></div>
-                <div className="summaryLine">Alertas abiertas: <strong>{supervisorPendingClose.open_alerts || 0}</strong></div>
-                <div className="summaryLine">Revisiones pendientes: <strong>{supervisorPendingClose.pending_reviews || 0}</strong></div>
+              <span className={`e014cStatusPill ${supervisorPendingClose.open_visits ? "e014cPillActive" : "e014cPillNeutral"}`}>{supervisorPendingClose.open_visits ? "Con visitas abiertas" : "Cierre al día"}</span>
+            </div>
+            <div className="e014cHeroMetric e016SupervisorHero">
+              <div className="e014cHeroCopy">
+                <span className="e014cEyebrow">Operación del día</span>
+                <strong>{supervisorSummary.visitasHoy} visita{supervisorSummary.visitasHoy === 1 ? "" : "s"}</strong>
+                <small>{supervisorSummary.promotores} promotor{supervisorSummary.promotores === 1 ? "" : "es"} · {supervisorSummary.evidenciasHoy} evidencias</small>
+              </div>
+              <div className="e014cHeroNumbers">
+                <span>{supervisorPendingClose.pending_reviews || 0}</span>
+                <small>por revisar</small>
+              </div>
+            </div>
+            <div className="e014cMetricGrid e016SupervisorMetricGrid">
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><Users size={16} /></div><div className="e014cMetricBody"><span>Promotores</span><strong>{supervisorSummary.promotores}</strong></div></div>
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><ClipboardList size={16} /></div><div className="e014cMetricBody"><span>Visitas hoy</span><strong>{supervisorSummary.visitasHoy}</strong></div></div>
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><Store size={16} /></div><div className="e014cMetricBody"><span>Abiertas</span><strong>{supervisorSummary.abiertas}</strong></div></div>
+              <div className="e014cMetricCard"><div className="e014cMetricIcon"><ShieldAlert size={16} /></div><div className="e014cMetricBody"><span>Alertas</span><strong>{supervisorSummary.alertas}</strong></div></div>
+            </div>
+            <div className="e016InfoGrid">
+              <div className="e016InfoPanel">
+                <div className="e016PanelTitle">Consumo aproximado</div>
+                <div className="e016InfoLine"><span>Fotos hoy</span><strong>{supervisorUsage.today?.fotos || 0}</strong></div>
+                <div className="e016InfoLine"><span>MB hoy</span><strong>{supervisorUsage.today?.mb?.toFixed ? supervisorUsage.today.mb.toFixed(2) : (supervisorUsage.today?.mb || 0)}</strong></div>
+                <div className="e016InfoLine"><span>MB mes</span><strong>{supervisorUsage.month?.mb?.toFixed ? supervisorUsage.month.mb.toFixed(2) : (supervisorUsage.month?.mb || 0)}</strong></div>
+              </div>
+              <div className="e016InfoPanel">
+                <div className="e016PanelTitle">Pendientes de cierre</div>
+                <div className="e016InfoLine"><span>Visitas abiertas</span><strong>{supervisorPendingClose.open_visits || 0}</strong></div>
+                <div className="e016InfoLine"><span>Alertas abiertas</span><strong>{supervisorPendingClose.open_alerts || 0}</strong></div>
+                <div className="e016InfoLine"><span>Revisiones pendientes</span><strong>{supervisorPendingClose.pending_reviews || 0}</strong></div>
               </div>
             </div>
           </div>
@@ -3522,17 +3599,27 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Detalle</div>
                 {selectedTeamMember ? (
                   <>
-                    <div className="summaryLine"><strong>{selectedTeamMember.nombre}</strong></div>
-                    <div className="summaryLine">Región: {selectedTeamMember.region || "-"}</div>
-                    <div className="summaryLine">Visitas hoy: <strong>{selectedTeamMember.visitas_hoy}</strong></div>
-                    <div className="summaryLine">Abiertas: <strong>{selectedTeamMember.visitas_abiertas}</strong></div>
-                    <div className="summaryLine">Evidencias hoy: <strong>{selectedTeamMember.evidencias_hoy}</strong></div>
-                    <div className="summaryLine">Alertas abiertas: <strong>{selectedTeamMember.alertas_abiertas}</strong></div>
-                    <div className="summaryLine">Última tienda: {selectedTeamMember.ultima_tienda_display || selectedTeamMember.ultima_tienda || "-"}</div>
-                    <div className="summaryLine">Última entrada: {formatHourFromIso(selectedTeamMember.ultima_entrada)}</div>
-                    <div className="summaryLine">Última salida: {selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</div>
-                    <div className="summaryLine">Estatus: <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span></div>
-                    <div className="actionGrid actionGridButtons">
+                    <div className="e016DetailHero">
+                      <div>
+                        <div className="e016DetailEyebrow">Promotor</div>
+                        <div className="e016DetailTitle">{selectedTeamMember.nombre}</div>
+                        <div className="e016DetailSub">Región: {selectedTeamMember.region || "-"}</div>
+                      </div>
+                      <span className={`riskBadge ${statusClass(selectedTeamMember.status_general)}`}>{selectedTeamMember.status_general}</span>
+                    </div>
+                    <div className="e016MiniMetricGrid">
+                      <div><span>Visitas</span><strong>{selectedTeamMember.visitas_hoy}</strong></div>
+                      <div><span>Abiertas</span><strong>{selectedTeamMember.visitas_abiertas}</strong></div>
+                      <div><span>Evidencias</span><strong>{selectedTeamMember.evidencias_hoy}</strong></div>
+                      <div><span>Alertas</span><strong>{selectedTeamMember.alertas_abiertas}</strong></div>
+                    </div>
+                    <div className="e016InfoPanel e016ActivityPanel">
+                      <div className="e016PanelTitle">Última actividad</div>
+                      <div className="e016InfoLine"><span>Tienda</span><strong>{selectedTeamMember.ultima_tienda_display || selectedTeamMember.ultima_tienda || "-"}</strong></div>
+                      <div className="e016InfoLine"><span>Entrada</span><strong>{formatHourFromIso(selectedTeamMember.ultima_entrada)}</strong></div>
+                      <div className="e016InfoLine"><span>Salida</span><strong>{selectedTeamMember.ultima_salida ? formatHourFromIso(selectedTeamMember.ultima_salida) : "Pendiente"}</strong></div>
+                    </div>
+                    <div className="actionGrid actionGridButtons e016ActionGrid">
                       <button className="actionButton" onClick={() => { setSupEvidencePromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("evidencias"); }}><ImageIcon size={16} /><span>Ver evidencias</span></button>
                       <button className="actionButton" onClick={() => { setAlertPromotorFilter(selectedTeamMember.promotor_id); setSupervisorModule("alertas"); }}><ShieldAlert size={16} /><span>Ver alertas</span></button>
                       <button className="actionButton" onClick={() => setStatusMsg(supervisorDayRoute.length ? "Selecciona una visita del día abajo." : "Este promotor no tiene visitas del día.")}><Eye size={16} /><span>Ver visitas</span></button>
@@ -3616,12 +3703,20 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Detalle</div>
                 {selectedAlert ? (
                   <>
-                    <div className="summaryLine"><strong>{selectedAlert.promotor_nombre || selectedAlert.promotor_id}</strong></div>
-                    <div className="summaryLine">Tienda: {selectedAlert.tienda_display || selectedAlert.tienda_nombre || selectedAlert.tienda_id || "-"}</div>
-                    <div className="summaryLine">Tipo: {selectedAlert.tipo_alerta}</div>
-                    <div className="summaryLine">Fecha: {selectedAlert.fecha_hora_fmt}</div>
-                    <div className="summaryLine">Canal: {selectedAlert.canal_notificacion || "-"}</div>
-                    <div className="summaryLine">Descripción: {selectedAlert.descripcion || "-"}</div>
+                    <div className="e016DetailHero">
+                      <div>
+                        <div className="e016DetailEyebrow">Alerta</div>
+                        <div className="e016DetailTitle">{selectedAlert.promotor_nombre || selectedAlert.promotor_id}</div>
+                        <div className="e016DetailSub">{selectedAlert.tienda_display || selectedAlert.tienda_nombre || selectedAlert.tienda_id || "Tienda"}</div>
+                      </div>
+                      <div className="e016BadgeStack"><span className={`riskBadge ${severityClass(selectedAlert.severidad)}`}>{selectedAlert.severidad}</span><span className={`riskBadge ${statusClass(selectedAlert.status)}`}>{selectedAlert.status}</span></div>
+                    </div>
+                    <div className="e016InfoPanel e016ActivityPanel">
+                      <div className="e016InfoLine"><span>Tipo</span><strong>{selectedAlert.tipo_alerta}</strong></div>
+                      <div className="e016InfoLine"><span>Fecha</span><strong>{selectedAlert.fecha_hora_fmt}</strong></div>
+                      <div className="e016InfoLine"><span>Canal</span><strong>{selectedAlert.canal_notificacion || "-"}</strong></div>
+                    </div>
+                    <div className="e016DescriptionBox">{selectedAlert.descripcion || "Sin descripción"}</div>
                     {(selectedAlert.photo_url || selectedAlert.url_foto) ? <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedAlert.photo_url || selectedAlert.url_foto || "")} onClick={() => handleImageTap(selectedAlert.photo_url || selectedAlert.url_foto || "")}><img src={selectedAlert.photo_url || selectedAlert.url_foto} alt={selectedAlert.tipo_alerta} className="img" /></div> : null}
                     {selectedAlert.hallazgos_ai ? <div className="summaryLine">Causa detectada: {selectedAlert.hallazgos_ai}</div> : null}
                     <div className="geoRow">
@@ -3670,6 +3765,19 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <span><strong>{supervisorEvidenceSummary.observadas + supervisorEvidenceSummary.rechazadas}</strong><small>Con acción</small></span>
               </div>
             </div>
+
+            <div className="e016DateFilterBar">
+              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "hoy" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("hoy")}>Hoy</button>
+              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "semana" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("semana")}>Semana</button>
+              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "rango" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("rango")}>Rango</button>
+              <span className="e016DateLabel">Mostrando: {supervisorDateBounds.label}</span>
+            </div>
+            {supEvidenceDatePreset === "rango" ? (
+              <div className="e016RangeRow">
+                <input className="inputLike" type="date" value={supEvidenceDateStart} onChange={(e) => setSupEvidenceDateStart(e.target.value)} />
+                <input className="inputLike" type="date" value={supEvidenceDateEnd} onChange={(e) => setSupEvidenceDateEnd(e.target.value)} />
+              </div>
+            ) : null}
 
             <details className="e013FiltersDrawer">
               <summary>Filtros opcionales</summary>
@@ -3759,11 +3867,11 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         </div>
                       ) : null}
 
-                      <input className="inputLike e013CommentInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional para observar o rechazar" />
+                      <input className="inputLike e013CommentInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional para comentar o rechazar" />
 
                       <div className="e013DecisionDock">
                         <button className="actionButton e013Approve" onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>Aprobar</span></button>
-                        <button className="actionButton e013Comment" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>Observar</span></button>
+                        <button className="actionButton e013Comment" onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>Comentar</span></button>
                         <button className="actionButton e013Reject" onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>Rechazar</span></button>
                       </div>
                     </>
@@ -4300,7 +4408,36 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
-@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
+
+	/* E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN */
+	.e016SupervisorSummaryCard { padding: 16px; }
+	.e016SupervisorHero { margin-top: 14px; }
+	.e016SupervisorMetricGrid { margin-top: 12px; }
+	.e016InfoGrid { margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+	.e016InfoPanel { border-radius: 16px; padding: 12px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.92)); border: 1px solid rgba(38,50,56,.08); box-shadow: inset 0 1px 0 rgba(255,255,255,.72); }
+	.e016PanelTitle { font-size: 12px; font-weight: 900; color: #263238; margin-bottom: 8px; letter-spacing: .01em; }
+	.e016InfoLine { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 7px 0; border-top: 1px solid rgba(38,50,56,.06); color: #607d8b; font-size: 12px; text-align: left; }
+	.e016InfoLine:first-of-type { border-top: 0; }
+	.e016InfoLine strong { color: #263238; text-align: right; overflow-wrap: anywhere; }
+	.e016DetailHero { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 16px; background: linear-gradient(135deg, rgba(232,245,233,.92), rgba(255,255,255,.96)); border: 1px solid rgba(76,175,80,.18); text-align: left; }
+	.e016DetailEyebrow { font-size: 10px; font-weight: 900; color: #2e7d32; text-transform: uppercase; letter-spacing: .08em; }
+	.e016DetailTitle { margin-top: 3px; font-size: 16px; line-height: 1.2; font-weight: 900; color: #263238; }
+	.e016DetailSub { margin-top: 5px; color: #607d8b; font-size: 12px; font-weight: 700; }
+	.e016MiniMetricGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+	.e016MiniMetricGrid > div { border-radius: 14px; padding: 10px; background: rgba(255,255,255,.96); border: 1px solid rgba(38,50,56,.08); text-align: left; }
+	.e016MiniMetricGrid span { display: block; color: #607d8b; font-size: 11px; font-weight: 800; }
+	.e016MiniMetricGrid strong { display: block; margin-top: 4px; color: #263238; font-size: 22px; font-weight: 900; }
+	.e016ActivityPanel { margin-top: 10px; }
+	.e016ActionGrid { margin-top: 10px; }
+	.e016BadgeStack { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+	.e016DescriptionBox { margin: 10px 0; padding: 11px 12px; border-radius: 14px; background: rgba(239,246,255,.76); border: 1px solid rgba(96,125,139,.12); color: #455a64; font-size: 13px; line-height: 1.35; text-align: left; }
+	.e016DateFilterBar { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+	.e016DateChip { flex: 0 0 auto; border: 1px solid rgba(38,50,56,.08); background: rgba(255,255,255,.96); color: #455a64; border-radius: 999px; padding: 9px 13px; font-weight: 900; cursor: pointer; }
+	.e016DateChipActive { background: #4caf50; color: #fff; border-color: rgba(76,175,80,.58); box-shadow: 0 8px 18px rgba(76,175,80,.18); }
+	.e016DateLabel { flex: 0 0 auto; color: #607d8b; font-size: 12px; font-weight: 800; padding: 0 4px; }
+	.e016RangeRow { margin-top: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+@media (max-width: 900px) { .twoCol, .actionGrid, .summaryGrid, .actionGridButtons, .captureGrid, .captureGrid.threeCols, .filtersRow, .twoColsFilters, .quickActionRow, .viewerActionRow, .supervisorSummaryGrid, .e016InfoGrid, .e016RangeRow { grid-template-columns: 1fr; } .reviewRailCard { flex-basis: 136px; } .reviewRailCardWide { flex-basis: 180px; } .galleryCard { flex-basis: 220px; } .galleryCardCompact { min-width: 240px; } .viewerChrome { left: 8px; right: 8px; } }
 @media (max-width: 760px) { .heroTitleBlockWide { width: min(220px, 58%); min-width: 168px; } .heroMetaSingleWide { max-width: 190px; } .cameraModal, .cameraModalTight { width: calc(100vw - 16px); max-height: calc(100vh - 64px); padding: 10px; } .cameraViewport { max-height: min(42vh, 320px); } .cameraViewportTight { max-height: min(48vh, 440px); } .cameraVideo { min-height: 0; max-height: min(42vh, 320px); } .cameraVideoTight { max-height: min(48vh, 440px); } .cameraActionRow, .cameraActionRowTight { grid-template-columns: 1fr 1fr; } .mainActionBtn { min-height: 54px; padding: 12px 12px; } .compactBtn, .assistQuickBtn { padding: 12px 14px; } }
 
 /* E014C_PROMOTOR_SUMMARY_REDESIGN --------------------------------------------
