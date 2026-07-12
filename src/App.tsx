@@ -1,3 +1,4 @@
+// E015_PROMOTOR_MARCA_FUERA_SERVICIO: permite justificar marca fuera de servicio por visita en version promotor.
 // E014E_FIX4_REZGO_LOGO_HEADER_BUILD_OK: corrige export, conserva resumen E014C FIX1 y muestra tagline ASCII marker Pasion por la movilidad.
 // E014F_REGISTRAR_EVIDENCIA_INLINE_LEFT: boton Registrar evidencia con icono y texto en una sola linea, alineado a la izquierda.
 // E014E_FIX2_REZGO_LOGO_HEADER_TAGLINE: logo oficial REZGO con frase visible Pasión por la movilidad. Verifier ASCII marker: Pasion por la movilidad.
@@ -169,6 +170,17 @@ type ReplaceEvidenceResponse = {
   warning?: string;
 };
 
+type MarcaFueraServicioItem = {
+  registro_id?: string;
+  fecha_hora?: string;
+  visita_id?: string;
+  tienda_id?: string;
+  marca_id: string;
+  motivo?: string;
+  comentario?: string;
+  estatus?: string;
+};
+
 type EvidenceContextResponse = {
   ok: boolean;
   visita?: {
@@ -178,6 +190,13 @@ type EvidenceContextResponse = {
     tienda_display?: string;
   };
   marcas?: Array<{ marca_id: string; marca_nombre: string }>;
+  marcas_fuera_servicio?: MarcaFueraServicioItem[];
+};
+
+type MarcaFueraServicioResponse = {
+  ok: boolean;
+  message?: string;
+  row?: MarcaFueraServicioItem;
 };
 
 type EvidenceRulesResponse = {
@@ -926,6 +945,17 @@ function getCurrentLocation() {
   });
 }
 
+const marcaFueraServicioMotivos = [
+  "Sin servicio vigente",
+  "Visita no corresponde esta semana",
+  "Marca de visita quincenal",
+  "Sin exhibición",
+  "Producto retirado",
+  "Sin inventario / sin presencia",
+  "No autorizado por tienda",
+  "Otro",
+];
+
 const promotorTabs: Array<{ key: PromotorModule; label: string }> = [
   { key: "asistencia", label: "Inicio" },
   { key: "evidencias", label: "Capturar" },
@@ -985,6 +1015,9 @@ export default function App() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<PhotoCapture[]>([]);
   const [availableBrands, setAvailableBrands] = useState<Array<{ marca_id: string; marca_nombre: string }>>([]);
+  const [brandsOutOfService, setBrandsOutOfService] = useState<Record<string, MarcaFueraServicioItem>>({});
+  const [outOfServiceReason, setOutOfServiceReason] = useState("Marca de visita quincenal");
+  const [outOfServiceComment, setOutOfServiceComment] = useState("");
   const [brandRules, setBrandRules] = useState<Array<{ tipo_evidencia: string; fotos_requeridas: number; requiere_antes_despues: boolean; orden?: number; obligatoria?: boolean; observaciones?: string }>>([]);
   const [selectedVisitStoreName, setSelectedVisitStoreName] = useState("");
 
@@ -1179,6 +1212,7 @@ export default function App() {
   const exitVisit = useMemo(() => openVisits.find((v) => v.visita_id === selectedVisitId) || openVisits[0] || null, [openVisits, selectedVisitId]);
   const hasOpenVisit = Boolean(exitVisit);
   const selectedVisitHasNoBrands = Boolean(selectedVisitId && selectedVisitStoreName && availableBrands.length === 0);
+  const selectedBrandOutOfService = evidenceBrandId ? brandsOutOfService[evidenceBrandId] : null;
 
   const evidenceTypeOptions = useMemo(() => {
     return brandRules
@@ -1580,6 +1614,7 @@ export default function App() {
   async function loadEvidenceContext(visitaId: string) {
     if (!visitaId) {
       setAvailableBrands([]);
+      setBrandsOutOfService({});
       setBrandRules([]);
       setSelectedVisitStoreName("");
       return;
@@ -1588,18 +1623,21 @@ export default function App() {
     if (isLocalVisitId(visitaId) && offlineVisit) {
       const cachedBrands = storeBrandsCache[offlineVisit.tienda_id] || [];
       setAvailableBrands(cachedBrands);
+      setBrandsOutOfService({});
       setSelectedVisitStoreName(getVisitDisplayName(offlineVisit, stores));
       return;
     }
     try {
       const ctx = await postJson<EvidenceContextResponse>("/miniapp/promotor/evidence-context", { visita_id: visitaId });
       setAvailableBrands(ctx.marcas || []);
+      setBrandsOutOfService(Object.fromEntries((ctx.marcas_fuera_servicio || []).filter((item) => item.marca_id).map((item) => [item.marca_id, item])));
       setSelectedVisitStoreName(ctx.visita?.tienda_display || ctx.visita?.tienda_nombre || "");
       if (ctx.visita?.tienda_id && ctx.marcas?.length) {
         setStoreBrandsCache((prev) => ({ ...prev, [ctx.visita!.tienda_id]: ctx.marcas || [] }));
       }
     } catch {
       setAvailableBrands([]);
+      setBrandsOutOfService({});
       setSelectedVisitStoreName("");
     }
   }
@@ -2350,11 +2388,51 @@ export default function App() {
     }
   }
 
+  async function markSelectedBrandOutOfService() {
+    try {
+      if (!selectedVisitId) return setStatusMsg("Selecciona una visita activa.");
+      if (!evidenceBrandId) return setStatusMsg("Selecciona una marca.");
+      if (!outOfServiceReason.trim()) return setStatusMsg("Selecciona el motivo de fuera de servicio.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
+      const brandLabel = evidenceBrandLabel || availableBrands.find((item) => item.marca_id === evidenceBrandId)?.marca_nombre || evidenceBrandId;
+      if (typeof window !== "undefined" && !window.confirm(`¿Marcar ${brandLabel} como fuera de servicio en esta visita?`)) return;
+      setSyncing(true);
+      let geo: Partial<LocationCapture> = {};
+      try {
+        geo = await getCurrentLocation();
+      } catch {
+        geo = {};
+      }
+      const response = await postJson<MarcaFueraServicioResponse>("/miniapp/promotor/marca-fuera-servicio", {
+        visita_id: selectedVisitId,
+        marca_id: evidenceBrandId,
+        motivo: outOfServiceReason.trim(),
+        comentario: outOfServiceComment.trim(),
+        lat: geo.lat ?? "",
+        lon: geo.lon ?? "",
+        accuracy: geo.accuracy ?? "",
+      });
+      const row = response.row || { marca_id: evidenceBrandId, motivo: outOfServiceReason.trim(), comentario: outOfServiceComment.trim(), estatus: "ACTIVA" };
+      setBrandsOutOfService((prev) => ({ ...prev, [evidenceBrandId]: row }));
+      setEvidencePhotos([]);
+      setEvidenceType("");
+      setEvidenceDescription("");
+      setOutOfServiceComment("");
+      setStatusMsg("Marca marcada fuera de servicio para esta visita. No contará como evidencia pendiente de esta marca.");
+      await loadEvidenceContext(selectedVisitId);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo marcar la marca fuera de servicio.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function saveEvidenceFlow() {
     let queuedPayload: Record<string, unknown> | null = null;
     try {
       if (!selectedVisitId) return setStatusMsg("Selecciona una visita activa.");
       if (!evidenceBrandLabel.trim()) return setStatusMsg("Selecciona una marca.");
+      if (selectedBrandOutOfService) return setStatusMsg("Esta marca ya fue marcada fuera de servicio para esta visita.");
       if (!evidenceType.trim()) return setStatusMsg("Selecciona o escribe el tipo de evidencia.");
       if (!evidencePhotos.length) return setStatusMsg("Agrega al menos una foto de evidencia.");
       if (evidencePhotos.length < evidenceQty) return setStatusMsg(`Debes cargar al menos ${evidenceQty} foto(s).`);
@@ -3099,15 +3177,39 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 }}>
                   <option value="">{selectedVisitHasNoBrands ? "Tienda sin marcas activas" : "Selecciona una marca"}</option>
                   {availableBrands.map((brand) => (
-                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}</option>
+                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}{brandsOutOfService[brand.marca_id] ? " · Fuera de servicio" : ""}</option>
                   ))}
                 </select>
                 {selectedVisitHasNoBrands ? (
                   <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
                 ) : null}
 
+                {evidenceBrandId ? (
+                  <div className="outOfServiceBox">
+                    {selectedBrandOutOfService ? (
+                      <>
+                        <div className="outOfServiceTitle">Marca fuera de servicio en esta visita</div>
+                        <div className="outOfServiceText">Motivo: {selectedBrandOutOfService.motivo || "Sin motivo"}</div>
+                        {selectedBrandOutOfService.comentario ? <div className="outOfServiceText">Comentario: {selectedBrandOutOfService.comentario}</div> : null}
+                      </>
+                    ) : (
+                      <>
+                        <div className="outOfServiceTitle">¿Esta marca no debe atenderse hoy?</div>
+                        <select className="inputLike" value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
+                          {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
+                        </select>
+                        <input className="inputLike" style={{ marginTop: 8 }} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
+                        <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => void markSelectedBrandOutOfService()}>
+                          <ShieldAlert size={16} />
+                          Marcar fuera de servicio
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
+                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
                   const nextType = e.target.value;
                   setEvidenceType(nextType);
                   const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
@@ -3122,7 +3224,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </select>
 
                 <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
-                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !evidenceType}>
+                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
                   {evidencePhaseOptions.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
                 </select>
 
@@ -3134,12 +3236,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <label className="fieldLabel">Observación</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
                 <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
+                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
                     <Camera size={16} />
                     Tomar foto
                   </button>
                   {evidenceGalleryAuth.allowed ? (
-                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
+                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
                       <ImageIcon size={16} />
                       Galería autorizada
                     </button>
@@ -3161,7 +3263,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </div>
                   </>
                 ) : null}
-                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !evidenceType}>
+                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
                   <span className="mainActionTop e014fEvidenceActionTop"><Camera size={16} /><span>{syncing ? "Guardando..." : "Registrar evidencia"}</span></span>
                 </button>
               </div>
@@ -4168,6 +4270,10 @@ input[type=file] { display: none; }
 .removeThumbBtn { position: absolute; right: -4px; top: -4px; width: 22px; height: 22px; border-radius: 999px; border: 0; background: rgba(211,47,47,0.95); color: white; font-weight: 900; cursor: pointer; }
 .authTraceBox { margin-top: 8px; padding: 9px 11px; border-radius: 12px; background: rgba(76,175,80,0.08); border: 1px solid rgba(76,175,80,0.18); color: #2f4f37; font-size: 11px; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
 .mainActionBtn { width: 100%; max-width: 100%; box-sizing: border-box; padding: 12px 14px; white-space: normal; line-height: 1.15; min-height: 56px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; text-align: left; gap: 4px; overflow: hidden; }
+.outOfServiceBox { margin-top: 10px; padding: 12px; border: 1px solid rgba(245, 158, 11, .35); border-radius: 16px; background: rgba(255, 247, 237, .78); display: grid; gap: 8px; }
+.outOfServiceTitle { font-weight: 900; color: #7c2d12; font-size: .92rem; }
+.outOfServiceText { color: #7c2d12; font-size: .84rem; line-height: 1.35; }
+.outOfServiceBtn { width: 100%; justify-content: flex-start; margin-top: 2px; border-color: rgba(245, 158, 11, .5); background: rgba(255, 255, 255, .75); }
 .mainActionTop { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 100%; min-width: 0; text-align: left; }
 .mainActionTop > span:last-child { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
 /* E014F: Registrar evidencia icono + texto en una sola linea y alineado a la izquierda */
