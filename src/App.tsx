@@ -1,3 +1,4 @@
+// E024F_UN_BOTON_VOLVER_REVISAR: elimina botón secundario y usa cierre seguro como única acción final.
 // E024E_FIX_BOT_USERNAME_RETURN: usa @promobolsillo_operacion_bot para regresar desde cámara a Mini App.
 // E024D_CLARIDAD_MIS_FOTOS_RETURN: Con foto/Sin servicio/Todo, regreso a Mis fotos, botón claro y sin texto redundante.
 // E024C_RETURN_TO_MINIAPP_CAPTURE: botón de regreso abre Mini App en Capturar/Evidencias y evita volver al chat.
@@ -1377,7 +1378,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   }
 
   function closeExternalCameraSafely() {
-    setStatus("Cierra esta ventana con la X superior. Para revisar lo capturado, usa Volver y revisar evidencias.");
+    setStatus("Volviendo a PromoBolsillo. Si no se cierra automáticamente, toca la X superior.");
     try { window.close(); } catch {}
   }
 
@@ -1403,11 +1404,8 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
             <div style={{ borderRadius: 18, background: "#dcfce7", color: "#166534", padding: 13, fontWeight: 900 }}>
               Listo. Las fotos ya fueron enviadas al registro de evidencias.
             </div>
-            <button type="button" onClick={returnToMiniAppCapture} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
               Volver y revisar evidencias
-            </button>
-            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, background: "transparent", color: "#64748b", padding: "8px 10px", fontWeight: 850, fontSize: 13, textDecoration: "underline" }}>
-              Cerrar sin revisar ahora
             </button>
           </div>
         </div>
