@@ -1,4 +1,4 @@
-// E021_CAMERA_TEST_AB_TELEGRAM: prueba controlada de cámara para evidencias dentro de Telegram; no es fix final de producción.
+// E022_EXTERNAL_CAMERA_PHASE1_PWA: prototipo de captura externa desde Telegram con token temporal; no usa galeria salvo autorizacion.
 // E020F_BUILD_FIX_OPEN_CAMERA_FACING_USED: corrige TS6133 usando el parametro facing en openCamera; conserva E020C/E020D/E020E.
 // E020E_BUILD_FIX_UNUSED_FACING: corrige TS6133 variable facing no usada; conserva E020C/E020D.
 // E020D_BUILD_FIX_CSS_STYLE_TAG: corrige JSX style tag mal formado en E020C; conserva camara mejorada, filtros claros y fixes E020B.
@@ -48,6 +48,7 @@ declare global {
         expand?: () => void;
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
+        openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
       };
     };
   }
@@ -172,6 +173,33 @@ type EvidenceRegisterResponse = {
   visita_id: string;
   created: string[];
   count: number;
+  warning?: string;
+};
+
+type ExternalCameraSessionResponse = {
+  ok: boolean;
+  capture_url: string;
+  expires_at?: string;
+};
+
+type ExternalCameraContextResponse = {
+  ok: boolean;
+  context?: {
+    tienda_id?: string;
+    tienda_nombre?: string;
+    marca_id?: string;
+    marca_nombre?: string;
+    tipo_evidencia?: string;
+    fase?: string;
+    descripcion?: string;
+    expires_at?: string;
+  };
+};
+
+type ExternalCameraUploadResponse = {
+  ok: boolean;
+  evidencia_id?: string;
+  message?: string;
   warning?: string;
 };
 
@@ -662,6 +690,24 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
   }
 }
 
+async function postExternalJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 45000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((json as { error?: string }).error || `Error ${res.status}`);
+    return json as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function formatHourFromIso(iso: string) {
   if (!iso) return "pendiente";
   const d = new Date(iso);
@@ -1064,12 +1110,112 @@ const clientTabs: Array<{ key: ClientModule; label: string }> = [
   { key: "entregables", label: "Entregables" },
 ];
 
+
+function ExternalCameraCapturePage({ token }: { token: string }) {
+  const nativeCameraRef = useRef<HTMLInputElement | null>(null);
+  const [context, setContext] = useState<ExternalCameraContextResponse["context"] | null>(null);
+  const [preview, setPreview] = useState("");
+  const [status, setStatus] = useState("Preparando cámara externa...");
+  const [uploading, setUploading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    async function loadContext() {
+      try {
+        const data = await postExternalJson<ExternalCameraContextResponse>("/external-camera/context", { token });
+        if (!alive) return;
+        setContext(data.context || null);
+        setStatus("Lista para tomar evidencia.");
+      } catch (err) {
+        if (!alive) return;
+        setError(err instanceof Error ? err.message : "No se pudo validar la sesión de cámara.");
+        setStatus("");
+      }
+    }
+    void loadContext();
+    return () => { alive = false; };
+  }, [token]);
+
+  async function handleNativeEvidenceSelection(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      setError("");
+      setUploading(true);
+      setStatus("Procesando foto...");
+      const photo = await readPhotoForSheets(file);
+      setPreview(photo.dataUrl);
+      setStatus("Subiendo evidencia...");
+      const result = await postExternalJson<ExternalCameraUploadResponse>("/external-camera/upload", { token, photo }, 60000);
+      setUploaded(true);
+      setStatus(result.message || "Evidencia registrada. Puedes volver a Telegram.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo subir la evidencia.");
+      setStatus("");
+    } finally {
+      setUploading(false);
+      if (nativeCameraRef.current) nativeCameraRef.current.value = "";
+    }
+  }
+
+  const brand = context?.marca_nombre || context?.marca_id || "Marca";
+  const store = context?.tienda_nombre || context?.tienda_id || "Tienda";
+  const type = context?.tipo_evidencia || "Evidencia";
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f5f7fb 0%,#eef2f7 100%)", padding: 18, fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#17212b" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto", display: "grid", gap: 14 }}>
+        <div style={{ borderRadius: 24, background: "#fff", border: "1px solid rgba(15,23,42,.08)", boxShadow: "0 16px 42px rgba(15,23,42,.10)", padding: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 900, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+          <h1 style={{ margin: "8px 0 6px", fontSize: 28, lineHeight: 1.05 }}>Captura de evidencia</h1>
+          <p style={{ margin: 0, color: "#64748b", fontWeight: 700 }}>Módulo externo de prueba para usar la cámara del celular con mejor encuadre.</p>
+        </div>
+
+        <div style={{ borderRadius: 22, background: "#fff", border: "1px solid rgba(15,23,42,.08)", padding: 16, display: "grid", gap: 9 }}>
+          <div style={{ fontWeight: 950, fontSize: 18 }}>{store}</div>
+          <div style={{ color: "#334155", fontWeight: 850 }}>{brand}</div>
+          <div style={{ color: "#64748b", fontWeight: 800 }}>{type}{context?.fase ? ` · ${formatPhaseLabel(context.fase)}` : ""}</div>
+          {context?.descripcion ? <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14 }}>Comentario: {context.descripcion}</div> : null}
+        </div>
+
+        {error ? <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 14, fontWeight: 900 }}>{error}</div> : null}
+        {status ? <div style={{ borderRadius: 18, background: uploaded ? "#dcfce7" : "#e0f2fe", color: uploaded ? "#166534" : "#075985", padding: 14, fontWeight: 900 }}>{status}</div> : null}
+
+        {preview ? <img src={preview} alt="Evidencia" style={{ width: "100%", borderRadius: 22, border: "1px solid rgba(15,23,42,.10)", boxShadow: "0 14px 36px rgba(15,23,42,.16)" }} /> : null}
+
+        <button
+          type="button"
+          disabled={uploading || !token || !!error}
+          onClick={() => nativeCameraRef.current?.click()}
+          style={{ border: 0, borderRadius: 22, background: uploading ? "#94a3b8" : "#22c55e", color: "#fff", padding: "18px 20px", fontWeight: 950, fontSize: 20, boxShadow: "0 12px 24px rgba(34,197,94,.28)" }}
+        >
+          {uploading ? "Subiendo..." : uploaded ? "Tomar otra foto" : "Abrir cámara"}
+        </button>
+        <input ref={nativeCameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(event) => void handleNativeEvidenceSelection(event.target.files)} />
+
+        <div style={{ borderRadius: 18, background: "rgba(255,255,255,.76)", border: "1px dashed rgba(15,23,42,.18)", padding: 14, color: "#475569", fontWeight: 750, lineHeight: 1.45 }}>
+          Si el celular abre galería en lugar de cámara, no selecciones fotos. Eso confirmaría que este navegador tampoco garantiza cámara trasera directa.
+        </div>
+
+        <button type="button" onClick={() => window.history.length > 1 ? window.history.back() : window.close()} style={{ border: "1px solid rgba(15,23,42,.12)", borderRadius: 18, background: "#fff", color: "#334155", padding: "14px 16px", fontWeight: 900 }}>
+          Volver a PromoBolsillo
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // E014E_FIX3_EXPORT_AND_STYLE_FIX: corrige export default function App y estilos del header/boton.
 // E014E_REZGO_LOGO_HEADER: Logo oficial REZGO + frase Pasión por la movilidad.
 const REZGO_HORIZONTAL_LOGO_E014E = "data:image/jpeg;base64,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";
 
 export default function App() {
   const tg = getTelegramWebApp();
+  const externalCameraParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const isExternalCameraMode = externalCameraParams?.get("external_camera") === "1";
+  const externalCameraToken = externalCameraParams?.get("token") || "";
 
   const [role, setRole] = useState<AppRole>(null);
   const [actorLabel, setActorLabel] = useState("Operador");
@@ -2010,6 +2156,10 @@ export default function App() {
   }
 
   async function initialize() {
+    if (isExternalCameraMode) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError("");
@@ -2716,6 +2866,41 @@ export default function App() {
     }
   }
 
+  async function startExternalCameraForEvidence() {
+    try {
+      if (!selectedVisitId) {
+        showCaptureGuard("Primero selecciona una visita/tienda activa. Después podrás tomar foto de evidencia.");
+        return;
+      }
+      if (!evidenceBrandLabel.trim()) return setStatusMsg("Selecciona una marca.");
+      if (selectedBrandOutOfService) return setStatusMsg("Esta marca ya fue marcada fuera de servicio para esta visita.");
+      if (!evidenceType.trim()) return setStatusMsg("Selecciona o escribe el tipo de evidencia.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
+      setSyncing(true);
+      setStatusMsgDuration(9000);
+      setStatusMsg("Abriendo módulo de cámara...");
+      const data = await postJson<ExternalCameraSessionResponse>("/miniapp/promotor/external-camera-session", {
+        visita_id: selectedVisitId,
+        marca_id: evidenceBrandId,
+        marca_nombre: evidenceBrandLabel,
+        tipo_evidencia: evidenceType,
+        fase: evidencePhase,
+        descripcion: evidenceDescription.trim(),
+      });
+      if (!data.capture_url) throw new Error("No se recibió URL de cámara externa.");
+      if (tg?.openLink) {
+        tg.openLink(data.capture_url, { try_instant_view: false });
+      } else {
+        window.open(data.capture_url, "_blank", "noopener,noreferrer");
+      }
+      setStatusMsg("Se abrió el módulo de cámara. Al terminar, vuelve a PromoBolsillo y actualiza tus evidencias.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo abrir el módulo de cámara.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function saveEvidenceFlow() {
     let queuedPayload: Record<string, unknown> | null = null;
     try {
@@ -3134,6 +3319,10 @@ ${evidenceToCancel.fecha_hora_fmt}`);
   void selectBrandSupervisorEvidences;
   void runBatchEvidenceReview;
   void runBrandEvidenceReview;
+
+  if (isExternalCameraMode) {
+    return <ExternalCameraCapturePage token={externalCameraToken} />;
+  }
 
   if (loading) {
     return (
@@ -3650,7 +3839,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 {!selectedVisitId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una visita/tienda activa. Después podrás tomar foto de evidencia.</div> : null}
                 {captureGuardMsg && promotorModule === "evidencias" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
                 <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
+                  <button className="secondaryBtn compactBtn" disabled={syncing || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void startExternalCameraForEvidence()}>
                     <Camera size={16} />
                     Tomar foto
                   </button>
@@ -3663,38 +3852,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </div>
                 <input ref={evidenceNativeCameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("evidencia", e.target.files)} />
                 <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleGallerySelection("evidence", e.target.files)} />
-                <div className="contextHint">La cámara de evidencia se abre desde la Mini App con cámara trasera. La galería solo se habilita cuando existe autorización. Máximo 24 fotos en la selección actual.</div>
-                <details className="e021CameraTestBox">
-                  <summary>Prueba de cámara E021</summary>
-                  <div className="contextHint">
-                    Prueba controlada para comparar cómo responde Telegram en este celular. Usa una opción, revisa si abre cámara trasera real, selector/galería, zoom y encuadre. Esta sección es temporal de diagnóstico.
-                  </div>
-                  <div className="captureGrid e021CameraTestGrid">
-                    <button className="secondaryBtn compactBtn" type="button" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment")}>
-                      <Camera size={16} />
-                      A · Integrada
-                    </button>
-                    <button className="secondaryBtn compactBtn" type="button" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => {
-                      if (!selectedVisitId) {
-                        showCaptureGuard("Primero selecciona una visita/tienda activa. Después podrás probar la cámara.");
-                        return;
-                      }
-                      setStatusMsg("Prueba B: si Telegram lo permite, debería abrir cámara trasera nativa; si abre selector/galería, esa limitación queda confirmada.");
-                      setStatusMsgDuration(9000);
-                      evidenceNativeCameraInputRef.current?.click();
-                    }}>
-                      <Camera size={16} />
-                      B · Nativa
-                    </button>
-                    <button className="secondaryBtn compactBtn" type="button" disabled={!evidenceGalleryAuth.allowed || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
-                      <ImageIcon size={16} />
-                      C · Galería autorizada
-                    </button>
-                  </div>
-                  <div className="contextHint">
-                    Resultado esperado: si B vuelve a abrir galería/selector, Telegram WebView no garantiza cámara nativa directa. En ese caso la decisión será mejorar la cámara integrada o evaluar PWA/app propia para evidencias.
-                  </div>
-                </details>
+                <div className="contextHint">La evidencia se captura en un módulo externo de cámara para validar mejor encuadre. La galería solo se habilita cuando existe autorización.</div>
                 <div className="authTraceBox">Galería evidencia: <strong>{galleryReasonLabel(evidenceGalleryAuth)}</strong></div>
                 {evidencePhotos.length ? (
                   <>
@@ -4875,24 +5033,6 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
-
-
-/* E021_CAMERA_TEST_AB_TELEGRAM */
-.e021CameraTestBox {
-  margin-top: 10px;
-  border: 1px dashed rgba(14, 165, 233, .45);
-  background: rgba(240, 249, 255, .72);
-  border-radius: 16px;
-  padding: 10px 12px;
-}
-.e021CameraTestBox summary {
-  cursor: pointer;
-  font-weight: 950;
-  color: #0f2f44;
-}
-.e021CameraTestGrid {
-  margin-top: 10px;
-}
 
 /* E020C_CAMERA_MEJORADA_PROMOTOR */
 .e020cCaptureGuardStrong {
