@@ -1,3 +1,4 @@
+// E024B_FINALIZAR_SEGURO_Y_SIN_SERVICIO_CONTEXTUAL: evita Aw Snap al finalizar y mueve Sin servicio junto a Marca.
 // E024_EXTERNAL_CAMERA_UX_WORKSPACE: mini app simplificada y cámara externa con contexto integrado, galeria horizontal y anulación.
 // E023_EXTERNAL_CAMERA_WORKSPACE: cámara externa como espacio de captura; permite cambiar marca/tipo/estado y registrar múltiples fotos sin volver a Telegram.
 // E022_EXTERNAL_CAMERA_PHASE1_PWA: prototipo de captura externa desde Telegram con token temporal; no usa galeria salvo autorizacion.
@@ -1131,6 +1132,8 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const [annulledCount, setAnnulledCount] = useState(0);
   const [outOfServiceCount, setOutOfServiceCount] = useState(0);
   const [recentPhotos, setRecentPhotos] = useState<Array<{ evidencia_id?: string; name: string; dataUrl: string; marca: string; tipo: string; fase: string; status: "SUBIENDO" | "REGISTRADA" | "ANULADA" | "ERROR" }>>([]);
+  const [finished, setFinished] = useState(false);
+  const [outOfServiceMarcaIds, setOutOfServiceMarcaIds] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [showAllPhotos, setShowAllPhotos] = useState(false);
   const [outOfServiceOpen, setOutOfServiceOpen] = useState(false);
@@ -1170,10 +1173,12 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const store = context?.tienda_nombre || context?.tienda_id || "Tienda";
   const tipoLabel = selectedTipo || "Tipo";
   const faseLabel = formatPhaseLabel(selectedFase);
-  const canCapture = !!token && !error && !!selectedMarcaId && !!selectedTipo && !!context?.visita_id && !uploading;
+  const selectedBrandMarkedOutOfService = !!selectedMarcaId && !!outOfServiceMarcaIds[selectedMarcaId];
+  const canCapture = !!token && !error && !!selectedMarcaId && !!selectedTipo && !!context?.visita_id && !uploading && !selectedBrandMarkedOutOfService;
   const registeredPhotos = recentPhotos.filter((item) => item.status === "REGISTRADA");
   const activeRecentPhotos = recentPhotos.filter((item) => item.status !== "ANULADA");
   const lastRegistered = registeredPhotos[0];
+  const registeredForCurrentBrandCount = registeredPhotos.filter((item) => item.marca === marcaNombre).length;
 
   async function handleNativeEvidenceSelection(files: FileList | null) {
     const file = files?.[0];
@@ -1245,6 +1250,13 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
       setStatus("Selecciona un motivo para marcar fuera de servicio.");
       return;
     }
+    if (registeredForCurrentBrandCount > 0) {
+      const ok = window.confirm(`${marcaNombre} ya tiene ${registeredForCurrentBrandCount} foto${registeredForCurrentBrandCount === 1 ? "" : "s"} registrada${registeredForCurrentBrandCount === 1 ? "" : "s"} en esta visita. ¿Confirmas marcar solo esta marca como fuera de servicio conservando esas fotos?`);
+      if (!ok) {
+        setStatus("Sin servicio cancelado. No se modificó la marca seleccionada.");
+        return;
+      }
+    }
     try {
       setError("");
       setStatus("Registrando marca fuera de servicio...");
@@ -1254,6 +1266,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
         motivo: outOfServiceReason,
         comentario: outOfServiceComment.trim(),
       }, 45000);
+      setOutOfServiceMarcaIds((prev) => ({ ...prev, [selectedMarcaId]: true }));
       setOutOfServiceCount((prev) => prev + 1);
       setOutOfServiceOpen(false);
       setOutOfServiceComment("");
@@ -1265,13 +1278,29 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   }
 
   function finishCapture() {
-    setStatus(`Captura finalizada: ${uploadedCount} foto${uploadedCount === 1 ? "" : "s"} registrada${uploadedCount === 1 ? "" : "s"}${annulledCount ? `, ${annulledCount} anulada${annulledCount === 1 ? "" : "s"}` : ""}${outOfServiceCount ? `, ${outOfServiceCount} marca${outOfServiceCount === 1 ? "" : "s"} fuera de servicio` : ""}.`);
-    setTimeout(() => {
-      try {
-        if (window.history.length > 1) window.history.back();
-        else window.close();
-      } catch {}
-    }, 650);
+    const summary = `Captura finalizada: ${uploadedCount} foto${uploadedCount === 1 ? "" : "s"} registrada${uploadedCount === 1 ? "" : "s"}${annulledCount ? `, ${annulledCount} anulada${annulledCount === 1 ? "" : "s"}` : ""}${outOfServiceCount ? `, ${outOfServiceCount} marca${outOfServiceCount === 1 ? "" : "s"} fuera de servicio` : ""}.`;
+    setError("");
+    setStatus(summary);
+    setPreview("");
+    setRecentPhotos([]);
+    setShowAllPhotos(false);
+    setFinished(true);
+    try {
+      sessionStorage.setItem("promobolsillo_external_camera_finished", JSON.stringify({
+        uploadedCount,
+        annulledCount,
+        outOfServiceCount,
+        finishedAt: new Date().toISOString(),
+      }));
+    } catch {}
+    window.setTimeout(() => {
+      try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
+    }, 50);
+  }
+
+  function closeExternalCameraSafely() {
+    setStatus("Listo. Si esta ventana no se cierra sola, toca la X superior para volver a PromoBolsillo y luego Actualizar.");
+    try { window.close(); } catch {}
   }
 
   const shellStyle: React.CSSProperties = { minHeight: "100vh", background: "linear-gradient(180deg,#f6f8fb 0%,#e8eef5 100%)", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#17212b" };
@@ -1279,6 +1308,34 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const selectStyle: React.CSSProperties = { width: "100%", border: "1px solid rgba(15,23,42,.14)", borderRadius: 16, padding: "12px 12px", fontWeight: 850, color: "#17212b", background: "#fff", fontSize: 15, boxSizing: "border-box" };
   const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 950, color: "#64748b", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 };
   const smallButtonStyle: React.CSSProperties = { border: "1px solid rgba(15,23,42,.12)", borderRadius: 14, background: "#fff", color: "#334155", padding: "10px 12px", fontWeight: 950 };
+
+  if (finished) {
+    return (
+      <div style={shellStyle}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
+          <div style={{ ...cardStyle, padding: 18, display: "grid", gap: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+            <h1 style={{ margin: 0, fontSize: 27, lineHeight: 1.05 }}>Captura finalizada</h1>
+            <div style={{ color: "#64748b", fontWeight: 900 }}>{store}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              <div style={{ borderRadius: 18, background: "#f8fafc", padding: 12, textAlign: "center" }}><strong style={{ fontSize: 26 }}>{uploadedCount}</strong><br /><span style={{ fontSize: 12, fontWeight: 900, color: "#64748b" }}>fotos</span></div>
+              <div style={{ borderRadius: 18, background: "#f8fafc", padding: 12, textAlign: "center" }}><strong style={{ fontSize: 26 }}>{annulledCount}</strong><br /><span style={{ fontSize: 12, fontWeight: 900, color: "#64748b" }}>anuladas</span></div>
+              <div style={{ borderRadius: 18, background: "#f8fafc", padding: 12, textAlign: "center" }}><strong style={{ fontSize: 26 }}>{outOfServiceCount}</strong><br /><span style={{ fontSize: 12, fontWeight: 900, color: "#64748b" }}>sin servicio</span></div>
+            </div>
+            <div style={{ borderRadius: 18, background: "#dcfce7", color: "#166534", padding: 13, fontWeight: 900 }}>
+              Listo. Las fotos ya fueron enviadas al registro de evidencias.
+            </div>
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, borderRadius: 20, background: "#0f172a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
+              Cerrar cámara
+            </button>
+            <div style={{ borderRadius: 16, background: "#eff6ff", color: "#1d4ed8", padding: 12, fontWeight: 850, lineHeight: 1.35 }}>
+              Si esta ventana no se cierra sola, toca la X superior para volver a PromoBolsillo. Al regresar, usa Actualizar para refrescar la galería de la visita.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={shellStyle}>
@@ -1328,6 +1385,34 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
           <div style={{ borderRadius: 16, background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)", padding: 10, fontWeight: 850, color: "#334155", lineHeight: 1.3, fontSize: 13 }}>
             Capturando: <strong>{marcaNombre}</strong> · {tipoLabel} · {faseLabel}
           </div>
+          <div style={{ borderTop: "1px solid rgba(15,23,42,.08)", paddingTop: 10, display: "grid", gap: 8 }}>
+            <button type="button" onClick={() => setOutOfServiceOpen((prev) => !prev)} style={{ ...smallButtonStyle, textAlign: "left", background: selectedBrandMarkedOutOfService ? "#ecfdf5" : "#fff" }}>
+              ¿Esta marca está fuera de servicio?
+            </button>
+            <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>
+              Aplica solo a la marca seleccionada: <strong>{marcaNombre}</strong>.
+            </div>
+            {selectedBrandMarkedOutOfService ? (
+              <div style={{ borderRadius: 14, background: "#dcfce7", color: "#166534", padding: 10, fontWeight: 900 }}>
+                Esta marca ya quedó marcada fuera de servicio en esta visita. Cambia de marca para seguir capturando evidencias.
+              </div>
+            ) : null}
+            {outOfServiceOpen ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 850, color: "#334155" }}>Marca: {marcaNombre}</div>
+                <select style={selectStyle} value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
+                  {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
+                </select>
+                <input style={selectStyle} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button type="button" onClick={() => void markOutOfServiceFromCamera()} style={{ border: 0, borderRadius: 16, background: "#0f172a", color: "#fff", padding: "12px 14px", fontWeight: 950 }}>
+                    Registrar sin servicio
+                  </button>
+                  <button type="button" onClick={() => setOutOfServiceOpen(false)} style={smallButtonStyle}>Cancelar</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {error ? <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 13, fontWeight: 900 }}>{error}</div> : null}
@@ -1348,32 +1433,11 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
             {uploading ? "Registrando..." : "Capturar evidencia"}
           </button>
           <input ref={nativeCameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(event) => void handleNativeEvidenceSelection(event.target.files)} />
-          {!canCapture && !uploading ? <div style={{ color: "#92400e", background: "#fffbeb", borderRadius: 14, padding: 12, fontWeight: 850 }}>Selecciona marca y tipo para habilitar la cámara.</div> : null}
+          {!canCapture && !uploading ? <div style={{ color: "#92400e", background: "#fffbeb", borderRadius: 14, padding: 12, fontWeight: 850 }}>{selectedBrandMarkedOutOfService ? "Esta marca está marcada fuera de servicio. Cambia de marca para seguir capturando." : "Selecciona marca y tipo para habilitar la cámara."}</div> : null}
           {lastRegistered ? (
             <button type="button" onClick={() => void cancelExternalPhoto(lastRegistered)} style={{ ...smallButtonStyle, color: "#991b1b", background: "#fff7f7" }}>
               Deshacer última foto
             </button>
-          ) : null}
-        </div>
-
-        <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
-          <button type="button" onClick={() => setOutOfServiceOpen((prev) => !prev)} style={{ ...smallButtonStyle, textAlign: "left" }}>
-            ¿Marca fuera de servicio?
-          </button>
-          {outOfServiceOpen ? (
-            <div style={{ display: "grid", gap: 8 }}>
-              <div style={{ fontWeight: 850, color: "#334155" }}>Marca: {marcaNombre}</div>
-              <select style={selectStyle} value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
-                {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
-              </select>
-              <input style={selectStyle} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button type="button" onClick={() => void markOutOfServiceFromCamera()} style={{ border: 0, borderRadius: 16, background: "#0f172a", color: "#fff", padding: "12px 14px", fontWeight: 950 }}>
-                  Registrar sin servicio
-                </button>
-                <button type="button" onClick={() => setOutOfServiceOpen(false)} style={smallButtonStyle}>Cancelar</button>
-              </div>
-            </div>
           ) : null}
         </div>
 
