@@ -1,3 +1,4 @@
+// E024_EXTERNAL_CAMERA_UX_WORKSPACE: mini app simplificada y cámara externa con contexto integrado, galeria horizontal y anulación.
 // E023_EXTERNAL_CAMERA_WORKSPACE: cámara externa como espacio de captura; permite cambiar marca/tipo/estado y registrar múltiples fotos sin volver a Telegram.
 // E022_EXTERNAL_CAMERA_PHASE1_PWA: prototipo de captura externa desde Telegram con token temporal; no usa galeria salvo autorizacion.
 // E020F_BUILD_FIX_OPEN_CAMERA_FACING_USED: corrige TS6133 usando el parametro facing en openCamera; conserva E020C/E020D/E020E.
@@ -1127,8 +1128,14 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const [status, setStatus] = useState("Preparando cámara de evidencias...");
   const [uploading, setUploading] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
-  const [recentPhotos, setRecentPhotos] = useState<Array<{ name: string; dataUrl: string; marca: string; tipo: string; fase: string }>>([]);
+  const [annulledCount, setAnnulledCount] = useState(0);
+  const [outOfServiceCount, setOutOfServiceCount] = useState(0);
+  const [recentPhotos, setRecentPhotos] = useState<Array<{ evidencia_id?: string; name: string; dataUrl: string; marca: string; tipo: string; fase: string; status: "SUBIENDO" | "REGISTRADA" | "ANULADA" | "ERROR" }>>([]);
   const [error, setError] = useState("");
+  const [showAllPhotos, setShowAllPhotos] = useState(false);
+  const [outOfServiceOpen, setOutOfServiceOpen] = useState(false);
+  const [outOfServiceReason, setOutOfServiceReason] = useState(marcaFueraServicioMotivos[0] || "Sin servicio vigente");
+  const [outOfServiceComment, setOutOfServiceComment] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -1145,7 +1152,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
         const incomingPhase = String(ctx?.fase || "ESTADO_ACTUAL").toUpperCase();
         setSelectedFase((incomingPhase === "ANTES" || incomingPhase === "DESPUES" ? incomingPhase : "ESTADO_ACTUAL") as EvidencePhase);
         setDescripcion(ctx?.descripcion || "");
-        setStatus("Lista para capturar. Puedes cambiar marca, tipo o estado sin volver a Telegram.");
+        setStatus("Lista para capturar. Cambia marca, tipo o estado aquí mismo.");
       } catch (err) {
         if (!alive) return;
         setError(err instanceof Error ? err.message : "No se pudo validar la sesión de cámara.");
@@ -1161,23 +1168,29 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const selectedMarca = marcas.find((item) => item.marca_id === selectedMarcaId);
   const marcaNombre = selectedMarca?.marca_nombre || context?.marca_nombre || selectedMarcaId || "Marca";
   const store = context?.tienda_nombre || context?.tienda_id || "Tienda";
-  const tipoLabel = selectedTipo || "Tipo de evidencia";
+  const tipoLabel = selectedTipo || "Tipo";
   const faseLabel = formatPhaseLabel(selectedFase);
-  const canCapture = !!token && !error && !!selectedMarcaId && !!selectedTipo && !!context?.visita_id;
+  const canCapture = !!token && !error && !!selectedMarcaId && !!selectedTipo && !!context?.visita_id && !uploading;
+  const registeredPhotos = recentPhotos.filter((item) => item.status === "REGISTRADA");
+  const activeRecentPhotos = recentPhotos.filter((item) => item.status !== "ANULADA");
+  const lastRegistered = registeredPhotos[0];
 
   async function handleNativeEvidenceSelection(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    if (!canCapture) {
-      setStatus("Selecciona marca y tipo de evidencia antes de capturar.");
+    if (!selectedMarcaId || !selectedTipo || !context?.visita_id) {
+      setStatus("Selecciona marca y tipo antes de capturar.");
+      if (nativeCameraRef.current) nativeCameraRef.current.value = "";
       return;
     }
+    const tempId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     try {
       setError("");
       setUploading(true);
       setStatus("Procesando foto...");
       const photo = await readPhotoForSheets(file);
       setPreview(photo.dataUrl);
+      setRecentPhotos((prev) => [{ evidencia_id: tempId, name: photo.name, dataUrl: photo.dataUrl, marca: marcaNombre, tipo: selectedTipo, fase: selectedFase, status: "SUBIENDO" as const }, ...prev].slice(0, 24));
       setStatus("Registrando evidencia...");
       const result = await postExternalJson<ExternalCameraUploadResponse>("/external-camera/upload", {
         token,
@@ -1190,10 +1203,12 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
           descripcion: descripcion.trim(),
         },
       }, 60000);
+      const evidenceId = result.evidencia_id || tempId;
       setUploadedCount((prev) => prev + 1);
-      setRecentPhotos((prev) => [{ name: photo.name, dataUrl: photo.dataUrl, marca: marcaNombre, tipo: selectedTipo, fase: selectedFase }, ...prev].slice(0, 6));
-      setStatus(result.message || "Foto registrada. Puedes tomar otra o cambiar de marca/tipo.");
+      setRecentPhotos((prev) => prev.map((item) => item.evidencia_id === tempId ? { ...item, evidencia_id: evidenceId, status: "REGISTRADA" as const } : item));
+      setStatus(result.message || "Foto registrada. Puedes tomar otra, cambiar tipo o cambiar marca.");
     } catch (err) {
+      setRecentPhotos((prev) => prev.map((item) => item.evidencia_id === tempId ? { ...item, status: "ERROR" as const } : item));
       setError(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
       setStatus("");
     } finally {
@@ -1202,48 +1217,96 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
     }
   }
 
+  async function cancelExternalPhoto(item: { evidencia_id?: string; status: string }) {
+    if (!item.evidencia_id || item.status !== "REGISTRADA") return;
+    try {
+      setError("");
+      setStatus("Anulando foto...");
+      await postExternalJson<{ ok: boolean; evidencia_id?: string; status?: string }>("/external-camera/cancel", {
+        token,
+        evidencia_id: item.evidencia_id,
+        note: "ANULADA_POR_PROMOTOR_DESDE_CAMARA_EXTERNA",
+      }, 45000);
+      setRecentPhotos((prev) => prev.map((photo) => photo.evidencia_id === item.evidencia_id ? { ...photo, status: "ANULADA" as const } : photo));
+      setAnnulledCount((prev) => prev + 1);
+      setStatus("Foto anulada. No aparecerá como evidencia activa.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo anular la foto.");
+      setStatus("");
+    }
+  }
+
+  async function markOutOfServiceFromCamera() {
+    if (!context?.visita_id || !selectedMarcaId) {
+      setStatus("Selecciona marca antes de marcar fuera de servicio.");
+      return;
+    }
+    if (!outOfServiceReason) {
+      setStatus("Selecciona un motivo para marcar fuera de servicio.");
+      return;
+    }
+    try {
+      setError("");
+      setStatus("Registrando marca fuera de servicio...");
+      await postExternalJson<{ ok: boolean; message?: string }>("/external-camera/out-of-service", {
+        token,
+        marca_id: selectedMarcaId,
+        motivo: outOfServiceReason,
+        comentario: outOfServiceComment.trim(),
+      }, 45000);
+      setOutOfServiceCount((prev) => prev + 1);
+      setOutOfServiceOpen(false);
+      setOutOfServiceComment("");
+      setStatus(`${marcaNombre} marcada fuera de servicio para esta visita.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo marcar la marca fuera de servicio.");
+      setStatus("");
+    }
+  }
+
   function finishCapture() {
-    setStatus(`Captura finalizada. Registraste ${uploadedCount} foto${uploadedCount === 1 ? "" : "s"}. Puedes volver a PromoBolsillo.`);
+    setStatus(`Captura finalizada: ${uploadedCount} foto${uploadedCount === 1 ? "" : "s"} registrada${uploadedCount === 1 ? "" : "s"}${annulledCount ? `, ${annulledCount} anulada${annulledCount === 1 ? "" : "s"}` : ""}${outOfServiceCount ? `, ${outOfServiceCount} marca${outOfServiceCount === 1 ? "" : "s"} fuera de servicio` : ""}.`);
     setTimeout(() => {
       try {
         if (window.history.length > 1) window.history.back();
         else window.close();
       } catch {}
-    }, 550);
+    }, 650);
   }
 
-  const shellStyle: React.CSSProperties = { minHeight: "100vh", background: "linear-gradient(180deg,#f6f8fb 0%,#edf2f7 100%)", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#17212b" };
-  const cardStyle: React.CSSProperties = { borderRadius: 22, background: "rgba(255,255,255,.96)", border: "1px solid rgba(15,23,42,.08)", boxShadow: "0 16px 42px rgba(15,23,42,.10)" };
-  const selectStyle: React.CSSProperties = { width: "100%", border: "1px solid rgba(15,23,42,.14)", borderRadius: 16, padding: "12px 12px", fontWeight: 850, color: "#17212b", background: "#fff", fontSize: 15 };
-  const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 950, color: "#64748b", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 };
+  const shellStyle: React.CSSProperties = { minHeight: "100vh", background: "linear-gradient(180deg,#f6f8fb 0%,#e8eef5 100%)", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#17212b" };
+  const cardStyle: React.CSSProperties = { borderRadius: 24, background: "rgba(255,255,255,.97)", border: "1px solid rgba(15,23,42,.08)", boxShadow: "0 16px 42px rgba(15,23,42,.10)" };
+  const selectStyle: React.CSSProperties = { width: "100%", border: "1px solid rgba(15,23,42,.14)", borderRadius: 16, padding: "12px 12px", fontWeight: 850, color: "#17212b", background: "#fff", fontSize: 15, boxSizing: "border-box" };
+  const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 950, color: "#64748b", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 };
+  const smallButtonStyle: React.CSSProperties = { border: "1px solid rgba(15,23,42,.12)", borderRadius: 14, background: "#fff", color: "#334155", padding: "10px 12px", fontWeight: 950 };
 
   return (
     <div style={shellStyle}>
-      <div style={{ maxWidth: 680, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
-        <div style={{ ...cardStyle, padding: 16, position: "sticky", top: 0, zIndex: 5 }}>
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: 12, display: "grid", gap: 10 }}>
+        <div style={{ ...cardStyle, padding: 14, position: "sticky", top: 0, zIndex: 5 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
-              <h1 style={{ margin: "6px 0 5px", fontSize: 24, lineHeight: 1.05 }}>Captura de evidencias</h1>
-              <div style={{ color: "#64748b", fontWeight: 800, lineHeight: 1.25 }}>{store}</div>
+              <div style={{ fontSize: 11, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+              <h1 style={{ margin: "5px 0 4px", fontSize: 23, lineHeight: 1.05 }}>Captura de evidencias</h1>
+              <div style={{ color: "#64748b", fontWeight: 900, lineHeight: 1.2 }}>{store}</div>
             </div>
-            <div style={{ textAlign: "right", minWidth: 78 }}>
+            <div style={{ textAlign: "right", minWidth: 74 }}>
               <div style={{ fontSize: 28, fontWeight: 1000, color: "#0f172a", lineHeight: 1 }}>{uploadedCount}</div>
               <div style={{ fontSize: 11, fontWeight: 900, color: "#64748b" }}>fotos</div>
             </div>
           </div>
         </div>
 
-        <div style={{ ...cardStyle, padding: 14, display: "grid", gap: 12 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <label style={{ display: "grid" }}>
+        <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <label style={{ display: "grid", minWidth: 0 }}>
               <span style={labelStyle}>Marca</span>
               <select style={selectStyle} value={selectedMarcaId} onChange={(e) => setSelectedMarcaId(e.target.value)}>
                 <option value="">Selecciona marca</option>
                 {marcas.map((item) => <option key={item.marca_id} value={item.marca_id}>{item.marca_nombre}</option>)}
               </select>
             </label>
-            <label style={{ display: "grid" }}>
+            <label style={{ display: "grid", minWidth: 0 }}>
               <span style={labelStyle}>Tipo</span>
               <select style={selectStyle} value={selectedTipo} onChange={(e) => setSelectedTipo(e.target.value)}>
                 <option value="">Selecciona tipo</option>
@@ -1251,7 +1314,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
               </select>
             </label>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
             <label style={{ display: "grid" }}>
               <span style={labelStyle}>Estado</span>
               <select style={selectStyle} value={selectedFase} onChange={(e) => setSelectedFase(e.target.value as EvidencePhase)}>
@@ -1260,45 +1323,80 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
                 <option value="DESPUES">Después</option>
               </select>
             </label>
-            <label style={{ display: "grid" }}>
-              <span style={labelStyle}>Comentario opcional</span>
-              <input style={{ ...selectStyle, boxSizing: "border-box" }} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Ej. agotado, precio visible, anaquel completo..." />
-            </label>
+            <input style={selectStyle} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Comentario opcional: precio visible, anaquel completo..." />
           </div>
-          <div style={{ borderRadius: 16, background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)", padding: 12, fontWeight: 850, color: "#334155", lineHeight: 1.35 }}>
+          <div style={{ borderRadius: 16, background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)", padding: 10, fontWeight: 850, color: "#334155", lineHeight: 1.3, fontSize: 13 }}>
             Capturando: <strong>{marcaNombre}</strong> · {tipoLabel} · {faseLabel}
           </div>
         </div>
 
-        {error ? <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 14, fontWeight: 900 }}>{error}</div> : null}
-        {status ? <div style={{ borderRadius: 18, background: status.includes("registrada") || status.includes("finalizada") ? "#dcfce7" : "#e0f2fe", color: status.includes("registrada") || status.includes("finalizada") ? "#166534" : "#075985", padding: 14, fontWeight: 900 }}>{status}</div> : null}
+        {error ? <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 13, fontWeight: 900 }}>{error}</div> : null}
+        {status ? <div style={{ borderRadius: 18, background: status.includes("registrada") || status.includes("finalizada") || status.includes("anulada") || status.includes("fuera de servicio") ? "#dcfce7" : "#e0f2fe", color: status.includes("registrada") || status.includes("finalizada") || status.includes("anulada") || status.includes("fuera de servicio") ? "#166534" : "#075985", padding: 13, fontWeight: 900 }}>{status}</div> : null}
 
-        <div style={{ ...cardStyle, padding: 14, display: "grid", gap: 12 }}>
-          {preview ? <img src={preview} alt="Última evidencia" style={{ width: "100%", maxHeight: "52vh", objectFit: "contain", borderRadius: 20, border: "1px solid rgba(15,23,42,.10)", background: "#0f172a" }} /> : (
-            <div style={{ minHeight: 210, borderRadius: 20, border: "1px dashed rgba(15,23,42,.18)", background: "linear-gradient(135deg,#f8fafc,#e2e8f0)", display: "grid", placeItems: "center", textAlign: "center", padding: 20, color: "#475569", fontWeight: 900 }}>
+        <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+          {preview ? <img src={preview} alt="Última evidencia" style={{ width: "100%", maxHeight: "58vh", objectFit: "contain", borderRadius: 22, border: "1px solid rgba(15,23,42,.10)", background: "#0f172a" }} /> : (
+            <div style={{ minHeight: 260, borderRadius: 22, border: "1px dashed rgba(15,23,42,.18)", background: "linear-gradient(135deg,#f8fafc,#e2e8f0)", display: "grid", placeItems: "center", textAlign: "center", padding: 20, color: "#475569", fontWeight: 900 }}>
               Selecciona marca/tipo y toca Capturar evidencia.
             </div>
           )}
           <button
             type="button"
-            disabled={uploading || !canCapture}
+            disabled={!canCapture}
             onClick={() => nativeCameraRef.current?.click()}
-            style={{ border: 0, borderRadius: 22, background: uploading || !canCapture ? "#94a3b8" : "#22c55e", color: "#fff", padding: "18px 20px", fontWeight: 1000, fontSize: 20, boxShadow: "0 12px 24px rgba(34,197,94,.26)" }}
+            style={{ border: 0, borderRadius: 22, background: !canCapture ? "#94a3b8" : "#22c55e", color: "#fff", padding: "18px 20px", fontWeight: 1000, fontSize: 20, boxShadow: "0 12px 24px rgba(34,197,94,.26)" }}
           >
             {uploading ? "Registrando..." : "Capturar evidencia"}
           </button>
           <input ref={nativeCameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(event) => void handleNativeEvidenceSelection(event.target.files)} />
-          {!canCapture ? <div style={{ color: "#92400e", background: "#fffbeb", borderRadius: 14, padding: 12, fontWeight: 850 }}>Selecciona marca y tipo para habilitar la cámara.</div> : null}
+          {!canCapture && !uploading ? <div style={{ color: "#92400e", background: "#fffbeb", borderRadius: 14, padding: 12, fontWeight: 850 }}>Selecciona marca y tipo para habilitar la cámara.</div> : null}
+          {lastRegistered ? (
+            <button type="button" onClick={() => void cancelExternalPhoto(lastRegistered)} style={{ ...smallButtonStyle, color: "#991b1b", background: "#fff7f7" }}>
+              Deshacer última foto
+            </button>
+          ) : null}
         </div>
 
-        {recentPhotos.length ? (
-          <div style={{ ...cardStyle, padding: 14, display: "grid", gap: 10 }}>
-            <div style={{ fontWeight: 950 }}>Últimas fotos registradas</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-              {recentPhotos.map((item, index) => (
-                <div key={`${item.name}-${index}`} style={{ borderRadius: 14, overflow: "hidden", background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)" }}>
+        <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+          <button type="button" onClick={() => setOutOfServiceOpen((prev) => !prev)} style={{ ...smallButtonStyle, textAlign: "left" }}>
+            ¿Marca fuera de servicio?
+          </button>
+          {outOfServiceOpen ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 850, color: "#334155" }}>Marca: {marcaNombre}</div>
+              <select style={selectStyle} value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
+                {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
+              </select>
+              <input style={selectStyle} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button type="button" onClick={() => void markOutOfServiceFromCamera()} style={{ border: 0, borderRadius: 16, background: "#0f172a", color: "#fff", padding: "12px 14px", fontWeight: 950 }}>
+                  Registrar sin servicio
+                </button>
+                <button type="button" onClick={() => setOutOfServiceOpen(false)} style={smallButtonStyle}>Cancelar</button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {activeRecentPhotos.length ? (
+          <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ fontWeight: 950 }}>Últimas capturas</div>
+              <button type="button" onClick={() => setShowAllPhotos((prev) => !prev)} style={{ border: 0, background: "transparent", color: "#2563eb", fontWeight: 950 }}>
+                {showAllPhotos ? "Ver menos" : "Ver todas"}
+              </button>
+            </div>
+            <div style={showAllPhotos ? { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 } : { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+              {activeRecentPhotos.slice(0, showAllPhotos ? 24 : 8).map((item, index) => (
+                <div key={`${item.evidencia_id || item.name}-${index}`} style={{ minWidth: showAllPhotos ? undefined : 112, borderRadius: 16, overflow: "hidden", background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)" }}>
                   <img src={item.dataUrl} alt={item.name} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-                  <div style={{ padding: 7, fontSize: 10, fontWeight: 850, color: "#475569", lineHeight: 1.2 }}>{item.marca}<br />{item.tipo}</div>
+                  <div style={{ padding: 7, fontSize: 10, fontWeight: 850, color: item.status === "ERROR" ? "#991b1b" : "#475569", lineHeight: 1.2 }}>
+                    {item.marca}<br />{item.tipo}<br />{item.status === "SUBIENDO" ? "Subiendo..." : item.status === "ERROR" ? "Error" : "Registrada"}
+                  </div>
+                  {item.status === "REGISTRADA" ? (
+                    <button type="button" onClick={() => void cancelExternalPhoto(item)} style={{ width: "100%", border: 0, background: "#fee2e2", color: "#991b1b", padding: "7px 6px", fontWeight: 900, fontSize: 11 }}>
+                      Anular
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -1306,7 +1404,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
         ) : null}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, paddingBottom: 16 }}>
-          <button type="button" onClick={() => nativeCameraRef.current?.click()} disabled={uploading || !canCapture} style={{ border: "1px solid rgba(15,23,42,.12)", borderRadius: 18, background: "#fff", color: "#334155", padding: "14px 16px", fontWeight: 950 }}>
+          <button type="button" onClick={() => nativeCameraRef.current?.click()} disabled={!canCapture} style={smallButtonStyle}>
             Tomar otra
           </button>
           <button type="button" onClick={finishCapture} style={{ border: 0, borderRadius: 18, background: "#0f172a", color: "#fff", padding: "14px 16px", fontWeight: 950 }}>
@@ -1498,6 +1596,13 @@ export default function App() {
   const replaceNativeCameraInputRef = useRef<HTMLInputElement | null>(null);
 
 
+  // E024 mantiene helpers heredados usados por flujos anteriores, aunque la pantalla de captura quedó simplificada.
+  void showOutOfServicePanel;
+  void setOutOfServiceReason;
+  void evidenceGalleryAuth;
+  void evidenceGalleryInputRef;
+  void evidenceNativeCameraInputRef;
+
   useEffect(() => {
     if (tg) {
       tg.ready?.();
@@ -1607,6 +1712,10 @@ export default function App() {
   }, [brandRules]);
   const evidencePhaseOptions = useMemo(() => ["ESTADO_ACTUAL", "ANTES", "DESPUES"] as EvidencePhase[], []);
 
+  // E024 usa selección de marca/tipo dentro de cámara externa; estas opciones se conservan para lógica heredada.
+  void evidenceTypeOptions;
+  void evidencePhaseOptions;
+
   const pendingEvidenceRows = useMemo<UiEvidence[]>(() => {
     const rows: UiEvidence[] = [];
     for (const item of pendingQueue) {
@@ -1660,6 +1769,10 @@ export default function App() {
   const mergedEvidenceRows = useMemo(() => [...pendingEvidenceRows, ...allEvidenceRows], [pendingEvidenceRows, allEvidenceRows]);
   const attendanceGallery = useMemo(() => mergedEvidenceRows.filter((item) => !isOperationalEvidence(item)), [mergedEvidenceRows]);
   const operationalGallery = useMemo(() => mergedEvidenceRows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [mergedEvidenceRows]);
+
+  const currentVisitEvidenceGallery = useMemo(() => {
+    return operationalGallery.filter((item) => !selectedVisitId || item.visita_id === selectedVisitId);
+  }, [operationalGallery, selectedVisitId]);
 
   const evidenceFilterOptions = useMemo(() => {
     const storeRows = operationalGallery;
@@ -3124,6 +3237,12 @@ export default function App() {
       setSyncing(false);
     }
   }
+  // E024 conserva funciones de captura heredada para no romper rutas de galería/reemplazo.
+  void removeEvidencePhotoAt;
+  void clearEvidencePhotos;
+  void markSelectedBrandOutOfService;
+  void saveEvidenceFlow;
+
 
   async function replaceEvidencePhotoPayload(fileName: string, dataUrl: string, source = "CAMARA") {
     if (!selectedEvidence) return;
@@ -3455,6 +3574,107 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 .e020CaptureGuard { margin: 10px 0 8px; border: 1px solid rgba(245,158,11,.45); background: rgba(255,247,237,.95); color: #7c2d12; border-radius: 14px; padding: 10px 12px; font-weight: 850; line-height: 1.35; }
 .outOfServiceBox { max-width: 430px; justify-self: start; }
 .outOfServiceDetailCard { border: 1px solid rgba(245, 158, 11, .35); background: rgba(255, 247, 237, .72); border-radius: 16px; padding: 12px; display: grid; gap: 7px; }
+
+/* E024_EXTERNAL_CAMERA_UX_WORKSPACE */
+.e024EvidenceLaunchPanel {
+  display: grid;
+  gap: 12px;
+}
+.e024StoreHero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, .12), rgba(14, 165, 233, .10));
+  border: 1px solid rgba(15, 23, 42, .08);
+}
+.e024StoreLabel {
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: .06em;
+}
+.e024StoreName {
+  font-size: 18px;
+  font-weight: 1000;
+  color: #0f172a;
+}
+.e024OpenCameraBtn {
+  justify-content: center !important;
+  text-align: center !important;
+  min-height: 62px;
+  border-radius: 22px;
+}
+.e024EvidenceSummary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.e024EvidenceSummary > div {
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid rgba(15,23,42,.08);
+  padding: 10px;
+  text-align: center;
+}
+.e024EvidenceSummary strong {
+  display: block;
+  font-size: 22px;
+  font-weight: 1000;
+  color: #0f172a;
+}
+.e024EvidenceSummary span {
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  color: #64748b;
+}
+.e024ResultGalleryPanel {
+  margin-top: 12px;
+}
+.e024VisitGalleryRail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  scroll-snap-type: x proximity;
+}
+.e024VisitGalleryCard {
+  min-width: 122px;
+  max-width: 122px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #f8fafc;
+  border: 1px solid rgba(15,23,42,.08);
+  box-shadow: 0 10px 24px rgba(15,23,42,.06);
+  cursor: pointer;
+  scroll-snap-align: start;
+}
+.e024VisitGalleryCard img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+.e024VisitGalleryMeta {
+  padding: 8px;
+  line-height: 1.15;
+}
+.e024VisitGalleryMeta strong {
+  display: block;
+  font-size: 11px;
+  color: #334155;
+}
+.e024VisitGalleryMeta span {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 800;
+}
+
 `}</style>
       <div className="shell">
         <div className="stickyTop">
@@ -3852,134 +4072,61 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         {role === "promotor" && promotorModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
-            <div className="twoCol">
-              <div className="panel">
-                <label className="fieldLabel">Visita activa</label>
-                <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
-                  <option value="">Selecciona una visita</option>
-                  {openVisits.map((visit) => (
-                    <option key={visit.visita_id} value={visit.visita_id}>{getVisitDisplayName(visit, stores)}</option>
-                  ))}
-                </select>
-                {selectedVisitStoreName ? <div className="contextHint">Tienda vinculada: {selectedVisitStoreName}</div> : null}
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
-                <select className="inputLike" value={evidenceBrandId} disabled={selectedVisitHasNoBrands} onChange={(e) => {
-                  const brand = availableBrands.find((item) => item.marca_id === e.target.value);
-                  setEvidenceBrandId(e.target.value);
-                  setEvidenceBrandLabel(normalizeBrandLabel(brand?.marca_nombre || "", brand?.marca_id || ""));
-                  setEvidenceType("");
-                  setEvidencePhase("ESTADO_ACTUAL");
-                  setShowOutOfServicePanel(false);
-                }}>
-                  <option value="">{selectedVisitHasNoBrands ? "Tienda sin marcas activas" : "Selecciona una marca"}</option>
-                  {availableBrands.map((brand) => (
-                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}{brandsOutOfService[brand.marca_id] ? " · Fuera de servicio" : ""}</option>
-                  ))}
-                </select>
-                {selectedVisitHasNoBrands ? (
-                  <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
-                ) : null}
-
-                {evidenceBrandId ? (
-                  <div className="outOfServiceBox">
-                    {selectedBrandOutOfService ? (
-                      <>
-                        <div className="outOfServiceTitle">Marca fuera de servicio en esta visita</div>
-                        <div className="outOfServiceText">Motivo: {selectedBrandOutOfService.motivo || "Sin motivo"}</div>
-                        {selectedBrandOutOfService.comentario ? <div className="outOfServiceText">Comentario: {selectedBrandOutOfService.comentario}</div> : null}
-                      </>
-                    ) : (
-                      <>
-                        {!showOutOfServicePanel ? (
-                          <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(true)}>
-                            <ShieldAlert size={16} />
-                            ¿Marca fuera de servicio?
-                          </button>
-                        ) : (
-                          <>
-                            <div className="outOfServiceTitle">¿Marca fuera de servicio?</div>
-                            <div className="outOfServiceText">Usa esta opción solo cuando la marca no deba atenderse en esta visita.</div>
-                            <select className="inputLike" value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
-                              {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
-                            </select>
-                            <input className="inputLike" style={{ marginTop: 8 }} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
-                            <div className="e019OutServiceActions">
-                              <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => void markSelectedBrandOutOfService()}>
-                                <ShieldAlert size={16} />
-                                Confirmar sin servicio
-                              </button>
-                              <button className="actionButton compactBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(false)}>Cancelar</button>
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ) : null}
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
-                  const nextType = e.target.value;
-                  setEvidenceType(nextType);
-                  const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
-                  if (nextRule) {
-                    setEvidenceQty(nextRule.fotos_requeridas || 1);
-                  }
-                }}>
-                  <option value="">{selectedVisitHasNoBrands ? "Sin marcas para capturar" : (evidenceTypeOptions.length ? "Selecciona un tipo" : "Selecciona primero tienda y marca")}</option>
-                  {evidenceTypeOptions.map((rule) => (
-                    <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>{rule.tipo_evidencia}</option>
-                  ))}
-                </select>
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
-                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
-                  {evidencePhaseOptions.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
-                </select>
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
-                <input className="inputLike" type="number" min={1} max={24} value={evidenceQty} readOnly disabled />
-              </div>
-
-              <div className="panel">
-                <label className="fieldLabel">Comentario</label>
-                <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
-                {!selectedVisitId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una visita/tienda activa. Después podrás tomar foto de evidencia.</div> : null}
-                {captureGuardMsg && promotorModule === "evidencias" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
-                <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={syncing || selectedVisitHasNoBrands} onClick={() => void startExternalCameraForEvidence()}>
-                    <Camera size={16} />
-                    Abrir cámara de evidencias
-                  </button>
-                  {evidenceGalleryAuth.allowed ? (
-                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
-                      <ImageIcon size={16} />
-                      Galería autorizada
-                    </button>
-                  ) : null}
+            <div className="panel e024EvidenceLaunchPanel">
+              <label className="fieldLabel">Visita / tienda</label>
+              <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
+                <option value="">Selecciona una visita</option>
+                {openVisits.map((visit) => (
+                  <option key={visit.visita_id} value={visit.visita_id}>{getVisitDisplayName(visit, stores)}</option>
+                ))}
+              </select>
+              {selectedVisitStoreName ? <div className="e024StoreHero">
+                <Store size={18} />
+                <div>
+                  <div className="e024StoreLabel">Tienda activa</div>
+                  <div className="e024StoreName">{selectedVisitStoreName}</div>
                 </div>
-                <input ref={evidenceNativeCameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("evidencia", e.target.files)} />
-                <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleGallerySelection("evidence", e.target.files)} />
-                <div className="contextHint">La evidencia se captura en un módulo externo de cámara para validar mejor encuadre. La galería solo se habilita cuando existe autorización.</div>
-                <div className="authTraceBox">Galería evidencia: <strong>{galleryReasonLabel(evidenceGalleryAuth)}</strong></div>
-                {evidencePhotos.length ? (
-                  <>
-                    <div className="thumbGrid">{evidencePhotos.map((photo, index) => (
-                      <div key={`${photo.name}-${photo.capturedAt}`} style={{ position: "relative" }}>
-                        <img src={photo.dataUrl} className="thumb" alt={photo.name} />
-                        <button className="removeThumbBtn" onClick={() => removeEvidencePhotoAt(index)} aria-label="Quitar foto">×</button>
-                      </div>
-                    ))}</div>
-                    <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => clearEvidencePhotos()}><Trash2 size={16} /><span>Limpiar selección</span></button>
-                    </div>
-                  </>
-                ) : null}
-                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
-                  <span className="mainActionTop e014fEvidenceActionTop"><Camera size={16} /><span>{syncing ? "Guardando..." : "Registrar evidencia"}</span></span>
+              </div> : null}
+              {!selectedVisitId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una visita/tienda activa. Después podrás abrir la cámara de evidencias.</div> : null}
+              {selectedVisitHasNoBrands ? (
+                <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
+              ) : null}
+              {captureGuardMsg && promotorModule === "evidencias" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
+              <button className="primaryBtn mainActionBtn e024OpenCameraBtn" disabled={syncing || !selectedVisitId || selectedVisitHasNoBrands} onClick={() => void startExternalCameraForEvidence()}>
+                <span className="mainActionTop e014fEvidenceActionTop"><Camera size={18} /><span>{syncing ? "Abriendo..." : "Abrir cámara de evidencias"}</span></span>
+              </button>
+              <div className="e024EvidenceSummary">
+                <div><strong>{currentVisitEvidenceGallery.length}</strong><span>fotos activas</span></div>
+                <div><strong>{Array.from(new Set(currentVisitEvidenceGallery.map((item) => normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca")).filter(Boolean))).length}</strong><span>marcas</span></div>
+                <div><strong>{Array.from(new Set(currentVisitEvidenceGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).length}</strong><span>tipos</span></div>
+              </div>
+            </div>
+
+            <div className="panel e024ResultGalleryPanel">
+              <div className="e018SectionHeader">
+                <div>
+                  <div className="sectionTitle" style={{ margin: 0 }}>Galería de la visita</div>
+                  <div className="contextHint">Las fotos capturadas desde el módulo de cámara aparecen aquí al regresar.</div>
+                </div>
+                <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}>
+                  <RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Actualizar"}</span>
                 </button>
               </div>
+              {currentVisitEvidenceGallery.length ? (
+                <div className="e024VisitGalleryRail">
+                  {currentVisitEvidenceGallery.slice(0, 18).map((item) => (
+                    <div className="e024VisitGalleryCard" key={item.evidencia_id} onClick={() => { setPromotorModule("mis_evidencias"); setPromotorEvidenceViewFilter("fotos"); setSelectedEvidenceId(item.evidencia_id); }}>
+                      <img src={item.url_foto} alt={item.tipo_evidencia || "Evidencia"} />
+                      <div className="e024VisitGalleryMeta">
+                        <strong>{normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca")}</strong>
+                        <span>{item.tipo_evidencia || "Evidencia"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="emptyBox">Aún no hay fotos registradas para esta visita.</div>
+              )}
             </div>
           </div>
         ) : null}
