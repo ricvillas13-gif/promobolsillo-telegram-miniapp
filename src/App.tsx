@@ -1,3 +1,4 @@
+// E024E_FIX_BOT_USERNAME_RETURN: usa @promobolsillo_operacion_bot para regresar desde cámara a Mini App.
 // E024D_CLARIDAD_MIS_FOTOS_RETURN: Con foto/Sin servicio/Todo, regreso a Mis fotos, botón claro y sin texto redundante.
 // E024C_RETURN_TO_MINIAPP_CAPTURE: botón de regreso abre Mini App en Capturar/Evidencias y evita volver al chat.
 // E024B_FINALIZAR_SEGURO_Y_SIN_SERVICIO_CONTEXTUAL: evita Aw Snap al finalizar y mueve Sin servicio junto a Marca.
@@ -596,7 +597,7 @@ type GalleryAuthorizationResponse = {
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
-const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "Promobolsillo").replace(/^@/, "");
+const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "promobolsillo_operacion_bot").replace(/^@/, "");
 const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
