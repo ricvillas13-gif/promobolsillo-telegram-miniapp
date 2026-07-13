@@ -1,3 +1,4 @@
+// E020F_BUILD_FIX_OPEN_CAMERA_FACING_USED: corrige TS6133 usando el parametro facing en openCamera; conserva E020C/E020D/E020E.
 // E020E_BUILD_FIX_UNUSED_FACING: corrige TS6133 variable facing no usada; conserva E020C/E020D.
 // E020D_BUILD_FIX_CSS_STYLE_TAG: corrige JSX style tag mal formado en E020C; conserva camara mejorada, filtros claros y fixes E020B.
 // E020C_PROMOTOR_CAMERA_MEJORADA_Y_FIXES_E020B: conserva selfie frontal, evidencia trasera sin galeria, visor amplio 16:9, zoom si el dispositivo lo soporta, mensajes claros y filtros Mis evidencias corregidos.
@@ -2280,7 +2281,7 @@ export default function App() {
       setCapturingPhoto(target);
       setCaptureGuardMsg("");
       await stopCameraStream();
-      const evidenceVideo = target === "evidencia" || target === "reemplazo";
+      const evidenceVideo = facing === "environment" || target === "evidencia" || target === "reemplazo";
       const attempts: MediaStreamConstraints[] = evidenceVideo ? [
         { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, aspectRatio: { ideal: 1.7777778 } } as any, audio: false },
         { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.7777778 } } as any, audio: false },
