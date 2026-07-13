@@ -1,3 +1,4 @@
+// E021_CAMERA_TEST_AB_TELEGRAM: prueba controlada de cámara para evidencias dentro de Telegram; no es fix final de producción.
 // E020F_BUILD_FIX_OPEN_CAMERA_FACING_USED: corrige TS6133 usando el parametro facing en openCamera; conserva E020C/E020D/E020E.
 // E020E_BUILD_FIX_UNUSED_FACING: corrige TS6133 variable facing no usada; conserva E020C/E020D.
 // E020D_BUILD_FIX_CSS_STYLE_TAG: corrige JSX style tag mal formado en E020C; conserva camara mejorada, filtros claros y fixes E020B.
@@ -3663,6 +3664,37 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <input ref={evidenceNativeCameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("evidencia", e.target.files)} />
                 <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleGallerySelection("evidence", e.target.files)} />
                 <div className="contextHint">La cámara de evidencia se abre desde la Mini App con cámara trasera. La galería solo se habilita cuando existe autorización. Máximo 24 fotos en la selección actual.</div>
+                <details className="e021CameraTestBox">
+                  <summary>Prueba de cámara E021</summary>
+                  <div className="contextHint">
+                    Prueba controlada para comparar cómo responde Telegram en este celular. Usa una opción, revisa si abre cámara trasera real, selector/galería, zoom y encuadre. Esta sección es temporal de diagnóstico.
+                  </div>
+                  <div className="captureGrid e021CameraTestGrid">
+                    <button className="secondaryBtn compactBtn" type="button" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment")}>
+                      <Camera size={16} />
+                      A · Integrada
+                    </button>
+                    <button className="secondaryBtn compactBtn" type="button" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => {
+                      if (!selectedVisitId) {
+                        showCaptureGuard("Primero selecciona una visita/tienda activa. Después podrás probar la cámara.");
+                        return;
+                      }
+                      setStatusMsg("Prueba B: si Telegram lo permite, debería abrir cámara trasera nativa; si abre selector/galería, esa limitación queda confirmada.");
+                      setStatusMsgDuration(9000);
+                      evidenceNativeCameraInputRef.current?.click();
+                    }}>
+                      <Camera size={16} />
+                      B · Nativa
+                    </button>
+                    <button className="secondaryBtn compactBtn" type="button" disabled={!evidenceGalleryAuth.allowed || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
+                      <ImageIcon size={16} />
+                      C · Galería autorizada
+                    </button>
+                  </div>
+                  <div className="contextHint">
+                    Resultado esperado: si B vuelve a abrir galería/selector, Telegram WebView no garantiza cámara nativa directa. En ese caso la decisión será mejorar la cámara integrada o evaluar PWA/app propia para evidencias.
+                  </div>
+                </details>
                 <div className="authTraceBox">Galería evidencia: <strong>{galleryReasonLabel(evidenceGalleryAuth)}</strong></div>
                 {evidencePhotos.length ? (
                   <>
@@ -4843,6 +4875,24 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
+
+
+/* E021_CAMERA_TEST_AB_TELEGRAM */
+.e021CameraTestBox {
+  margin-top: 10px;
+  border: 1px dashed rgba(14, 165, 233, .45);
+  background: rgba(240, 249, 255, .72);
+  border-radius: 16px;
+  padding: 10px 12px;
+}
+.e021CameraTestBox summary {
+  cursor: pointer;
+  font-weight: 950;
+  color: #0f2f44;
+}
+.e021CameraTestGrid {
+  margin-top: 10px;
+}
 
 /* E020C_CAMERA_MEJORADA_PROMOTOR */
 .e020cCaptureGuardStrong {
