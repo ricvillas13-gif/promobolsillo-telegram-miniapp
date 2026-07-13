@@ -1,3 +1,4 @@
+// E020D_BUILD_FIX_CSS_STYLE_TAG: corrige JSX style tag mal formado en E020C; conserva camara mejorada, filtros claros y fixes E020B.
 // E020C_PROMOTOR_CAMERA_MEJORADA_Y_FIXES_E020B: conserva selfie frontal, evidencia trasera sin galeria, visor amplio 16:9, zoom si el dispositivo lo soporta, mensajes claros y filtros Mis evidencias corregidos.
 // E020B_FIX_PROMOTOR_CAMERA_GUARDS_EVIDENCE_FILTERS: selfie vuelve a cámara frontal integrada; evidencia usa cámara trasera integrada, no galería; mensajes claros sin tienda; Mis evidencias liga Fotos/Sin servicio/Todo con detalle útil.
 // E020A_BUILD_FIX_TS2367_CAMERA_NATIVE: corrige comparación TS2367 en openCamera; conserva E020 filtros claros y cámara nativa.
@@ -3149,11 +3150,11 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
   return (
     <div style={styles.page}>
-      <style>{globalCss}
+      <style>{globalCss + `
 .e020CaptureGuard { margin: 10px 0 8px; border: 1px solid rgba(245,158,11,.45); background: rgba(255,247,237,.95); color: #7c2d12; border-radius: 14px; padding: 10px 12px; font-weight: 850; line-height: 1.35; }
 .outOfServiceBox { max-width: 430px; justify-self: start; }
 .outOfServiceDetailCard { border: 1px solid rgba(245, 158, 11, .35); background: rgba(255, 247, 237, .72); border-radius: 16px; padding: 12px; display: grid; gap: 7px; }
-</style>
+`}</style>
       <div className="shell">
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
