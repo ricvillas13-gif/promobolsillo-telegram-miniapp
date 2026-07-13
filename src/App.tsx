@@ -1,3 +1,4 @@
+// E020E_BUILD_FIX_UNUSED_FACING: corrige TS6133 variable facing no usada; conserva E020C/E020D.
 // E020D_BUILD_FIX_CSS_STYLE_TAG: corrige JSX style tag mal formado en E020C; conserva camara mejorada, filtros claros y fixes E020B.
 // E020C_PROMOTOR_CAMERA_MEJORADA_Y_FIXES_E020B: conserva selfie frontal, evidencia trasera sin galeria, visor amplio 16:9, zoom si el dispositivo lo soporta, mensajes claros y filtros Mis evidencias corregidos.
 // E020B_FIX_PROMOTOR_CAMERA_GUARDS_EVIDENCE_FILTERS: selfie vuelve a cámara frontal integrada; evidencia usa cámara trasera integrada, no galería; mensajes claros sin tienda; Mis evidencias liga Fotos/Sin servicio/Todo con detalle útil.
