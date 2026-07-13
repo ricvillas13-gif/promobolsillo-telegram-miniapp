@@ -1,3 +1,4 @@
+// E020A_BUILD_FIX_TS2367_CAMERA_NATIVE: corrige comparación TS2367 en openCamera; conserva E020 filtros claros y cámara nativa.
 // E020_SUPERVISOR_FILTROS_CLAROS_PROMOTOR_CAPTURA_NATIVA: filtros desplegables, actualizar resultados unico, bloqueo captura sin tienda/visita, panel sin servicio compacto y cámara nativa.
 // E019_PROMOTOR_SUPERVISOR_FLUIDEZ_REVISION_Y_SIN_SERVICIO: entrada mas fluida, fuera de servicio bajo solicitud, mis evidencias con Sin servicio, aprobacion con estado visible, consulta de aprobadas y seleccion masiva visible.
 // E018B_PROMOTOR_SUPERVISOR_NAVEGACION_DETALLE_UTIL_CONFIRMADO: marcador visible para verificar en GitHub; incluye recargar arriba, Inicio/Final, fecha completa, detalle útil y filtro Sin servicio.
@@ -2230,7 +2231,7 @@ export default function App() {
 
     // Fallback técnico para salida u otros casos no migrados a cámara nativa.
     try {
-      setCapturingPhoto(target === "evidencia" ? "entrada" : target);
+      setCapturingPhoto(target);
       await stopCameraStream();
       const attempts: MediaStreamConstraints[] = [
         { video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
