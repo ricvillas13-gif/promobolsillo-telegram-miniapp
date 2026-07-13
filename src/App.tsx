@@ -1,3 +1,4 @@
+// E024C_RETURN_TO_MINIAPP_CAPTURE: botón de regreso abre Mini App en Capturar/Evidencias y evita volver al chat.
 // E024B_FINALIZAR_SEGURO_Y_SIN_SERVICIO_CONTEXTUAL: evita Aw Snap al finalizar y mueve Sin servicio junto a Marca.
 // E024_EXTERNAL_CAMERA_UX_WORKSPACE: mini app simplificada y cámara externa con contexto integrado, galeria horizontal y anulación.
 // E023_EXTERNAL_CAMERA_WORKSPACE: cámara externa como espacio de captura; permite cambiar marca/tipo/estado y registrar múltiples fotos sin volver a Telegram.
@@ -47,11 +48,14 @@ declare global {
     Telegram?: {
       WebApp?: {
         initData?: string;
+        initDataUnsafe?: { start_param?: string };
         ready?: () => void;
         expand?: () => void;
+        close?: () => void;
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
         openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+        openTelegramLink?: (url: string) => void;
       };
     };
   }
@@ -591,6 +595,8 @@ type GalleryAuthorizationResponse = {
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
+const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "Promobolsillo").replace(/^@/, "");
+const MINIAPP_RETURN_PARAM_PREFIX = "capture_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
 const SHEETS_SAFE_PHOTO_CHARS = 32000;
@@ -677,6 +683,60 @@ function getTelegramWebApp() {
 
 function getInitData() {
   return getTelegramWebApp()?.initData || "";
+}
+
+function getTelegramStartParam() {
+  if (typeof window === "undefined") return "";
+  const webApp = getTelegramWebApp();
+  const directParam = webApp?.initDataUnsafe?.start_param || "";
+  if (directParam) return String(directParam);
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("tgWebAppStartParam") || params.get("startapp") || params.get("start_param") || "";
+  } catch {
+    return "";
+  }
+}
+
+function encodeStartParamSegment(value: string) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  try {
+    return btoa(encodeURIComponent(raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  } catch {
+    return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
+  }
+}
+
+function decodeStartParamSegment(value: string) {
+  const raw = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  try {
+    const padded = raw.padEnd(Math.ceil(raw.length / 4) * 4, "=");
+    return decodeURIComponent(atob(padded));
+  } catch {
+    return String(value || "");
+  }
+}
+
+function parseMiniAppReturnStartParam(startParam: string) {
+  const raw = String(startParam || "");
+  if (!raw) return { wantsCapture: false, visitaId: "" };
+  if (raw === "capture" || raw === "capturar" || raw === "return_capture") return { wantsCapture: true, visitaId: "" };
+  if (raw.startsWith(MINIAPP_RETURN_PARAM_PREFIX)) {
+    return { wantsCapture: true, visitaId: decodeStartParamSegment(raw.slice(MINIAPP_RETURN_PARAM_PREFIX.length)) };
+  }
+  return { wantsCapture: false, visitaId: "" };
+}
+
+function buildTelegramMiniAppReturnLinks(visitaId = "") {
+  const suffix = encodeStartParamSegment(visitaId);
+  const startParam = suffix ? `${MINIAPP_RETURN_PARAM_PREFIX}${suffix}` : "capture";
+  const domain = TELEGRAM_BOT_USERNAME || "Promobolsillo";
+  return {
+    startParam,
+    tg: `tg://resolve?domain=${encodeURIComponent(domain)}&startapp=${encodeURIComponent(startParam)}`,
+    web: `https://t.me/${encodeURIComponent(domain)}?startapp=${encodeURIComponent(startParam)}`,
+  };
 }
 
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
@@ -1298,8 +1358,21 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
     }, 50);
   }
 
+  function returnToMiniAppCapture() {
+    setStatus("Abriendo PromoBolsillo en Capturar / Evidencias...");
+    const links = buildTelegramMiniAppReturnLinks(context?.visita_id || "");
+    try {
+      window.location.href = links.tg;
+    } catch {}
+    window.setTimeout(() => {
+      try {
+        window.location.href = links.web;
+      } catch {}
+    }, 850);
+  }
+
   function closeExternalCameraSafely() {
-    setStatus("Listo. Si esta ventana no se cierra sola, toca la X superior para volver a PromoBolsillo y luego Actualizar.");
+    setStatus("Cierra esta ventana con la X superior. Para volver directo a la captura, usa el botón Volver a PromoBolsillo.");
     try { window.close(); } catch {}
   }
 
@@ -1325,11 +1398,14 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
             <div style={{ borderRadius: 18, background: "#dcfce7", color: "#166534", padding: 13, fontWeight: 900 }}>
               Listo. Las fotos ya fueron enviadas al registro de evidencias.
             </div>
-            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, borderRadius: 20, background: "#0f172a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
-              Cerrar cámara
+            <button type="button" onClick={returnToMiniAppCapture} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
+              Volver a PromoBolsillo
+            </button>
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: "1px solid rgba(15,23,42,.12)", borderRadius: 18, background: "#fff", color: "#334155", padding: "13px 16px", fontWeight: 950, fontSize: 15 }}>
+              Solo cerrar esta cámara
             </button>
             <div style={{ borderRadius: 16, background: "#eff6ff", color: "#1d4ed8", padding: 12, fontWeight: 850, lineHeight: 1.35 }}>
-              Si esta ventana no se cierra sola, toca la X superior para volver a PromoBolsillo. Al regresar, usa Actualizar para refrescar la galería de la visita.
+              El botón principal reabre la Mini App en Capturar / Evidencias. Si Telegram no la abre automáticamente, vuelve al bot y toca el botón de la Mini App.
             </div>
           </div>
         </div>
@@ -1489,6 +1565,7 @@ export default function App() {
   const externalCameraParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const isExternalCameraMode = externalCameraParams?.get("external_camera") === "1";
   const externalCameraToken = externalCameraParams?.get("token") || "";
+  const miniAppReturnTarget = parseMiniAppReturnStartParam(getTelegramStartParam());
 
   const [role, setRole] = useState<AppRole>(null);
   const [actorLabel, setActorLabel] = useState("Operador");
@@ -2197,7 +2274,17 @@ export default function App() {
       return;
     }
     const currentStillExists = nextOpenVisits.find((v) => v.visita_id === selectedVisitId);
-    setSelectedVisitId(currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
+    const returnVisit = miniAppReturnTarget.visitaId ? nextOpenVisits.find((v) => v.visita_id === miniAppReturnTarget.visitaId) : null;
+    const nextSelectedVisitId = returnVisit?.visita_id || (currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
+    setSelectedVisitId(nextSelectedVisitId);
+    if (miniAppReturnTarget.wantsCapture) {
+      setPromotorModule("evidencias");
+      setStatusMsgDuration(9000);
+      setStatusMsg("Regresaste de la cámara. Actualizando evidencias de la visita...");
+      void loadEvidencesToday();
+      void loadPromotorOutOfService();
+      if (nextSelectedVisitId) void loadEvidenceContext(nextSelectedVisitId);
+    }
   }
 
   async function loadEvidencesToday() {
