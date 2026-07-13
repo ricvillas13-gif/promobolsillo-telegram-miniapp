@@ -1,3 +1,5 @@
+// E020C_PROMOTOR_CAMERA_MEJORADA_Y_FIXES_E020B: conserva selfie frontal, evidencia trasera sin galeria, visor amplio 16:9, zoom si el dispositivo lo soporta, mensajes claros y filtros Mis evidencias corregidos.
+// E020B_FIX_PROMOTOR_CAMERA_GUARDS_EVIDENCE_FILTERS: selfie vuelve a cámara frontal integrada; evidencia usa cámara trasera integrada, no galería; mensajes claros sin tienda; Mis evidencias liga Fotos/Sin servicio/Todo con detalle útil.
 // E020A_BUILD_FIX_TS2367_CAMERA_NATIVE: corrige comparación TS2367 en openCamera; conserva E020 filtros claros y cámara nativa.
 // E020_SUPERVISOR_FILTROS_CLAROS_PROMOTOR_CAPTURA_NATIVA: filtros desplegables, actualizar resultados unico, bloqueo captura sin tienda/visita, panel sin servicio compacto y cámara nativa.
 // E019_PROMOTOR_SUPERVISOR_FLUIDEZ_REVISION_Y_SIN_SERVICIO: entrada mas fluida, fuera de servicio bajo solicitud, mis evidencias con Sin servicio, aprobacion con estado visible, consulta de aprobadas y seleccion masiva visible.
@@ -1107,6 +1109,7 @@ export default function App() {
   const [promotorEvidenceViewFilter, setPromotorEvidenceViewFilter] = useState<"fotos" | "fuera" | "todo">("fotos");
   const [promotorUsage, setPromotorUsage] = useState<PromotorUsageSummary>({});
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
+  const [selectedPromotorOutOfServiceId, setSelectedPromotorOutOfServiceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [promotorRecentAlerts, setPromotorRecentAlerts] = useState<PromotorRecentAlert[]>([]);
   const [pendingQueue, setPendingQueue] = useState<PendingQueueOp[]>([]);
@@ -1212,6 +1215,8 @@ export default function App() {
   const [imageViewerOffset, setImageViewerOffset] = useState({ x: 0, y: 0 });
   const [imageViewerDragging, setImageViewerDragging] = useState(false);
   const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
+  const [cameraZoom, setCameraZoom] = useState<{ supported: boolean; min: number; max: number; step: number; value: number }>({ supported: false, min: 1, max: 1, step: 0.1, value: 1 });
+  const [captureGuardMsg, setCaptureGuardMsg] = useState("");
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const supervisorQueueTopRef = useRef<HTMLDivElement | null>(null);
@@ -1328,6 +1333,12 @@ export default function App() {
     });
   }, [promotorOutOfServiceRows, evidenceFilterStore, evidenceFilterBrand]);
 
+  const selectedPromotorOutOfService = useMemo(() => {
+    if (promotorEvidenceViewFilter === "fotos") return null;
+    if (promotorEvidenceViewFilter === "todo" && selectedEvidenceId) return null;
+    return promotorOutOfServiceVisibleRows.find((item) => item.registro_id === selectedPromotorOutOfServiceId) || (promotorEvidenceViewFilter === "fuera" ? promotorOutOfServiceVisibleRows[0] : null) || null;
+  }, [promotorEvidenceViewFilter, promotorOutOfServiceVisibleRows, selectedPromotorOutOfServiceId, selectedEvidenceId]);
+
   const evidenceTypeOptions = useMemo(() => {
     return brandRules
       .filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index)
@@ -1412,8 +1423,17 @@ export default function App() {
     });
   }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
 
-  const selectedEvidence = useMemo(() => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || null, [filteredOperationalGallery, selectedEvidenceId]);
+  const selectedEvidence = useMemo(() => {
+    if (promotorEvidenceViewFilter === "fuera") return null;
+    if (promotorEvidenceViewFilter === "todo" && selectedPromotorOutOfServiceId) return null;
+    return filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || (promotorEvidenceViewFilter === "fotos" ? filteredOperationalGallery[0] : null) || null;
+  }, [filteredOperationalGallery, selectedEvidenceId, promotorEvidenceViewFilter, selectedPromotorOutOfServiceId]);
 
+
+  useEffect(() => {
+    if (promotorEvidenceViewFilter === "fuera") setSelectedEvidenceId("");
+    if (promotorEvidenceViewFilter === "fotos") setSelectedPromotorOutOfServiceId("");
+  }, [promotorEvidenceViewFilter]);
   function isStoredPhotoUnavailable(value?: string) {
     const textValue = String(value || "").trim();
     return !textValue || textValue === "[DRIVE_UPLOAD_FAILED]" || textValue.startsWith("[") || textValue.startsWith("PHOTO_STORAGE:");
@@ -2203,39 +2223,70 @@ export default function App() {
       cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     } finally {
       cameraStreamRef.current = null;
+      setCameraZoom({ supported: false, min: 1, max: 1, step: 0.1, value: 1 });
+    }
+  }
+
+  function showCaptureGuard(message: string) {
+    setCaptureGuardMsg(message);
+    setStatusMsg(message);
+    setStatusMsgDuration(8500);
+    window.setTimeout(() => {
+      setCaptureGuardMsg((current) => current === message ? "" : current);
+    }, 8500);
+  }
+
+  function setupCameraZoom(stream: MediaStream, facing: "user" | "environment") {
+    try {
+      const track = stream.getVideoTracks?.()[0];
+      const capabilities = (track?.getCapabilities?.() || {}) as any;
+      const settings = (track?.getSettings?.() || {}) as any;
+      const min = Number(capabilities?.zoom?.min ?? 1);
+      const max = Number(capabilities?.zoom?.max ?? min);
+      const step = Number(capabilities?.zoom?.step ?? 0.1);
+      const value = Number(settings?.zoom ?? min);
+      const supported = facing === "environment" && Number.isFinite(min) && Number.isFinite(max) && max > min;
+      setCameraZoom({ supported, min: supported ? min : 1, max: supported ? max : 1, step: supported && Number.isFinite(step) && step > 0 ? step : 0.1, value: supported && Number.isFinite(value) ? value : 1 });
+    } catch {
+      setCameraZoom({ supported: false, min: 1, max: 1, step: 0.1, value: 1 });
+    }
+  }
+
+  async function changeCameraZoom(nextValue: number) {
+    const value = Math.max(cameraZoom.min, Math.min(cameraZoom.max, nextValue));
+    setCameraZoom((prev) => ({ ...prev, value }));
+    try {
+      const track = cameraStreamRef.current?.getVideoTracks?.()[0];
+      await track?.applyConstraints?.({ advanced: [{ zoom: value }] } as any);
+    } catch {
+      setStatusMsg("El zoom no está disponible en este equipo o Telegram lo limitó.");
+      setStatusMsgDuration(5200);
     }
   }
 
   async function openCamera(target: CameraTarget, facing: "user" | "environment") {
-    // E020: usar cámara nativa del celular para conservar encuadre/zoom del dispositivo.
+    // E020C: cámara integrada mejorada. Selfie mantiene cámara frontal; evidencia/reemplazo usa trasera, sin abrir galería.
     if (target === "entrada" && !selectedStoreId) {
-      setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+      showCaptureGuard("Primero selecciona una tienda. Después podrás capturar ubicación y tomar selfie.");
       return;
     }
     if (target === "evidencia" && !selectedVisitId) {
-      setStatusMsg("Selecciona una tienda/visita antes de tomar foto.");
+      showCaptureGuard("Primero selecciona una visita/tienda activa. Después podrás tomar foto de evidencia.");
       return;
     }
-    if (target === "entrada") {
-      entryNativeCameraInputRef.current?.click();
-      return;
-    }
-    if (target === "evidencia") {
-      evidenceNativeCameraInputRef.current?.click();
-      return;
-    }
-    if (target === "reemplazo") {
-      replaceNativeCameraInputRef.current?.click();
-      return;
-    }
-
-    // Fallback técnico para salida u otros casos no migrados a cámara nativa.
     try {
       setCapturingPhoto(target);
+      setCaptureGuardMsg("");
       await stopCameraStream();
-      const attempts: MediaStreamConstraints[] = [
-        { video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
-        { video: { facingMode: facing }, audio: false },
+      const evidenceVideo = target === "evidencia" || target === "reemplazo";
+      const attempts: MediaStreamConstraints[] = evidenceVideo ? [
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, aspectRatio: { ideal: 1.7777778 } } as any, audio: false },
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.7777778 } } as any, audio: false },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ] : [
+        { video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } } as any, audio: false },
+        { video: { facingMode: "user" }, audio: false },
         { video: true, audio: false },
       ];
       let stream: MediaStream | null = null;
@@ -2250,7 +2301,8 @@ export default function App() {
       }
       if (!stream) throw lastError || new Error("No se pudo abrir la cámara.");
       cameraStreamRef.current = stream;
-      setCameraModal({ open: true, target, facing });
+      setupCameraZoom(stream, evidenceVideo ? "environment" : "user");
+      setCameraModal({ open: true, target, facing: evidenceVideo ? "environment" : "user" });
       window.setTimeout(() => {
         if (cameraVideoRef.current) {
           cameraVideoRef.current.srcObject = stream;
@@ -2268,6 +2320,7 @@ export default function App() {
       setCapturingPhoto(null);
     }
   }
+
 
   async function captureFromCameraModal() {
     const video = cameraVideoRef.current;
@@ -2467,7 +2520,7 @@ export default function App() {
 
   async function captureLocation(kind: CaptureKind) {
     if (kind === "entrada" && !selectedStoreId) {
-      setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+      showCaptureGuard("Primero selecciona una tienda. Después podrás capturar ubicación y tomar selfie.");
       return;
     }
     if (kind === "salida" && !exitVisit) {
@@ -3012,7 +3065,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
   }
 
   function focusPromotorEvidence(item: EvidenceItem) {
+    setSelectedPromotorOutOfServiceId("");
     setSelectedEvidenceId(item.evidencia_id);
+    if (promotorModule !== "mis_evidencias") setPromotorModule("mis_evidencias");
+    window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
+  }
+
+  function focusPromotorOutOfService(item: SupervisorOutOfServiceItem) {
+    setSelectedEvidenceId("");
+    setSelectedPromotorOutOfServiceId(item.registro_id);
     if (promotorModule !== "mis_evidencias") setPromotorModule("mis_evidencias");
     window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
   }
@@ -3088,7 +3149,11 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
   return (
     <div style={styles.page}>
-      <style>{globalCss}</style>
+      <style>{globalCss}
+.e020CaptureGuard { margin: 10px 0 8px; border: 1px solid rgba(245,158,11,.45); background: rgba(255,247,237,.95); color: #7c2d12; border-radius: 14px; padding: 10px 12px; font-weight: 850; line-height: 1.35; }
+.outOfServiceBox { max-width: 430px; justify-self: start; }
+.outOfServiceDetailCard { border: 1px solid rgba(245, 158, 11, .35); background: rgba(255, 247, 237, .72); border-radius: 16px; padding: 12px; display: grid; gap: 7px; }
+</style>
       <div className="shell">
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
@@ -3398,16 +3463,17 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <option key={store.tienda_id} value={store.tienda_id}>{formatStoreDisplay(store.tienda_id, store.nombre_tienda)}</option>
                   ))}
                 </select>
-                {!selectedStoreId ? <div className="contextHint e020CaptureGuard">Selecciona una tienda antes de capturar ubicación o tomar foto.</div> : null}
+                {!selectedStoreId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una tienda. Después podrás capturar ubicación y tomar selfie.</div> : null}
+                {captureGuardMsg && promotorModule === "asistencia" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
 
                 <div className="captureBlock">
                   <div className="captureTitle">Entrada</div>
                   <div className="captureStack">
-                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={!selectedStoreId || capturingLocation === "entrada"}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
                     </button>
-                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")} disabled={!selectedStoreId}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")} disabled={false}>
                       <Camera size={16} />
                       {entryPhoto ? "Selfie lista" : "Tomar selfie"}
                     </button>
@@ -3577,8 +3643,10 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="panel">
                 <label className="fieldLabel">Comentario</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
+                {!selectedVisitId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una visita/tienda activa. Después podrás tomar foto de evidencia.</div> : null}
+                {captureGuardMsg && promotorModule === "evidencias" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
                 <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={!selectedVisitId || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
+                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
                     <Camera size={16} />
                     Tomar foto
                   </button>
@@ -3591,7 +3659,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </div>
                 <input ref={evidenceNativeCameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("evidencia", e.target.files)} />
                 <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleGallerySelection("evidence", e.target.files)} />
-                <div className="contextHint">La cámara usa el modo nativo del celular para permitir encuadre y zoom propios del dispositivo. Máximo 24 fotos en la selección actual.</div>
+                <div className="contextHint">La cámara de evidencia se abre desde la Mini App con cámara trasera. La galería solo se habilita cuando existe autorización. Máximo 24 fotos en la selección actual.</div>
                 <div className="authTraceBox">Galería evidencia: <strong>{galleryReasonLabel(evidenceGalleryAuth)}</strong></div>
                 {evidencePhotos.length ? (
                   <>
@@ -3621,9 +3689,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Recargar"}</span></button>
             </div>
             <div className="e018ReviewModeBar e019PromotorModeBar">
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("fotos")}>Fotos</button>
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("fuera")}>Sin servicio</button>
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("todo")}>Todo</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fotos"); setSelectedPromotorOutOfServiceId(""); }}>Fotos</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fuera"); setSelectedEvidenceId(""); }}>Sin servicio</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("todo"); setSelectedEvidenceId(""); setSelectedPromotorOutOfServiceId(""); }}>Todo</button>
             </div>
             <div className="filtersRow">
               <select className="inputLike" value={evidenceFilterStore} onChange={(e) => { setEvidenceFilterStore(e.target.value); setEvidenceFilterBrand(""); setEvidenceFilterType(""); setEvidenceFilterPhase(""); }}>
@@ -3655,12 +3723,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </button>
                   )) : null}
                   {promotorEvidenceViewFilter !== "fotos" ? promotorOutOfServiceVisibleRows.map((item) => (
-                    <div key={item.registro_id} className="listBtn e019OutServiceListItem">
+                    <button key={item.registro_id} type="button" onClick={() => focusPromotorOutOfService(item)} className={`listBtn e019OutServiceListItem ${selectedPromotorOutOfServiceId === item.registro_id ? "listBtnGreen" : ""}`}>
                       <div className="listTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"}</div>
                       <div className="listSub">Sin servicio · {item.marca_nombre || item.marca_id || "Marca"}</div>
                       <div className="summaryLine">Motivo: <strong>{item.motivo || "Sin motivo"}</strong></div>
                       {item.comentario ? <div className="summaryLine">Comentario: {item.comentario}</div> : null}
-                    </div>
+                    </button>
                   )) : null}
                   {promotorEvidenceViewFilter !== "fuera" && !filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
                   {promotorEvidenceViewFilter !== "fotos" && !promotorOutOfServiceVisibleRows.length ? <div className="emptyBox">No hay marcas sin servicio registradas con esos filtros.</div> : null}
@@ -3695,8 +3763,18 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
                     <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe un comentario" />
                   </>
+                ) : selectedPromotorOutOfService ? (
+                  <div className="outOfServiceDetailCard">
+                    <div className="outOfServiceTitle">¿Marca fuera de servicio?</div>
+                    <div className="summaryLine">Tienda: <strong>{selectedPromotorOutOfService.tienda_display || selectedPromotorOutOfService.tienda_nombre || selectedPromotorOutOfService.tienda_id || "Tienda"}</strong></div>
+                    <div className="summaryLine">Marca: <strong>{selectedPromotorOutOfService.marca_nombre || selectedPromotorOutOfService.marca_id || "Marca"}</strong></div>
+                    <div className="summaryLine">Motivo: <strong>{selectedPromotorOutOfService.motivo || "Sin motivo"}</strong></div>
+                    {selectedPromotorOutOfService.comentario ? <div className="summaryLine">Comentario: {selectedPromotorOutOfService.comentario}</div> : null}
+                    <div className="summaryLine">Fecha: {selectedPromotorOutOfService.fecha_hora_fmt || selectedPromotorOutOfService.fecha_hora || "Sin fecha"}</div>
+                    <div className="authTraceBox">Este registro no es una foto; es una justificación operativa de marca sin servicio.</div>
+                  </div>
                 ) : (
-                  <div className="emptyBox">Selecciona una evidencia.</div>
+                  <div className="emptyBox">Selecciona una evidencia o un registro sin servicio.</div>
                 )}
               </div>
             </div>
@@ -4249,7 +4327,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             ) : null}
           </div>
         ) : null}
-        {role === "promotor" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
+        {role === "promotor" && promotorEvidenceViewFilter !== "fuera" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
           <div className="card">
             <div className="e018SectionHeader">
               <div className="sectionTitle">Galería de evidencias</div>
@@ -4380,12 +4458,25 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
         {cameraModal.open ? (
           <div className="overlayBackdrop cameraBackdrop" onClick={() => void closeCameraModal()}>
-            <div className="cameraModal cameraModalTight" onClick={(e) => e.stopPropagation()}>
-              <div className="miniTitle cameraTitle">Captura de foto</div>
-              <div className="cameraViewport cameraViewportTight">
-                <video ref={cameraVideoRef} className="cameraVideo cameraVideoTight" playsInline muted autoPlay />
+            <div className={`cameraModal cameraModalTight ${cameraModal.facing === "environment" ? "cameraModalEvidence" : ""}`} onClick={(e) => e.stopPropagation()}>
+              <div className="miniTitle cameraTitle">{cameraModal.target === "entrada" ? "Selfie de entrada" : cameraModal.target === "salida" ? "Foto de salida" : cameraModal.target === "reemplazo" ? "Reemplazar evidencia" : "Foto de evidencia"}</div>
+              <div className={`cameraViewport cameraViewportTight ${cameraModal.facing === "environment" ? "cameraViewportEvidence" : ""}`}>
+                <video ref={cameraVideoRef} className={`cameraVideo cameraVideoTight ${cameraModal.facing === "environment" ? "cameraVideoEvidence" : ""}`} playsInline muted autoPlay />
               </div>
-              <div className="cameraHint">Ajusta la foto antes de capturar.</div>
+              {cameraModal.facing === "environment" ? (
+                <div className="cameraHint e020cCameraHint">Usa el celular en horizontal si necesitas una toma más panorámica. Si tu equipo lo permite, ajusta el zoom antes de capturar.</div>
+              ) : (
+                <div className="cameraHint e020cCameraHint">Cámara frontal para selfie de asistencia.</div>
+              )}
+              {cameraZoom.supported ? (
+                <div className="e020cZoomBox">
+                  <div className="e020cZoomLabel">Zoom</div>
+                  <input className="e020cZoomRange" type="range" min={cameraZoom.min} max={cameraZoom.max} step={cameraZoom.step} value={cameraZoom.value} onChange={(e) => void changeCameraZoom(Number(e.target.value))} />
+                  <div className="e020cZoomValue">{cameraZoom.value.toFixed(1)}x</div>
+                </div>
+              ) : cameraModal.facing === "environment" ? (
+                <div className="cameraHint e020cZoomUnavailable">Zoom no disponible en este equipo o dentro de Telegram.</div>
+              ) : null}
               <div className="cameraActionRow cameraActionRowTight">
                 <button className="cameraCaptureBtn cameraCaptureBtnTight" onClick={() => void captureFromCameraModal()}><Camera size={18} />Capturar</button>
                 <button className="cameraCancelBtn cameraCancelBtnTight" onClick={() => void closeCameraModal()}><Trash2 size={16} />Cancelar</button>
@@ -4749,6 +4840,59 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
+
+/* E020C_CAMERA_MEJORADA_PROMOTOR */
+.e020cCaptureGuardStrong {
+  border-width: 2px;
+  background: #fff7ed;
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.18);
+}
+.e020cGuardToast {
+  margin: 10px 0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  border: 2px solid rgba(245, 158, 11, .55);
+  background: #fff7ed;
+  color: #7c2d12;
+  font-weight: 900;
+  line-height: 1.35;
+}
+.cameraModalEvidence {
+  width: min(calc(100vw - 12px), 760px);
+  max-height: calc(100vh - 28px);
+}
+.cameraViewportEvidence {
+  aspect-ratio: 16 / 9;
+  max-height: min(62vh, 520px);
+}
+.cameraVideoEvidence {
+  object-fit: contain;
+  background: #000;
+  max-height: min(62vh, 520px);
+}
+.e020cCameraHint {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.e020cZoomBox {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+.e020cZoomLabel, .e020cZoomValue { font-weight: 900; font-size: 12px; }
+.e020cZoomRange { width: 100%; }
+.e020cZoomUnavailable { color: rgba(255,255,255,0.64); }
+@media (max-width: 760px) {
+  .cameraModalEvidence { width: calc(100vw - 8px); padding: 8px; }
+  .cameraViewportEvidence { max-height: min(58vh, 460px); }
+  .cameraVideoEvidence { max-height: min(58vh, 460px); }
+}
+
 
 	/* E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN */
 	.e016SupervisorSummaryCard { padding: 16px; }
