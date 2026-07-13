@@ -1,3 +1,4 @@
+// E024D_CLARIDAD_MIS_FOTOS_RETURN: Con foto/Sin servicio/Todo, regreso a Mis fotos, botón claro y sin texto redundante.
 // E024C_RETURN_TO_MINIAPP_CAPTURE: botón de regreso abre Mini App en Capturar/Evidencias y evita volver al chat.
 // E024B_FINALIZAR_SEGURO_Y_SIN_SERVICIO_CONTEXTUAL: evita Aw Snap al finalizar y mueve Sin servicio junto a Marca.
 // E024_EXTERNAL_CAMERA_UX_WORKSPACE: mini app simplificada y cámara externa con contexto integrado, galeria horizontal y anulación.
@@ -596,7 +597,7 @@ type GalleryAuthorizationResponse = {
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "Promobolsillo").replace(/^@/, "");
-const MINIAPP_RETURN_PARAM_PREFIX = "capture_";
+const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
 const SHEETS_SAFE_PHOTO_CHARS = 32000;
@@ -720,17 +721,20 @@ function decodeStartParamSegment(value: string) {
 
 function parseMiniAppReturnStartParam(startParam: string) {
   const raw = String(startParam || "");
-  if (!raw) return { wantsCapture: false, visitaId: "" };
-  if (raw === "capture" || raw === "capturar" || raw === "return_capture") return { wantsCapture: true, visitaId: "" };
+  if (!raw) return { wantsReview: false, visitaId: "" };
+  if (raw === "review" || raw === "mis_fotos" || raw === "capture" || raw === "capturar" || raw === "return_capture") return { wantsReview: true, visitaId: "" };
   if (raw.startsWith(MINIAPP_RETURN_PARAM_PREFIX)) {
-    return { wantsCapture: true, visitaId: decodeStartParamSegment(raw.slice(MINIAPP_RETURN_PARAM_PREFIX.length)) };
+    return { wantsReview: true, visitaId: decodeStartParamSegment(raw.slice(MINIAPP_RETURN_PARAM_PREFIX.length)) };
   }
-  return { wantsCapture: false, visitaId: "" };
+  if (raw.startsWith("capture_")) {
+    return { wantsReview: true, visitaId: decodeStartParamSegment(raw.slice("capture_".length)) };
+  }
+  return { wantsReview: false, visitaId: "" };
 }
 
 function buildTelegramMiniAppReturnLinks(visitaId = "") {
   const suffix = encodeStartParamSegment(visitaId);
-  const startParam = suffix ? `${MINIAPP_RETURN_PARAM_PREFIX}${suffix}` : "capture";
+  const startParam = suffix ? `${MINIAPP_RETURN_PARAM_PREFIX}${suffix}` : "review";
   const domain = TELEGRAM_BOT_USERNAME || "Promobolsillo";
   return {
     startParam,
@@ -1359,7 +1363,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   }
 
   function returnToMiniAppCapture() {
-    setStatus("Abriendo PromoBolsillo en Capturar / Evidencias...");
+    setStatus("Abriendo PromoBolsillo para revisar evidencias...");
     const links = buildTelegramMiniAppReturnLinks(context?.visita_id || "");
     try {
       window.location.href = links.tg;
@@ -1372,7 +1376,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   }
 
   function closeExternalCameraSafely() {
-    setStatus("Cierra esta ventana con la X superior. Para volver directo a la captura, usa el botón Volver a PromoBolsillo.");
+    setStatus("Cierra esta ventana con la X superior. Para revisar lo capturado, usa Volver y revisar evidencias.");
     try { window.close(); } catch {}
   }
 
@@ -1399,14 +1403,11 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
               Listo. Las fotos ya fueron enviadas al registro de evidencias.
             </div>
             <button type="button" onClick={returnToMiniAppCapture} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
-              Volver a PromoBolsillo
+              Volver y revisar evidencias
             </button>
-            <button type="button" onClick={closeExternalCameraSafely} style={{ border: "1px solid rgba(15,23,42,.12)", borderRadius: 18, background: "#fff", color: "#334155", padding: "13px 16px", fontWeight: 950, fontSize: 15 }}>
-              Solo cerrar esta cámara
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, background: "transparent", color: "#64748b", padding: "8px 10px", fontWeight: 850, fontSize: 13, textDecoration: "underline" }}>
+              Cerrar sin revisar ahora
             </button>
-            <div style={{ borderRadius: 16, background: "#eff6ff", color: "#1d4ed8", padding: 12, fontWeight: 850, lineHeight: 1.35 }}>
-              El botón principal reabre la Mini App en Capturar / Evidencias. Si Telegram no la abre automáticamente, vuelve al bot y toca el botón de la Mini App.
-            </div>
           </div>
         </div>
       </div>
@@ -2277,10 +2278,11 @@ export default function App() {
     const returnVisit = miniAppReturnTarget.visitaId ? nextOpenVisits.find((v) => v.visita_id === miniAppReturnTarget.visitaId) : null;
     const nextSelectedVisitId = returnVisit?.visita_id || (currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
     setSelectedVisitId(nextSelectedVisitId);
-    if (miniAppReturnTarget.wantsCapture) {
-      setPromotorModule("evidencias");
+    if (miniAppReturnTarget.wantsReview) {
+      setPromotorModule("mis_evidencias");
+      setPromotorEvidenceViewFilter("todo");
       setStatusMsgDuration(9000);
-      setStatusMsg("Regresaste de la cámara. Actualizando evidencias de la visita...");
+      setStatusMsg("Regresaste de la cámara. Actualizando Mis fotos de la visita...");
       void loadEvidencesToday();
       void loadPromotorOutOfService();
       if (nextSelectedVisitId) void loadEvidenceContext(nextSelectedVisitId);
@@ -4289,7 +4291,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Recargar"}</span></button>
             </div>
             <div className="e018ReviewModeBar e019PromotorModeBar">
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fotos"); setSelectedPromotorOutOfServiceId(""); }}>Fotos</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fotos"); setSelectedPromotorOutOfServiceId(""); }}>Con foto</button>
               <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fuera"); setSelectedEvidenceId(""); }}>Sin servicio</button>
               <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("todo"); setSelectedEvidenceId(""); setSelectedPromotorOutOfServiceId(""); }}>Todo</button>
             </div>
