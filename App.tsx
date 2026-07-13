@@ -1,3 +1,5 @@
+// E020A_BUILD_FIX_TS2367_CAMERA_NATIVE: corrige comparación TS2367 en openCamera; conserva E020 filtros claros y cámara nativa.
+// E020_SUPERVISOR_FILTROS_CLAROS_PROMOTOR_CAPTURA_NATIVA: filtros desplegables, actualizar resultados unico, bloqueo captura sin tienda/visita, panel sin servicio compacto y cámara nativa.
 // E019_PROMOTOR_SUPERVISOR_FLUIDEZ_REVISION_Y_SIN_SERVICIO: entrada mas fluida, fuera de servicio bajo solicitud, mis evidencias con Sin servicio, aprobacion con estado visible, consulta de aprobadas y seleccion masiva visible.
 // E018B_PROMOTOR_SUPERVISOR_NAVEGACION_DETALLE_UTIL_CONFIRMADO: marcador visible para verificar en GitHub; incluye recargar arriba, Inicio/Final, fecha completa, detalle útil y filtro Sin servicio.
 // E017_PROMOTOR_OPTIMIZACION_REGISTRO_EVIDENCIA: reduce peso de foto, evita refresco bloqueante despues de registrar evidencia y mejora mensajes de guardado.
@@ -991,11 +993,12 @@ async function fileToDataUrl(file: File) {
   });
 }
 
-async function readPhotoForSheets(file: File) {
+async function readPhotoForSheets(file: File, prefix = "galeria") {
   const raw = await fileToDataUrl(file);
   const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
+  const safePrefix = prefix || "galeria";
   return {
-    name: `galeria-${Date.now()}-${file.name || "foto.jpg"}`,
+    name: `${safePrefix}-${Date.now()}-${file.name || "foto.jpg"}`,
     dataUrl,
     capturedAt: nowMxString(),
   } as PhotoCapture;
@@ -1151,6 +1154,11 @@ export default function App() {
   const [supEvidenceDatePreset, setSupEvidenceDatePreset] = useState<"hoy" | "semana" | "rango">("hoy");
   const [supEvidenceDateStart, setSupEvidenceDateStart] = useState(localYmd());
   const [supEvidenceDateEnd, setSupEvidenceDateEnd] = useState(localYmd());
+  const [draftSupEvidenceDatePreset, setDraftSupEvidenceDatePreset] = useState<"hoy" | "semana" | "rango">("hoy");
+  const [draftSupEvidenceDateStart, setDraftSupEvidenceDateStart] = useState(localYmd());
+  const [draftSupEvidenceDateEnd, setDraftSupEvidenceDateEnd] = useState(localYmd());
+  const [draftSupReviewContentFilter, setDraftSupReviewContentFilter] = useState<"evidencias" | "fuera" | "todo">("evidencias");
+  const [draftSupEvidenceStatusFilter, setDraftSupEvidenceStatusFilter] = useState("PENDIENTE");
   const [supEvidenceGroupMode, setSupEvidenceGroupMode] = useState<EvidenceGroupMode>("marca");
   const [activeSupEvidenceGroupKey, setActiveSupEvidenceGroupKey] = useState("");
   const [supEvidenceGroupPage, setSupEvidenceGroupPage] = useState(1);
@@ -1219,6 +1227,9 @@ export default function App() {
   const entryGalleryInputRef = useRef<HTMLInputElement | null>(null);
   const evidenceGalleryInputRef = useRef<HTMLInputElement | null>(null);
   const replaceGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  const entryNativeCameraInputRef = useRef<HTMLInputElement | null>(null);
+  const evidenceNativeCameraInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceNativeCameraInputRef = useRef<HTMLInputElement | null>(null);
 
 
   useEffect(() => {
@@ -2145,6 +2156,36 @@ export default function App() {
     }
   }
 
+  async function handleNativeCameraSelection(target: CameraTarget, fileList: FileList | null) {
+    try {
+      const files = Array.from(fileList || []).filter(Boolean);
+      if (!files.length) return;
+      if (target === "entrada") {
+        if (!selectedStoreId) return setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+        const photo = await readPhotoForSheets(files[0], "captura");
+        setEntryPhoto(photo);
+        setStatusMsg("Foto de entrada lista.");
+        return;
+      }
+      if (target === "reemplazo") {
+        const photo = await readPhotoForSheets(files[0], "captura");
+        setStatusMsg("Reemplazando foto...");
+        setStatusMsgDuration(7000);
+        await replaceEvidencePhotoPayload(photo.name, photo.dataUrl, "CAMARA");
+        return;
+      }
+      if (!selectedVisitId) return setStatusMsg("Selecciona una tienda/visita antes de tomar foto.");
+      const nextPhotos = [] as PhotoCapture[];
+      for (const file of files.slice(0, 24)) {
+        nextPhotos.push(await readPhotoForSheets(file, "captura"));
+      }
+      setEvidencePhotos((prev) => [...prev, ...nextPhotos].slice(0, 24));
+      setStatusMsg(`${nextPhotos.length} foto(s) de cámara agregada(s).`);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo leer la foto tomada.");
+    }
+  }
+
   function galleryReasonLabel(info: GalleryAuthorizationInfo) {
     const reason = String(info.debug?.reason || "").toUpperCase();
     if (info.allowed) return `Autorizada${info.authorization?.autorizacion_id ? ` · ${info.authorization.autorizacion_id}` : ""}`;
@@ -2166,8 +2207,31 @@ export default function App() {
   }
 
   async function openCamera(target: CameraTarget, facing: "user" | "environment") {
+    // E020: usar cámara nativa del celular para conservar encuadre/zoom del dispositivo.
+    if (target === "entrada" && !selectedStoreId) {
+      setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+      return;
+    }
+    if (target === "evidencia" && !selectedVisitId) {
+      setStatusMsg("Selecciona una tienda/visita antes de tomar foto.");
+      return;
+    }
+    if (target === "entrada") {
+      entryNativeCameraInputRef.current?.click();
+      return;
+    }
+    if (target === "evidencia") {
+      evidenceNativeCameraInputRef.current?.click();
+      return;
+    }
+    if (target === "reemplazo") {
+      replaceNativeCameraInputRef.current?.click();
+      return;
+    }
+
+    // Fallback técnico para salida u otros casos no migrados a cámara nativa.
     try {
-      setCapturingPhoto(target === "evidencia" ? "entrada" : target);
+      setCapturingPhoto(target);
       await stopCameraStream();
       const attempts: MediaStreamConstraints[] = [
         { video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
@@ -2402,6 +2466,14 @@ export default function App() {
   }
 
   async function captureLocation(kind: CaptureKind) {
+    if (kind === "entrada" && !selectedStoreId) {
+      setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+      return;
+    }
+    if (kind === "salida" && !exitVisit) {
+      setStatusMsg("Selecciona una visita abierta antes de registrar salida.");
+      return;
+    }
     setStatusMsg(kind === "entrada" ? "Se solicitará tu ubicación para registrar la entrada." : "Se solicitará tu ubicación para registrar la salida.");
     try {
       setCapturingLocation(kind);
@@ -2883,6 +2955,21 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     });
   }
 
+  function applySupervisorMainFilters() {
+    setSupEvidenceDatePreset(draftSupEvidenceDatePreset);
+    setSupEvidenceDateStart(draftSupEvidenceDateStart || localYmd());
+    setSupEvidenceDateEnd(draftSupEvidenceDateEnd || draftSupEvidenceDateStart || localYmd());
+    setSupReviewContentFilter(draftSupReviewContentFilter);
+    setSupEvidenceStatusFilter(draftSupEvidenceStatusFilter);
+    setSupEvidenceOnlyPending(false);
+    setSelectedSupEvidenceIds([]);
+    setSupEvidenceGroupPage(1);
+    setActiveSupEvidenceGroupKey("");
+    setStatusMsgDuration(4200);
+    setStatusMsg("Sincronizando resultados con los filtros seleccionados...");
+    void refreshCurrentRoleData();
+  }
+
   function clearSupervisorEvidenceFilters() {
     setSupEvidencePromotorFilter("");
     setSupEvidenceStoreFilter("");
@@ -2895,6 +2982,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     setSupEvidenceDatePreset("hoy");
     setSupEvidenceDateStart(localYmd());
     setSupEvidenceDateEnd(localYmd());
+    setSupReviewContentFilter("evidencias");
+    setDraftSupEvidenceDatePreset("hoy");
+    setDraftSupEvidenceDateStart(localYmd());
+    setDraftSupEvidenceDateEnd(localYmd());
+    setDraftSupReviewContentFilter("evidencias");
+    setDraftSupEvidenceStatusFilter("PENDIENTE");
   }
 
   function scrollElementIntoView(ref: { current: HTMLElement | HTMLDivElement | null }, block: ScrollLogicalPosition = "start") {
@@ -3305,25 +3398,27 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <option key={store.tienda_id} value={store.tienda_id}>{formatStoreDisplay(store.tienda_id, store.nombre_tienda)}</option>
                   ))}
                 </select>
+                {!selectedStoreId ? <div className="contextHint e020CaptureGuard">Selecciona una tienda antes de capturar ubicación o tomar foto.</div> : null}
 
                 <div className="captureBlock">
                   <div className="captureTitle">Entrada</div>
                   <div className="captureStack">
-                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={!selectedStoreId || capturingLocation === "entrada"}>
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
                     </button>
-                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")} disabled={!selectedStoreId}>
                       <Camera size={16} />
                       {entryPhoto ? "Selfie lista" : "Tomar selfie"}
                     </button>
                     {attendanceGalleryAuth.allowed ? (
-                      <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => entryGalleryInputRef.current?.click()}>
+                      <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => entryGalleryInputRef.current?.click()} disabled={!selectedStoreId}>
                         <ImageIcon size={16} />
                         Galería autorizada
                       </button>
                     ) : null}
                   </div>
+                  <input ref={entryNativeCameraInputRef} type="file" accept="image/*" capture="user" style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("entrada", e.target.files)} />
                   <input ref={entryGalleryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void handleGallerySelection("attendance-entry", e.target.files)} />
                   <div className="authTraceBox">Galería asistencia: <strong>{galleryReasonLabel(attendanceGalleryAuth)}</strong></div>
                   {entryLocation ? <div className="captureMeta">Lat {entryLocation.lat.toFixed(5)} · Lon {entryLocation.lon.toFixed(5)}</div> : null}
@@ -3431,11 +3526,11 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         {!showOutOfServicePanel ? (
                           <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(true)}>
                             <ShieldAlert size={16} />
-                            Marcar marca fuera de servicio
+                            ¿Marca fuera de servicio?
                           </button>
                         ) : (
                           <>
-                            <div className="outOfServiceTitle">Marca fuera de servicio</div>
+                            <div className="outOfServiceTitle">¿Marca fuera de servicio?</div>
                             <div className="outOfServiceText">Usa esta opción solo cuando la marca no deba atenderse en esta visita.</div>
                             <select className="inputLike" value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
                               {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
@@ -3483,7 +3578,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <label className="fieldLabel">Comentario</label>
                 <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
                 <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
+                  <button className="secondaryBtn compactBtn" disabled={!selectedVisitId || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
                     <Camera size={16} />
                     Tomar foto
                   </button>
@@ -3494,8 +3589,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </button>
                   ) : null}
                 </div>
+                <input ref={evidenceNativeCameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("evidencia", e.target.files)} />
                 <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleGallerySelection("evidence", e.target.files)} />
-                <div className="contextHint">Las evidencias normalmente se capturan con cámara. Máximo 24 fotos en la selección actual.</div>
+                <div className="contextHint">La cámara usa el modo nativo del celular para permitir encuadre y zoom propios del dispositivo. Máximo 24 fotos en la selección actual.</div>
                 <div className="authTraceBox">Galería evidencia: <strong>{galleryReasonLabel(evidenceGalleryAuth)}</strong></div>
                 {evidencePhotos.length ? (
                   <>
@@ -3593,6 +3689,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       {replaceGalleryAuth.allowed ? <button className="actionButton" onClick={() => replaceGalleryInputRef.current?.click()}><ImageIcon size={16} /><span>Galería autorizada</span></button> : null}
                       <button className="actionButton" onClick={() => void saveNote()}><Pencil size={16} /><span>Guardar nota</span></button>
                     </div>
+                    <input ref={replaceNativeCameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("reemplazo", e.target.files)} />
                     <input ref={replaceGalleryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void handleGallerySelection("replace", e.target.files)} />
                     <div className="authTraceBox">Galería reemplazo: <strong>{galleryReasonLabel(replaceGalleryAuth)}</strong></div>
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
@@ -3976,33 +4073,51 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <span><strong>{supervisorEvidenceSummary.pendientes}</strong><small>Pendientes</small></span>
                 <span><strong>{supervisorEvidenceSummary.observadas + supervisorEvidenceSummary.rechazadas}</strong><small>Con acción</small></span>
               </div>
-              <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Recargar"}</span></button>
             </div>
 
-            <div className="e016DateFilterBar">
-              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "hoy" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("hoy")}>Hoy</button>
-              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "semana" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("semana")}>Semana</button>
-              <button type="button" className={`e016DateChip ${supEvidenceDatePreset === "rango" ? "e016DateChipActive" : ""}`} onClick={() => setSupEvidenceDatePreset("rango")}>Rango</button>
-              <span className="e016DateLabel">Mostrando: {supervisorDateBounds.label}</span>
-            </div>
-            <div className="e018ReviewModeBar">
-              <button type="button" className={`e016DateChip ${supReviewContentFilter === "evidencias" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("evidencias")}>Evidencias</button>
-              <button type="button" className={`e016DateChip ${supReviewContentFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("fuera")}>Sin servicio</button>
-              <button type="button" className={`e016DateChip ${supReviewContentFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => setSupReviewContentFilter("todo")}>Todo</button>
-            </div>
-            <div className="e019StatusModeBar">
-              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "PENDIENTE" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("PENDIENTE"); setSupEvidenceOnlyPending(false); }}>Pendientes</button>
-              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "APROBADA" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("APROBADA"); setSupEvidenceOnlyPending(false); }}>Aprobadas</button>
-              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "OBSERVADA" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("OBSERVADA"); setSupEvidenceOnlyPending(false); }}>Comentadas</button>
-              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "RECHAZADA" ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter("RECHAZADA"); setSupEvidenceOnlyPending(false); }}>Rechazadas</button>
-              <button type="button" className={`e016DateChip ${supEvidenceStatusFilter === "" && !supEvidenceOnlyPending ? "e016DateChipActive" : ""}`} onClick={() => { setSupEvidenceStatusFilter(""); setSupEvidenceOnlyPending(false); }}>Todo</button>
-            </div>
-            {supEvidenceDatePreset === "rango" ? (
-              <div className="e016RangeRow">
-                <input className="inputLike" type="date" value={supEvidenceDateStart} onChange={(e) => setSupEvidenceDateStart(e.target.value)} />
-                <input className="inputLike" type="date" value={supEvidenceDateEnd} onChange={(e) => setSupEvidenceDateEnd(e.target.value)} />
+            <div className="e020FilterPanel">
+              <div className="e020FilterGrid">
+                <label className="e020FilterField">
+                  <span>Periodo</span>
+                  <select className="inputLike" value={draftSupEvidenceDatePreset} onChange={(e) => setDraftSupEvidenceDatePreset(e.target.value as "hoy" | "semana" | "rango")}>
+                    <option value="hoy">Hoy</option>
+                    <option value="semana">Semana actual</option>
+                    <option value="rango">Rango personalizado</option>
+                  </select>
+                </label>
+                <label className="e020FilterField">
+                  <span>Tipo</span>
+                  <select className="inputLike" value={draftSupReviewContentFilter} onChange={(e) => setDraftSupReviewContentFilter(e.target.value as "evidencias" | "fuera" | "todo")}>
+                    <option value="evidencias">Evidencias</option>
+                    <option value="fuera">Sin servicio</option>
+                    <option value="todo">Todo</option>
+                  </select>
+                </label>
+                <label className="e020FilterField">
+                  <span>Estado</span>
+                  <select className="inputLike" value={draftSupEvidenceStatusFilter} onChange={(e) => setDraftSupEvidenceStatusFilter(e.target.value)}>
+                    <option value="PENDIENTE">Pendientes</option>
+                    <option value="APROBADA">Aprobadas</option>
+                    <option value="OBSERVADA">Comentadas</option>
+                    <option value="RECHAZADA">Rechazadas</option>
+                    <option value="">Todo</option>
+                  </select>
+                </label>
               </div>
-            ) : null}
+              {draftSupEvidenceDatePreset === "rango" ? (
+                <div className="e020RangeGrid">
+                  <label className="e020FilterField"><span>Desde</span><input className="inputLike" type="date" value={draftSupEvidenceDateStart} onChange={(e) => setDraftSupEvidenceDateStart(e.target.value)} /></label>
+                  <label className="e020FilterField"><span>Hasta</span><input className="inputLike" type="date" value={draftSupEvidenceDateEnd} onChange={(e) => setDraftSupEvidenceDateEnd(e.target.value)} /></label>
+                </div>
+              ) : null}
+              <div className="e020FilterActions">
+                <button type="button" className="primaryBtn compactBtn e020UpdateBtn" onClick={() => applySupervisorMainFilters()} disabled={syncing || !!reviewActionInProgress}>
+                  <RefreshCw size={15} />
+                  <span>{syncing ? "Sincronizando..." : "Actualizar resultados"}</span>
+                </button>
+                <span className="e020ActiveFilterText">Activo: {supervisorDateBounds.label} · {supReviewContentFilter === "fuera" ? "Sin servicio" : supReviewContentFilter === "todo" ? "Todo" : "Evidencias"} · {supEvidenceStatusFilter ? getSupervisorReviewLabel(supEvidenceStatusFilter) : "Todo"}</span>
+              </div>
+            </div>
 
             <details className="e013FiltersDrawer">
               <summary>Filtros opcionales</summary>
@@ -4019,14 +4134,6 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                   <option value="">Todas las marcas</option>
                   {supervisorEvidenceFilterOptions.brands.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
-                <select className="inputLike" value={supEvidenceStatusFilter} onChange={(e) => setSupEvidenceStatusFilter(e.target.value)}>
-                  <option value="">Todos los estatus</option>
-                  {supervisorEvidenceFilterOptions.statuses.map((value) => <option key={value} value={value}>{getSupervisorReviewLabel(value)}</option>)}
-                </select>
-                <label className="toggleCard">
-                  <input type="checkbox" checked={supEvidenceOnlyPending} onChange={(e) => setSupEvidenceOnlyPending(e.target.checked)} />
-                  <span>Solo pendientes</span>
-                </label>
                 <button className="actionButton compactBtn" onClick={() => clearSupervisorEvidenceFilters()}><Trash2 size={14} /><span>Limpiar</span></button>
               </div>
             </details>
