@@ -1,3 +1,4 @@
+// E024G_BUILD_FIX_UNUSED_RETURN: elimina código de retorno deep-link que ya no se usa y corrige TS6133.
 // E024F_UN_BOTON_VOLVER_REVISAR: elimina botón secundario y usa cierre seguro como única acción final.
 // E024E_FIX_BOT_USERNAME_RETURN: usa @promobolsillo_operacion_bot para regresar desde cámara a Mini App.
 // E024D_CLARIDAD_MIS_FOTOS_RETURN: Con foto/Sin servicio/Todo, regreso a Mis fotos, botón claro y sin texto redundante.
@@ -598,7 +599,6 @@ type GalleryAuthorizationResponse = {
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
-const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "promobolsillo_operacion_bot").replace(/^@/, "");
 const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
@@ -700,17 +700,6 @@ function getTelegramStartParam() {
     return "";
   }
 }
-
-function encodeStartParamSegment(value: string) {
-  const raw = String(value || "");
-  if (!raw) return "";
-  try {
-    return btoa(encodeURIComponent(raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  } catch {
-    return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
-  }
-}
-
 function decodeStartParamSegment(value: string) {
   const raw = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
   try {
@@ -733,18 +722,6 @@ function parseMiniAppReturnStartParam(startParam: string) {
   }
   return { wantsReview: false, visitaId: "" };
 }
-
-function buildTelegramMiniAppReturnLinks(visitaId = "") {
-  const suffix = encodeStartParamSegment(visitaId);
-  const startParam = suffix ? `${MINIAPP_RETURN_PARAM_PREFIX}${suffix}` : "review";
-  const domain = TELEGRAM_BOT_USERNAME || "Promobolsillo";
-  return {
-    startParam,
-    tg: `tg://resolve?domain=${encodeURIComponent(domain)}&startapp=${encodeURIComponent(startParam)}`,
-    web: `https://t.me/${encodeURIComponent(domain)}?startapp=${encodeURIComponent(startParam)}`,
-  };
-}
-
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -1363,20 +1340,6 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
       try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
     }, 50);
   }
-
-  function returnToMiniAppCapture() {
-    setStatus("Abriendo PromoBolsillo para revisar evidencias...");
-    const links = buildTelegramMiniAppReturnLinks(context?.visita_id || "");
-    try {
-      window.location.href = links.tg;
-    } catch {}
-    window.setTimeout(() => {
-      try {
-        window.location.href = links.web;
-      } catch {}
-    }, 850);
-  }
-
   function closeExternalCameraSafely() {
     setStatus("Volviendo a PromoBolsillo. Si no se cierra automáticamente, toca la X superior.");
     try { window.close(); } catch {}
