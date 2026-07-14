@@ -1,3 +1,4 @@
+// E024I_MIS_FOTOS_LAYOUT_ROWS: Mis fotos organiza datos por renglón y detalle útil usa tarjeta compacta tipo resumen.
 // E024G_BUILD_FIX_UNUSED_RETURN: elimina código de retorno deep-link que ya no se usa y corrige TS6133.
 // E024F_UN_BOTON_VOLVER_REVISAR: elimina botón secundario y usa cierre seguro como única acción final.
 // E024E_FIX_BOT_USERNAME_RETURN: usa @promobolsillo_operacion_bot para regresar desde cámara a Mini App.
@@ -3790,6 +3791,103 @@ ${evidenceToCancel.fecha_hora_fmt}`);
   font-weight: 800;
 }
 
+
+/* E024I_MIS_FOTOS_LAYOUT_ROWS */
+.e024iEvidenceListBtn {
+  padding: 11px 12px;
+}
+.e024iDataRows {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.e024iDataRows > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  line-height: 1.25;
+  min-width: 0;
+}
+.e024iDataRows span {
+  color: #78909c;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.e024iDataRows strong {
+  color: #263238;
+  font-size: 12.5px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+.e024iCommentLine {
+  margin-top: 8px;
+  color: #607d8b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.e024iDetailEvidenceCard {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  border-radius: 18px;
+  border: 1px solid rgba(38,50,56,0.10);
+  background: rgba(255,255,255,0.96);
+  padding: 10px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.e024iDetailImageFrame {
+  width: 108px;
+  height: 108px;
+  aspect-ratio: auto;
+  border-radius: 16px;
+}
+.e024iDetailBody {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.e024iGalleryEvidenceCard {
+  min-width: 328px;
+  max-width: 328px;
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+.e024iGalleryImageFrame {
+  width: 76px;
+  height: 76px;
+}
+.e024iGalleryRows > div {
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 6px;
+}
+.e024iGalleryRows span {
+  font-size: 10px;
+}
+.e024iGalleryRows strong {
+  font-size: 11.5px;
+}
+@media (max-width: 760px) {
+  .e024iDetailEvidenceCard {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .e024iDetailImageFrame {
+    width: 92px;
+    height: 92px;
+  }
+  .e024iDataRows > div {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+  .e024iGalleryEvidenceCard {
+    min-width: 306px;
+    max-width: 306px;
+  }
+}
+
 `}</style>
       <div className="shell">
         <div className="stickyTop">
@@ -4281,17 +4379,26 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="stack compactStack">
                   <div ref={promotorListTopRef} className="e018ScrollAnchor" />
                   {promotorEvidenceViewFilter !== "fuera" ? filteredOperationalGallery.map((item) => (
-                    <button key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
-                      <div className="listTitle">{getStoreDisplayFromItem(item) || "Visita activa"}</div>
-                      <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
+                    <button key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)} className={`listBtn e024iEvidenceListBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
+                      <div className="e024iDataRows">
+                        <div><span>Tienda</span><strong>{getStoreDisplayFromItem(item) || "Visita activa"}</strong></div>
+                        <div><span>Marca</span><strong>{normalizeBrandLabel(item.marca_nombre, "Marca")}</strong></div>
+                        <div><span>Tipo</span><strong>{item.tipo_evidencia || item.tipo_evento || "Evidencia"}</strong></div>
+                        <div><span>Fase</span><strong>{formatPhaseLabel(item.fase || "ESTADO_ACTUAL")}</strong></div>
+                        <div><span>Fecha</span><strong>{item.fecha_hora_fmt || formatDateTimeMaybe(item.fecha_hora || "")}</strong></div>
+                      </div>
                     </button>
                   )) : null}
                   {promotorEvidenceViewFilter !== "fotos" ? promotorOutOfServiceVisibleRows.map((item) => (
-                    <button key={item.registro_id} type="button" onClick={() => focusPromotorOutOfService(item)} className={`listBtn e019OutServiceListItem ${selectedPromotorOutOfServiceId === item.registro_id ? "listBtnGreen" : ""}`}>
-                      <div className="listTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"}</div>
-                      <div className="listSub">Sin servicio · {item.marca_nombre || item.marca_id || "Marca"}</div>
-                      <div className="summaryLine">Motivo: <strong>{item.motivo || "Sin motivo"}</strong></div>
-                      {item.comentario ? <div className="summaryLine">Comentario: {item.comentario}</div> : null}
+                    <button key={item.registro_id} type="button" onClick={() => focusPromotorOutOfService(item)} className={`listBtn e019OutServiceListItem e024iEvidenceListBtn ${selectedPromotorOutOfServiceId === item.registro_id ? "listBtnGreen" : ""}`}>
+                      <div className="e024iDataRows">
+                        <div><span>Tienda</span><strong>{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"}</strong></div>
+                        <div><span>Marca</span><strong>{item.marca_nombre || item.marca_id || "Marca"}</strong></div>
+                        <div><span>Registro</span><strong>Sin servicio</strong></div>
+                        <div><span>Motivo</span><strong>{item.motivo || "Sin motivo"}</strong></div>
+                        <div><span>Fecha</span><strong>{item.fecha_hora_fmt || item.fecha_hora || "Sin fecha"}</strong></div>
+                      </div>
+                      {item.comentario ? <div className="e024iCommentLine">Comentario: {item.comentario}</div> : null}
                     </button>
                   )) : null}
                   {promotorEvidenceViewFilter !== "fuera" && !filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
@@ -4309,11 +4416,19 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Detalle útil</div>
                 {selectedEvidence ? (
                   <>
-                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
-                    {getStoreDisplayFromItem(selectedEvidence) ? <div className="summaryLine">{getStoreDisplayFromItem(selectedEvidence)}</div> : null}
-                    <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
-                    <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
-                    <div className="summaryLine">Riesgo: <strong>{selectedEvidence.riesgo}</strong></div>
+                    <div className="e024iDetailEvidenceCard" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}>
+                      <div className="imageFrame e024iDetailImageFrame"><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
+                      <div className="e024iDetailBody">
+                        <div className="e024iDataRows">
+                          <div><span>Tienda</span><strong>{getStoreDisplayFromItem(selectedEvidence) || "Visita activa"}</strong></div>
+                          <div><span>Marca</span><strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
+                          <div><span>Tipo</span><strong>{selectedEvidence.tipo_evidencia || selectedEvidence.tipo_evento || "Evidencia"}</strong></div>
+                          <div><span>Fase</span><strong>{formatPhaseLabel(selectedEvidence.fase || "ESTADO_ACTUAL")}</strong></div>
+                          <div><span>Fecha</span><strong>{selectedEvidence.fecha_hora_fmt || formatDateTimeMaybe(selectedEvidence.fecha_hora || "")}</strong></div>
+                          <div><span>Riesgo</span><strong>{selectedEvidence.riesgo || "BAJO"}</strong></div>
+                        </div>
+                      </div>
+                    </div>
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => openImageViewer(selectedEvidence.url_foto)}><Eye size={16} /><span>Ver foto</span></button>
                       <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}><Trash2 size={16} /><span>Anular</span></button>
@@ -4903,16 +5018,16 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="galleryScroll" ref={promotorGalleryScrollRef}>
               <div className="galleryGrid">
                 {filteredOperationalGallery.slice(0, 30).map((item) => (
-                  <button type="button" className="galleryCard galleryCardCompact e018GalleryCardBtn" key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto); }} /></div>
-                    <div className="galleryBodyCompact">
-                      <div className="galleryTop compactTop">
-                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
+                  <button type="button" className="galleryCard galleryCardCompact e018GalleryCardBtn e024iGalleryEvidenceCard" key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)}>
+                    <div className="imageFrame imageFrameCompact e024iGalleryImageFrame"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto); }} /></div>
+                    <div className="galleryBodyCompact e024iGalleryBody">
+                      <div className="e024iDataRows e024iGalleryRows">
+                        <div><span>Tienda</span><strong>{getStoreDisplayFromItem(item) || "Visita activa"}</strong></div>
+                        <div><span>Marca</span><strong>{normalizeBrandLabel(item.marca_nombre, "Marca")}</strong></div>
+                        <div><span>Tipo</span><strong>{item.tipo_evidencia || item.tipo_evento || "Evidencia"}</strong></div>
+                        <div><span>Fase</span><strong>{formatPhaseLabel(item.fase || "ESTADO_ACTUAL")}</strong></div>
+                        <div><span>Fecha</span><strong>{item.fecha_hora_fmt || formatDateTimeMaybe(item.fecha_hora || "")}</strong></div>
                       </div>
-                      <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre, "Marca") })}</div>
-                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                      <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
                     </div>
                   </button>
                 ))}
