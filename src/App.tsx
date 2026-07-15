@@ -1,3 +1,4 @@
+﻿// E025_FECHAS_CDMX: toda fecha visible se fuerza a America/Mexico_City.
 // E024J_CAMERA_SESSION_3H_EXPIRED_SCREEN: sesión cámara 3h y pantalla expirada limpia.
 // E024I_MIS_FOTOS_LAYOUT_ROWS: Mis fotos organiza datos por renglón y detalle útil usa tarjeta compacta tipo resumen.
 // E024G_BUILD_FIX_UNUSED_RETURN: elimina código de retorno deep-link que ya no se usa y corrige TS6133.
@@ -600,6 +601,7 @@ type GalleryAuthorizationResponse = {
 };
 
 
+const APP_TIME_ZONE = "America/Mexico_City";
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
 const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
@@ -764,7 +766,12 @@ function formatHourFromIso(iso: string) {
   if (!iso) return "pendiente";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleTimeString("es-MX", {
+    timeZone: APP_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function formatDateTimeMaybe(iso?: string) {
@@ -772,6 +779,7 @@ function formatDateTimeMaybe(iso?: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("es-MX", {
+    timeZone: APP_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -783,37 +791,44 @@ function formatDateTimeMaybe(iso?: string) {
 
 // E016: utilidades de periodo para filtros del supervisor.
 function localYmd(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: APP_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date).map(({ type, value }) => [type, value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function startOfWeekMondayYmd(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
+  const base = new Date(`${localYmd(date)}T12:00:00Z`);
+  const day = base.getUTCDay();
   const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return localYmd(d);
+  base.setUTCDate(base.getUTCDate() + diff);
+  return base.toISOString().slice(0, 10);
 }
 
 function endOfWeekSundayYmd(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
+  const base = new Date(`${localYmd(date)}T12:00:00Z`);
+  const day = base.getUTCDay();
   const diff = day === 0 ? 0 : 7 - day;
-  d.setDate(d.getDate() + diff);
-  return localYmd(d);
+  base.setUTCDate(base.getUTCDate() + diff);
+  return base.toISOString().slice(0, 10);
 }
 
 function ymdFromAnyDateValue(value?: string) {
   const raw = String(value || "").trim();
   if (!raw) return "";
-  const direct = raw.match(/(20\d{2}-\d{2}-\d{2})/);
-  if (direct) return direct[1];
-  const mx = raw.match(/(\d{2})\/(\d{2})\/(20\d{2})/);
+  const mx = raw.match(/^(\d{2})\/(\d{2})\/(20\d{2})$/);
   if (mx) return `${mx[3]}-${mx[2]}-${mx[1]}`;
-  const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? "" : localYmd(d);
+  const dateOnly = raw.match(/^(20\d{2}-\d{2}-\d{2})$/);
+  if (dateOnly) return dateOnly[1];
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return localYmd(parsed);
+  const embedded = raw.match(/(20\d{2}-\d{2}-\d{2})/);
+  return embedded ? embedded[1] : "";
 }
 
 function getEvidenceYmd(item?: EvidenceItem | null) {
