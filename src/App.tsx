@@ -1,3 +1,4 @@
+// E024J_CAMERA_SESSION_3H_EXPIRED_SCREEN: sesión cámara 3h y pantalla expirada limpia.
 // E024I_MIS_FOTOS_LAYOUT_ROWS: Mis fotos organiza datos por renglón y detalle útil usa tarjeta compacta tipo resumen.
 // E024G_BUILD_FIX_UNUSED_RETURN: elimina código de retorno deep-link que ya no se usa y corrige TS6133.
 // E024F_UN_BOTON_VOLVER_REVISAR: elimina botón secundario y usa cierre seguro como única acción final.
@@ -1218,6 +1219,7 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const tipoLabel = selectedTipo || "Tipo";
   const faseLabel = formatPhaseLabel(selectedFase);
   const selectedBrandMarkedOutOfService = !!selectedMarcaId && !!outOfServiceMarcaIds[selectedMarcaId];
+  const isExpiredCameraSession = !!error && error.toLowerCase().includes("expir");
   const canCapture = !!token && !error && !!selectedMarcaId && !!selectedTipo && !!context?.visita_id && !uploading && !selectedBrandMarkedOutOfService;
   const registeredPhotos = recentPhotos.filter((item) => item.status === "REGISTRADA");
   const activeRecentPhotos = recentPhotos.filter((item) => item.status !== "ANULADA");
@@ -1351,6 +1353,28 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
   const selectStyle: React.CSSProperties = { width: "100%", border: "1px solid rgba(15,23,42,.14)", borderRadius: 16, padding: "12px 12px", fontWeight: 850, color: "#17212b", background: "#fff", fontSize: 15, boxSizing: "border-box" };
   const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 950, color: "#64748b", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 };
   const smallButtonStyle: React.CSSProperties = { border: "1px solid rgba(15,23,42,.12)", borderRadius: 14, background: "#fff", color: "#334155", padding: "10px 12px", fontWeight: 950 };
+
+  if (isExpiredCameraSession) {
+    return (
+      <div style={shellStyle}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
+          <div style={{ ...cardStyle, padding: 18, display: "grid", gap: 13 }}>
+            <div style={{ fontSize: 11, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+            <h1 style={{ margin: 0, fontSize: 25, lineHeight: 1.08 }}>Sesión de cámara vencida</h1>
+            <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 13, fontWeight: 900, lineHeight: 1.35 }}>
+              Por seguridad, esta cámara ya no está activa.
+            </div>
+            <div style={{ borderRadius: 18, background: "#f8fafc", color: "#334155", padding: 13, fontWeight: 850, lineHeight: 1.4 }}>
+              Cierra esta pantalla y vuelve a abrir la cámara desde <strong>Capturar evidencias</strong>. Esto evita usar ligas viejas o sesiones restauradas por Telegram/Android.
+            </div>
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
+              Cerrar y volver a PromoBolsillo
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (finished) {
     return (
