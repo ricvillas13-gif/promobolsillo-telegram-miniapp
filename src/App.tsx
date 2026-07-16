@@ -1,3 +1,4 @@
+// E027_FIX4_PREDEPLOY: amplía timeout para fotos de revisión y ordena integración E027.
 // E027_CALIDAD_FOTOGRAFICA_CLOUDINARY: captura de revisión hasta 1280 px/82%; mismo flujo visible del promotor; sin retroalimentación nueva.
 // E025_FECHAS_CDMX: toda fecha visible se fuerza a America/Mexico_City.
 // E024J_CAMERA_SESSION_3H_EXPIRED_SCREEN: sesión cámara 3h y pantalla expirada limpia.
@@ -607,7 +608,9 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegr
 const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
-const SHEETS_SAFE_PHOTO_CHARS = 32000; const E027_REVIEW_MAX_SIDE = 1280; const E027_REVIEW_JPEG_QUALITY = 0.82;
+const SHEETS_SAFE_PHOTO_CHARS = 32000;
+const E027_REVIEW_MAX_SIDE = 1280;
+const E027_REVIEW_JPEG_QUALITY = 0.82;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
 
@@ -1083,7 +1086,11 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   });
 }
 
-async function compressDataUrlForReview(dataUrl: string) { return await compressDataUrl(dataUrl, E027_REVIEW_MAX_SIDE, E027_REVIEW_JPEG_QUALITY); } async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+async function compressDataUrlForReview(dataUrl: string) {
+  return await compressDataUrl(dataUrl, E027_REVIEW_MAX_SIDE, E027_REVIEW_JPEG_QUALITY);
+}
+
+async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
   // E017: para piloto, priorizamos velocidad de envío y carga estable en Sheets.
   // Se arranca desde tamaños más ligeros para evitar payloads grandes en cada registro.
   const attempts = [
@@ -1113,7 +1120,11 @@ async function fileToDataUrl(file: File) {
   });
 }
 
-async function readPhotoForSheets(file: File, prefix = "galeria", reviewQuality = true) { const raw = await fileToDataUrl(file); const dataUrl = reviewQuality ? await compressDataUrlForReview(raw) : await compressDataUrlToSheetsSafeSize(raw);
+async function readPhotoForSheets(file: File, prefix = "galeria", reviewQuality = true) {
+  const raw = await fileToDataUrl(file);
+  const dataUrl = reviewQuality
+    ? await compressDataUrlForReview(raw)
+    : await compressDataUrlToSheetsSafeSize(raw);
   const safePrefix = prefix || "galeria";
   return {
     name: `${safePrefix}-${Date.now()}-${file.name || "foto.jpg"}`,
@@ -2862,7 +2873,15 @@ export default function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, width, height);
-    const raw = canvas.toDataURL("image/jpeg", 0.92); const dataUrl = (cameraModal.target === "entrada" || cameraModal.target === "salida") ? await compressDataUrlToSheetsSafeSize(raw) : await compressDataUrlForReview(raw); const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
+    const raw = canvas.toDataURL("image/jpeg", 0.92);
+    const dataUrl = cameraModal.target === "entrada" || cameraModal.target === "salida"
+      ? await compressDataUrlToSheetsSafeSize(raw)
+      : await compressDataUrlForReview(raw);
+    const payload: PhotoCapture = {
+      name: `captura-${Date.now()}.jpg`,
+      dataUrl,
+      capturedAt: nowMxString(),
+    };
     if (cameraModal.target === "entrada") {
       setEntryPhoto(payload);
       setStatusMsg("Foto de entrada lista.");
@@ -3303,7 +3322,15 @@ export default function App() {
         source: evidenceSource,
         fotos: localPhotosForPreview.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
       };
-      const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", queuedPayload);
+      const e027UploadTimeoutMs = Math.min(
+        240000,
+        Math.max(60000, 45000 + localPhotosForPreview.length * 20000),
+      );
+      const result = await postJson<EvidenceRegisterResponse>(
+        "/miniapp/promotor/evidence-register",
+        queuedPayload,
+        e027UploadTimeoutMs,
+      );
       const createdIds = Array.isArray(result.created) ? result.created.filter(Boolean) : [];
       if (createdIds.length) {
         const previewEntries: Record<string, string> = {};
@@ -3397,7 +3424,16 @@ export default function App() {
     if (!selectedEvidence) return;
     setSyncing(true);
     try {
-      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", { evidencia_id: selectedEvidence.evidencia_id, foto_nombre: fileName, foto_data_url: dataUrl, source });
+      const result = await postJson<ReplaceEvidenceResponse>(
+        "/miniapp/promotor/replace-evidence",
+        {
+          evidencia_id: selectedEvidence.evidencia_id,
+          foto_nombre: fileName,
+          foto_data_url: dataUrl,
+          source,
+        },
+        60000,
+      );
       await loadEvidencesToday();
       setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "La evidencia se reemplazó, pero la foto no cupo completa en Sheets." : "Evidencia reemplazada.");
       setStatusMsgDuration(6800);
