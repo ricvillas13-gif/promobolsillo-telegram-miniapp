@@ -1,4 +1,5 @@
-// E027_FIX4_PREDEPLOY: amplía timeout para fotos de revisión y ordena integración E027.
+// E027_FIX5_RETORNO_CAMARA_SEGURO: confirma guardado, refresca Mis fotos al volver y oculta errores técnicos de abort.
+// E027_FIX4_PREDEPLOY_FRONTEND: conserva timeout ampliado para fotos de revisión.
 // E027_CALIDAD_FOTOGRAFICA_CLOUDINARY: captura de revisión hasta 1280 px/82%; mismo flujo visible del promotor; sin retroalimentación nueva.
 // E025_FECHAS_CDMX: toda fecha visible se fuerza a America/Mexico_City.
 // E024J_CAMERA_SESSION_3H_EXPIRED_SCREEN: sesión cámara 3h y pantalla expirada limpia.
@@ -608,11 +609,12 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegr
 const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
-const SHEETS_SAFE_PHOTO_CHARS = 32000;
-const E027_REVIEW_MAX_SIDE = 1280;
-const E027_REVIEW_JPEG_QUALITY = 0.82;
+const SHEETS_SAFE_PHOTO_CHARS = 32000; const E027_REVIEW_MAX_SIDE = 1280; const E027_REVIEW_JPEG_QUALITY = 0.82;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
+const EXTERNAL_CAMERA_LAST_SUCCESS_KEY = "promobolsillo_external_camera_last_success_v1";
+const EXTERNAL_CAMERA_LAST_FINISH_KEY = "promobolsillo_external_camera_last_finish_v1";
+const EXTERNAL_CAMERA_LAST_HANDLED_KEY = "promobolsillo_external_camera_last_handled_v1";
 
 function safeReadLocalStorage(key: string) {
   if (typeof window === "undefined") return "";
@@ -666,6 +668,27 @@ function isLocalVisitId(value?: string) {
 
 function buildPendingQueueId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isAbortLikeError(err: unknown) {
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : String(err || "");
+  const normalized = `${name} ${message}`.toLowerCase();
+  return normalized.includes("abort")
+    || normalized.includes("signal is aborted")
+    || normalized.includes("timeout")
+    || normalized.includes("tiempo de espera");
+}
+
+function friendlyRequestError(err: unknown, fallback: string) {
+  if (isAbortLikeError(err)) {
+    return "La actualización tardó más de lo esperado. Lo ya guardado no se perdió; espera unos segundos y vuelve a intentar.";
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function waitMs(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 function shouldQueueSubmission(err: unknown) {
@@ -1086,11 +1109,7 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   });
 }
 
-async function compressDataUrlForReview(dataUrl: string) {
-  return await compressDataUrl(dataUrl, E027_REVIEW_MAX_SIDE, E027_REVIEW_JPEG_QUALITY);
-}
-
-async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+async function compressDataUrlForReview(dataUrl: string) { return await compressDataUrl(dataUrl, E027_REVIEW_MAX_SIDE, E027_REVIEW_JPEG_QUALITY); } async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
   // E017: para piloto, priorizamos velocidad de envío y carga estable en Sheets.
   // Se arranca desde tamaños más ligeros para evitar payloads grandes en cada registro.
   const attempts = [
@@ -1120,11 +1139,7 @@ async function fileToDataUrl(file: File) {
   });
 }
 
-async function readPhotoForSheets(file: File, prefix = "galeria", reviewQuality = true) {
-  const raw = await fileToDataUrl(file);
-  const dataUrl = reviewQuality
-    ? await compressDataUrlForReview(raw)
-    : await compressDataUrlToSheetsSafeSize(raw);
+async function readPhotoForSheets(file: File, prefix = "galeria", reviewQuality = true) { const raw = await fileToDataUrl(file); const dataUrl = reviewQuality ? await compressDataUrlForReview(raw) : await compressDataUrlToSheetsSafeSize(raw);
   const safePrefix = prefix || "galeria";
   return {
     name: `${safePrefix}-${Date.now()}-${file.name || "foto.jpg"}`,
@@ -1278,10 +1293,15 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
           fase: selectedFase,
           descripcion: descripcion.trim(),
         },
-      }, 60000);
+      }, 120000);
       const evidenceId = result.evidencia_id || tempId;
       setUploadedCount((prev) => prev + 1);
       setRecentPhotos((prev) => prev.map((item) => item.evidencia_id === tempId ? { ...item, evidencia_id: evidenceId, status: "REGISTRADA" as const } : item));
+      safeWriteLocalStorage(EXTERNAL_CAMERA_LAST_SUCCESS_KEY, JSON.stringify({
+        evidenciaId: evidenceId,
+        visitaId: context.visita_id || "",
+        registeredAt: new Date().toISOString(),
+      }));
       setStatus(result.message || "Foto registrada. Puedes tomar otra, cambiar tipo o cambiar marca.");
     } catch (err) {
       setRecentPhotos((prev) => prev.map((item) => item.evidencia_id === tempId ? { ...item, status: "ERROR" as const } : item));
@@ -1356,13 +1376,16 @@ function ExternalCameraCapturePage({ token }: { token: string }) {
     setRecentPhotos([]);
     setShowAllPhotos(false);
     setFinished(true);
+    const finishedPayload = {
+      uploadedCount,
+      annulledCount,
+      outOfServiceCount,
+      visitaId: context?.visita_id || "",
+      finishedAt: new Date().toISOString(),
+    };
+    safeWriteLocalStorage(EXTERNAL_CAMERA_LAST_FINISH_KEY, JSON.stringify(finishedPayload));
     try {
-      sessionStorage.setItem("promobolsillo_external_camera_finished", JSON.stringify({
-        uploadedCount,
-        annulledCount,
-        outOfServiceCount,
-        finishedAt: new Date().toISOString(),
-      }));
+      sessionStorage.setItem("promobolsillo_external_camera_finished", JSON.stringify(finishedPayload));
     } catch {}
     window.setTimeout(() => {
       try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
@@ -1588,6 +1611,9 @@ export default function App() {
   const [detectedExternalId, setDetectedExternalId] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
   const [statusMsgDuration, setStatusMsgDuration] = useState(6800);
+  const manualRefreshInFlightRef = useRef(false);
+  const promotorResumeRefreshInFlightRef = useRef(false);
+  const promotorWasHiddenRef = useRef(false);
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -1791,8 +1817,18 @@ export default function App() {
   }, [role, pendingQueue]);
 
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
+    const markPromotorHidden = () => {
+      if (role === "promotor") promotorWasHiddenRef.current = true;
+    };
+    const resumeVisibleRole = () => {
+      if (document.visibilityState !== "visible") {
+        markPromotorHidden();
+        return;
+      }
+      if (role === "promotor" && promotorWasHiddenRef.current) {
+        promotorWasHiddenRef.current = false;
+        window.setTimeout(() => { void refreshPromotorAfterCameraReturn(); }, 350);
+      }
       if (role === "supervisor") {
         void loadSupervisorDashboard();
         void loadSupervisorTeam();
@@ -1801,8 +1837,16 @@ export default function App() {
         void loadSupervisorOutOfService();
       }
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    const onFocus = () => resumeVisibleRole();
+    const onBlur = () => markPromotorHidden();
+    document.addEventListener("visibilitychange", resumeVisibleRole);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("visibilitychange", resumeVisibleRole);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [role, alertStatusFilter, alertSeverityFilter, alertPromotorFilter, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => () => { void stopCameraStream(); }, []);
@@ -2301,8 +2345,8 @@ export default function App() {
     }
   }
 
-  async function loadEvidencesToday() {
-    const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
+  async function loadEvidencesToday(timeoutMs = 45000) {
+    const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {}, timeoutMs);
     const rows = withLocalEvidencePreviews((data.evidencias || []).map((item) => ({ ...item, status: item.status || ("ACTIVA" as const) })));
     const operationalRows = rows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA");
     setAllEvidenceRows(rows);
@@ -2873,15 +2917,7 @@ export default function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, width, height);
-    const raw = canvas.toDataURL("image/jpeg", 0.92);
-    const dataUrl = cameraModal.target === "entrada" || cameraModal.target === "salida"
-      ? await compressDataUrlToSheetsSafeSize(raw)
-      : await compressDataUrlForReview(raw);
-    const payload: PhotoCapture = {
-      name: `captura-${Date.now()}.jpg`,
-      dataUrl,
-      capturedAt: nowMxString(),
-    };
+    const raw = canvas.toDataURL("image/jpeg", 0.92); const dataUrl = (cameraModal.target === "entrada" || cameraModal.target === "salida") ? await compressDataUrlToSheetsSafeSize(raw) : await compressDataUrlForReview(raw); const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
     if (cameraModal.target === "entrada") {
       setEntryPhoto(payload);
       setStatusMsg("Foto de entrada lista.");
@@ -3680,13 +3716,82 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
   }
 
+  function getFreshExternalCameraMarker() {
+    const marker = safeReadLocalStorage(EXTERNAL_CAMERA_LAST_SUCCESS_KEY);
+    if (!marker) return { raw: "", isFresh: false };
+    const handled = safeReadLocalStorage(EXTERNAL_CAMERA_LAST_HANDLED_KEY);
+    if (marker === handled) return { raw: marker, isFresh: false };
+    try {
+      const parsed = JSON.parse(marker) as { registeredAt?: string };
+      const registeredAt = parsed?.registeredAt ? new Date(parsed.registeredAt).getTime() : 0;
+      const isRecent = registeredAt > 0 && Date.now() - registeredAt < 20 * 60 * 1000;
+      return { raw: marker, isFresh: isRecent };
+    } catch {
+      return { raw: marker, isFresh: true };
+    }
+  }
+
+  async function refreshPromotorAfterCameraReturn() {
+    if (role !== "promotor" || promotorResumeRefreshInFlightRef.current) return;
+    promotorResumeRefreshInFlightRef.current = true;
+    const marker = getFreshExternalCameraMarker();
+    try {
+      setPromotorModule("mis_evidencias");
+      setPromotorEvidenceViewFilter("fotos");
+      setStatusMsgDuration(12000);
+      setStatusMsg(marker.isFresh
+        ? "Foto registrada correctamente. Actualizando Mis fotos..."
+        : "Actualizando Mis fotos...");
+
+      let loaded = false;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await loadEvidencesToday(60000);
+          loaded = true;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt === 0) await waitMs(1600);
+        }
+      }
+
+      void loadPromotorDashboard().catch(() => undefined);
+      void loadPromotorOutOfService().catch(() => undefined);
+
+      if (loaded) {
+        setStatusMsg(marker.isFresh
+          ? "Foto registrada correctamente. Ya está disponible en Mis fotos."
+          : "Mis fotos se actualizaron correctamente.");
+      } else {
+        setStatusMsg(marker.isFresh
+          ? "La foto quedó registrada. Mis fotos está tardando en actualizarse; puedes continuar y revisarla en unos segundos."
+          : friendlyRequestError(lastError, "Mis fotos está tardando en actualizarse."));
+      }
+      if (marker.raw) safeWriteLocalStorage(EXTERNAL_CAMERA_LAST_HANDLED_KEY, marker.raw);
+    } finally {
+      promotorResumeRefreshInFlightRef.current = false;
+    }
+  }
+
   async function refreshCurrentRoleData() {
+    if (manualRefreshInFlightRef.current) return;
+    manualRefreshInFlightRef.current = true;
     try {
       setSyncing(true);
       if (role === "promotor") {
-        await loadPromotorDashboard();
-        await loadEvidencesToday();
-        await loadPromotorOutOfService();
+        const errors: unknown[] = [];
+        try { await loadPromotorDashboard(); } catch (err) { errors.push(err); }
+        try { await loadEvidencesToday(60000); } catch (err) { errors.push(err); }
+        try { await loadPromotorOutOfService(); } catch (err) { errors.push(err); }
+        if (errors.length >= 3) {
+          setStatusMsg(friendlyRequestError(errors[0], "No se pudo actualizar en este momento."));
+        } else if (errors.length) {
+          setStatusMsg("La información principal se actualizó; una sección tardó más de lo esperado.");
+        } else {
+          setStatusMsg("Información actualizada.");
+        }
+        return;
       }
       if (role === "supervisor") {
         await loadSupervisorDashboard();
@@ -3707,8 +3812,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
       }
       setStatusMsg("Información actualizada.");
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
+      setStatusMsg(friendlyRequestError(err, "No se pudo recargar."));
     } finally {
+      manualRefreshInFlightRef.current = false;
       setSyncing(false);
     }
   }
