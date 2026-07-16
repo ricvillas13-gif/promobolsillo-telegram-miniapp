@@ -1,4 +1,5 @@
-﻿// E025_FECHAS_CDMX: toda fecha visible se fuerza a America/Mexico_City.
+// E027_CALIDAD_FOTOGRAFICA_CLOUDINARY: captura de revisión hasta 1280 px/82%; mismo flujo visible del promotor; sin retroalimentación nueva.
+// E025_FECHAS_CDMX: toda fecha visible se fuerza a America/Mexico_City.
 // E024J_CAMERA_SESSION_3H_EXPIRED_SCREEN: sesión cámara 3h y pantalla expirada limpia.
 // E024I_MIS_FOTOS_LAYOUT_ROWS: Mis fotos organiza datos por renglón y detalle útil usa tarjeta compacta tipo resumen.
 // E024G_BUILD_FIX_UNUSED_RETURN: elimina código de retorno deep-link que ya no se usa y corrige TS6133.
@@ -606,7 +607,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegr
 const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
-const SHEETS_SAFE_PHOTO_CHARS = 32000;
+const SHEETS_SAFE_PHOTO_CHARS = 32000; const E027_REVIEW_MAX_SIDE = 1280; const E027_REVIEW_JPEG_QUALITY = 0.82;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
 
@@ -1082,7 +1083,7 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   });
 }
 
-async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+async function compressDataUrlForReview(dataUrl: string) { return await compressDataUrl(dataUrl, E027_REVIEW_MAX_SIDE, E027_REVIEW_JPEG_QUALITY); } async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
   // E017: para piloto, priorizamos velocidad de envío y carga estable en Sheets.
   // Se arranca desde tamaños más ligeros para evitar payloads grandes en cada registro.
   const attempts = [
@@ -1112,9 +1113,7 @@ async function fileToDataUrl(file: File) {
   });
 }
 
-async function readPhotoForSheets(file: File, prefix = "galeria") {
-  const raw = await fileToDataUrl(file);
-  const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
+async function readPhotoForSheets(file: File, prefix = "galeria", reviewQuality = true) { const raw = await fileToDataUrl(file); const dataUrl = reviewQuality ? await compressDataUrlForReview(raw) : await compressDataUrlToSheetsSafeSize(raw);
   const safePrefix = prefix || "galeria";
   return {
     name: `${safePrefix}-${Date.now()}-${file.name || "foto.jpg"}`,
@@ -2685,8 +2684,7 @@ export default function App() {
     try {
       const files = Array.from(fileList || []).filter(Boolean);
       if (!files.length) return;
-      if (target === "attendance-entry") {
-        const photo = await readPhotoForSheets(files[0]);
+      if (target === "attendance-entry") { const photo = await readPhotoForSheets(files[0], "galeria", false);
         setEntryPhoto(photo);
         setStatusMsg("Foto desde galería lista.");
         return;
@@ -2715,9 +2713,7 @@ export default function App() {
       if (!files.length) return;
       if (target === "entrada") {
         if (!selectedStoreId) return setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
-        const photo = await readPhotoForSheets(files[0], "captura");
-        setEntryPhoto(photo);
-        setStatusMsg("Foto de entrada lista.");
+        const photo = await readPhotoForSheets(files[0], "captura", false); setEntryPhoto(photo); setStatusMsg("Foto de entrada lista.");
         return;
       }
       if (target === "reemplazo") {
@@ -2866,9 +2862,7 @@ export default function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, width, height);
-    const raw = canvas.toDataURL("image/jpeg", 0.92);
-    const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
-    const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
+    const raw = canvas.toDataURL("image/jpeg", 0.92); const dataUrl = (cameraModal.target === "entrada" || cameraModal.target === "salida") ? await compressDataUrlToSheetsSafeSize(raw) : await compressDataUrlForReview(raw); const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
     if (cameraModal.target === "entrada") {
       setEntryPhoto(payload);
       setStatusMsg("Foto de entrada lista.");
