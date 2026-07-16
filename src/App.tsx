@@ -1,3 +1,4 @@
+// E028_SUPERVISOR_CARGA_PROGRESIVA: metadatos primero, miniaturas ligeras y foto completa al seleccionarla.
 // E027_FIX5_RETORNO_CAMARA_SEGURO: confirma guardado, refresca Mis fotos al volver y oculta errores técnicos de abort.
 // E027_FIX4_PREDEPLOY_FRONTEND: conserva timeout ampliado para fotos de revisión.
 // E027_CALIDAD_FOTOGRAFICA_CLOUDINARY: captura de revisión hasta 1280 px/82%; mismo flujo visible del promotor; sin retroalimentación nueva.
@@ -120,6 +121,11 @@ type EvidenceItem = {
   fecha_hora_fmt: string;
   fecha_hora?: string;
   url_foto: string;
+  thumb_url?: string;
+  photo_available?: boolean;
+  photo_deferred?: boolean;
+  photo_storage?: string;
+  photo_bytes_estimate?: number;
   descripcion: string;
   tienda_nombre?: string;
   tienda_display?: string;
@@ -476,6 +482,21 @@ type SupervisorEvidenceReviewResponse = {
 type SupervisorEvidencesResponse = {
   ok: boolean;
   evidences?: EvidenceItem[];
+  meta?: {
+    total?: number;
+    deferred_photos?: number;
+    remote_photos?: number;
+    payload_mode?: string;
+  };
+};
+
+type SupervisorEvidencePhotoResponse = {
+  ok: boolean;
+  evidencia_id: string;
+  url_foto?: string;
+  thumb_url?: string;
+  photo_deferred?: boolean;
+  photo_storage?: string;
 };
 
 type SupervisorOutOfServiceItem = {
@@ -1681,6 +1702,9 @@ export default function App() {
   const [supervisorEvidences, setSupervisorEvidences] = useState<EvidenceItem[]>([]);
   const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
   const [selectedSupEvidenceIds, setSelectedSupEvidenceIds] = useState<string[]>([]);
+  const [supervisorPhotoCache, setSupervisorPhotoCache] = useState<Record<string, { thumb?: string; full?: string }>>({});
+  const [supervisorPhotoLoadingIds, setSupervisorPhotoLoadingIds] = useState<string[]>([]);
+  const [supervisorQueueVisibleCount, setSupervisorQueueVisibleCount] = useState(24);
   const [supervisorEvidenceAudit, setSupervisorEvidenceAudit] = useState<EvidenceAuditRow[]>([]);
   const [supervisorOutOfServiceRows, setSupervisorOutOfServiceRows] = useState<SupervisorOutOfServiceItem[]>([]);
   const [supReviewContentFilter, setSupReviewContentFilter] = useState<"evidencias" | "fuera" | "todo">("evidencias");
@@ -2107,6 +2131,11 @@ export default function App() {
     supEvidenceOnlyPending,
   ]);
 
+  const visibleSupervisorQueueItems = useMemo(
+    () => filteredSupervisorEvidences.slice(0, supervisorQueueVisibleCount),
+    [filteredSupervisorEvidences, supervisorQueueVisibleCount],
+  );
+
   const filteredSupervisorOutOfServiceRows = useMemo(() => supervisorOutOfServiceRows.filter((item) => {
     const itemYmd = getOutOfServiceYmd(item);
     const byDate = !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
@@ -2475,11 +2504,76 @@ export default function App() {
   async function loadSupervisorEvidences() {
     const data = await postJson<SupervisorEvidencesResponse>("/miniapp/supervisor/evidences", {
       promotor_id: supEvidencePromotorFilter,
-    });
+    }, 60000);
     const rows = data.evidences || [];
     setSupervisorEvidences(rows);
+    setSupervisorQueueVisibleCount(24);
+    setSupervisorPhotoCache((previous) => {
+      const next: Record<string, { thumb?: string; full?: string }> = {};
+      for (const row of rows) {
+        const cached = previous[row.evidencia_id] || {};
+        const thumb = row.thumb_url || cached.thumb || "";
+        const full = row.url_foto || cached.full || "";
+        if (thumb || full) next[row.evidencia_id] = { thumb, full };
+      }
+      return next;
+    });
     if (rows.length && !rows.find((row) => row.evidencia_id === selectedSupEvidenceId)) setSelectedSupEvidenceId(rows[0].evidencia_id);
     if (!rows.length) setSelectedSupEvidenceId("");
+  }
+
+  function getSupervisorThumbSrc(item: EvidenceItem | null | undefined) {
+    if (!item) return "";
+    const cached = supervisorPhotoCache[item.evidencia_id];
+    return cached?.thumb || item.thumb_url || cached?.full || item.url_foto || "";
+  }
+
+  function getSupervisorFullSrc(item: EvidenceItem | null | undefined) {
+    if (!item) return "";
+    const cached = supervisorPhotoCache[item.evidencia_id];
+    return cached?.full || item.url_foto || cached?.thumb || item.thumb_url || "";
+  }
+
+  function isSupervisorPhotoLoading(evidenceId: string) {
+    return supervisorPhotoLoadingIds.includes(evidenceId);
+  }
+
+  async function ensureSupervisorEvidencePhoto(item: EvidenceItem, options?: { silent?: boolean }) {
+    const existing = getSupervisorFullSrc(item);
+    if (existing && !item.photo_deferred) return existing;
+    const cached = supervisorPhotoCache[item.evidencia_id]?.full;
+    if (cached) return cached;
+    if (isSupervisorPhotoLoading(item.evidencia_id)) return "";
+
+    setSupervisorPhotoLoadingIds((previous) => previous.includes(item.evidencia_id) ? previous : [...previous, item.evidencia_id]);
+    try {
+      const data = await postJson<SupervisorEvidencePhotoResponse>(
+        "/miniapp/supervisor/evidence-photo",
+        { evidencia_id: item.evidencia_id },
+        60000,
+      );
+      const full = data.url_foto || "";
+      const thumb = data.thumb_url || full;
+      setSupervisorPhotoCache((previous) => ({
+        ...previous,
+        [item.evidencia_id]: {
+          thumb: thumb || previous[item.evidencia_id]?.thumb || "",
+          full: full || previous[item.evidencia_id]?.full || "",
+        },
+      }));
+      return full;
+    } catch (err) {
+      if (!options?.silent) setStatusMsg(friendlyRequestError(err, "No se pudo cargar esta fotografía."));
+      return "";
+    } finally {
+      setSupervisorPhotoLoadingIds((previous) => previous.filter((id) => id !== item.evidencia_id));
+    }
+  }
+
+  async function openSupervisorEvidenceViewer(item: EvidenceItem) {
+    const src = getSupervisorFullSrc(item) || await ensureSupervisorEvidencePhoto(item);
+    if (!src) return;
+    openImageViewer(src, item.evidencia_id);
   }
 
   async function loadSupervisorOutOfService() {
@@ -2654,6 +2748,12 @@ export default function App() {
   }, [selectedSupEvidenceId, role]);
 
   useEffect(() => {
+    if (role !== "supervisor" || !selectedSupervisorEvidence) return;
+    void ensureSupervisorEvidencePhoto(selectedSupervisorEvidence, { silent: true });
+  }, [role, selectedSupEvidenceId]);
+
+
+  useEffect(() => {
     if (role !== "supervisor") return;
     if (!supervisorAlerts.length) {
       setSelectedAlertId("");
@@ -2688,8 +2788,9 @@ export default function App() {
   useEffect(() => {
     if (role !== "supervisor") return;
     setSupEvidenceGroupPage(1);
+    setSupervisorQueueVisibleCount(24);
     setActiveSupEvidenceGroupKey("");
-  }, [role, supEvidenceGroupMode, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter, supEvidenceOnlyPending]);
+  }, [role, supEvidenceGroupMode, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter, supEvidenceOnlyPending, supEvidenceDatePreset, supEvidenceDateStart, supEvidenceDateEnd]);
 
   useEffect(() => {
     if (role !== "cliente") return;
@@ -3576,7 +3677,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
       if (nextId) {
         setSelectedSupEvidenceId(nextId);
         const nextItem = filteredSupervisorEvidences.find((item) => item.evidencia_id === nextId);
-        if (nextItem) openImageViewer(nextItem.url_foto, nextItem.evidencia_id);
+        if (nextItem) void openSupervisorEvidenceViewer(nextItem);
       } else if (options?.focusEvidenceId && imageViewerEvidenceId === options.focusEvidenceId) {
         closeImageViewer();
       }
@@ -3617,7 +3718,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
   }
 
   function selectAllVisibleSupervisorEvidences() {
-    const ids = filteredSupervisorEvidences.map((item) => item.evidencia_id);
+    const ids = visibleSupervisorQueueItems.map((item) => item.evidencia_id);
     setSelectedSupEvidenceIds(ids);
     if (ids[0]) setSelectedSupEvidenceId(ids[0]);
   }
@@ -3699,6 +3800,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
   function focusSupervisorEvidence(item: EvidenceItem) {
     setSelectedSupEvidenceId(item.evidencia_id);
+    void ensureSupervisorEvidencePhoto(item, { silent: true });
     window.setTimeout(() => scrollElementIntoView(supervisorReviewDetailRef, "start"), 40);
   }
 
@@ -3819,12 +3921,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     }
   }
 
-  function moveSupervisorEvidenceViewer(step: number) {
+  async function moveSupervisorEvidenceViewer(step: number) {
     if (activeViewerSupervisorEvidenceIndex < 0) return;
     const next = activeViewerSupervisorEvidenceSequence[activeViewerSupervisorEvidenceIndex + step];
     if (!next) return;
     setSelectedSupEvidenceId(next.evidencia_id);
-    openImageViewer(next.url_foto, next.evidencia_id);
+    await openSupervisorEvidenceViewer(next);
   }
 
   // E013 keeps legacy supervisor helpers referenced so TypeScript noUnusedLocals stays clean while the main UX is simplified.
@@ -4997,7 +5099,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="e013TopBar">
               <div>
                 <div className="sectionTitle e010PageTitle">Revisar evidencias</div>
-                <div className="contextHint e013Sub">Cola rápida: toca una tarjeta para ir directo al detalle útil, revisar la foto y aplicar acción.</div>
+                <div className="contextHint e013Sub">Carga progresiva activa: primero datos y miniaturas; la foto completa se descarga solo al seleccionarla.</div>
               </div>
               <div className="e013CounterStrip">
                 <span><strong>{filteredSupervisorEvidences.length}</strong><small>Evidencias</small></span>
@@ -5073,7 +5175,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             {supReviewContentFilter !== "fuera" && filteredSupervisorEvidences.length ? (
               <div className="e019BatchBar">
                 <div className="e019BatchInfo"><strong>{selectedSupEvidenceIds.length}</strong> seleccionada(s)</div>
-                <button type="button" className="actionButton compactBtn" onClick={() => selectedSupEvidenceIds.length === filteredSupervisorEvidences.length ? setSelectedSupEvidenceIds([]) : selectAllVisibleSupervisorEvidences()}>{selectedSupEvidenceIds.length === filteredSupervisorEvidences.length ? "Limpiar selección" : "Seleccionar visibles"}</button>
+                <button type="button" className="actionButton compactBtn" onClick={() => selectedSupEvidenceIds.length === visibleSupervisorQueueItems.length ? setSelectedSupEvidenceIds([]) : selectAllVisibleSupervisorEvidences()}>{selectedSupEvidenceIds.length === visibleSupervisorQueueItems.length ? "Limpiar selección" : "Seleccionar cargadas"}</button>
                 <button type="button" className="actionButton compactBtn e013Approve" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar selección"}</span></button>
                 <button type="button" className="actionButton compactBtn e013Comment" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar selección"}</span></button>
                 <button type="button" className="actionButton compactBtn e013Reject" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={14} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar selección"}</span></button>
@@ -5087,9 +5189,20 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="e013QueueLayout">
                 <aside className="e013QueueList" aria-label="Cola de evidencias por revisar">
                   <div ref={supervisorQueueTopRef} className="e018ScrollAnchor" />
-                  {supReviewContentFilter !== "fuera" ? filteredSupervisorEvidences.map((item) => (
+                  {supReviewContentFilter !== "fuera" ? visibleSupervisorQueueItems.map((item) => (
                     <button key={item.evidencia_id} type="button" className={`e013QueueItem ${selectedSupEvidenceId === item.evidencia_id ? "e013QueueItemActive" : ""}`} onClick={() => focusSupervisorEvidence(item)}>
-                      <div className="e013MiniPhoto"><img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"} /></div>
+                      <div className="e013MiniPhoto">
+                        {getSupervisorThumbSrc(item) ? (
+                          <img
+                            src={getSupervisorThumbSrc(item)}
+                            alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"}
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <span className="e028DeferredThumb">{isSupervisorPhotoLoading(item.evidencia_id) ? "Cargando..." : "Foto histórica"}</span>
+                        )}
+                      </div>
                       <div className="e013QueueText">
                         <div className="e013QueueTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {normalizeBrandLabel(String(item.marca_nombre || item.marca_id || ""), "Marca")}</div>
                         <div className="e013QueueMeta e018QueueMetaName">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
@@ -5117,6 +5230,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       {item.visita_id ? <button type="button" className="actionButton compactBtn" onClick={() => void openVisitExpedient(item.visita_id || "")}><Eye size={14} /><span>Ver visita</span></button> : null}
                     </div>
                   )) : null}
+                  {supReviewContentFilter !== "fuera" && supervisorQueueVisibleCount < filteredSupervisorEvidences.length ? (
+                    <button
+                      type="button"
+                      className="actionButton e028LoadMoreBtn"
+                      onClick={() => setSupervisorQueueVisibleCount((current) => Math.min(filteredSupervisorEvidences.length, current + 24))}
+                    >
+                      Mostrar 24 más · {filteredSupervisorEvidences.length - supervisorQueueVisibleCount} pendientes por cargar
+                    </button>
+                  ) : null}
                   <div ref={supervisorQueueBottomRef} className="e018ScrollAnchor" />
                 </aside>
 
@@ -5137,9 +5259,27 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         }} disabled={filteredSupervisorEvidences.findIndex((item) => item.evidencia_id === selectedSupervisorEvidence.evidencia_id) >= filteredSupervisorEvidences.length - 1}>Siguiente ›</button>
                       </div>
 
-                      <div className="e013PhotoStage" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto || "", selectedSupervisorEvidence.evidencia_id)}>
-                        <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia || "Evidencia"} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto || "")} />
-                        <button type="button" className="e013ZoomBtn" onClick={(e) => { e.stopPropagation(); openImageViewer(selectedSupervisorEvidence.url_foto || "", selectedSupervisorEvidence.evidencia_id); }}><Eye size={15} /> Zoom</button>
+                      <div className="e013PhotoStage" onDoubleClick={() => void openSupervisorEvidenceViewer(selectedSupervisorEvidence)}>
+                        {getSupervisorFullSrc(selectedSupervisorEvidence) ? (
+                          <img
+                            src={getSupervisorFullSrc(selectedSupervisorEvidence)}
+                            alt={selectedSupervisorEvidence.tipo_evidencia || "Evidencia"}
+                            decoding="async"
+                            onClick={() => handleImageTap(getSupervisorFullSrc(selectedSupervisorEvidence))}
+                          />
+                        ) : (
+                          <div className="e028PhotoLoading">
+                            <RefreshCw className={isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id) ? "spin" : ""} size={22} />
+                            <strong>{isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id) ? "Cargando fotografía..." : "Fotografía disponible bajo demanda"}</strong>
+                            <span>La cola ya cargó; ahora se descarga únicamente esta evidencia.</span>
+                            {!isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id) ? (
+                              <button type="button" className="actionButton compactBtn" onClick={() => void ensureSupervisorEvidencePhoto(selectedSupervisorEvidence)}>
+                                Cargar fotografía
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+                        <button type="button" className="e013ZoomBtn" disabled={!getSupervisorFullSrc(selectedSupervisorEvidence) && isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id)} onClick={(e) => { e.stopPropagation(); void openSupervisorEvidenceViewer(selectedSupervisorEvidence); }}><Eye size={15} /> Zoom</button>
                       </div>
 
                       <div className="e013ContextLine">
@@ -5397,7 +5537,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(-1); }}
+                  onClick={(e) => { e.stopPropagation(); void moveSupervisorEvidenceViewer(-1); }}
                   disabled={activeViewerSupervisorEvidenceIndex <= 0}
                   style={{ position: "fixed", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex <= 0 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex <= 0 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
                 >
@@ -5405,7 +5545,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(1); }}
+                  onClick={(e) => { e.stopPropagation(); void moveSupervisorEvidenceViewer(1); }}
                   disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1}
                   style={{ position: "fixed", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
                 >
@@ -6256,6 +6396,10 @@ body {
 .e013QueueItemActive { border-color: rgba(16,185,129,.55); outline: 3px solid rgba(16,185,129,.14); background: #fff; }
 .e013MiniPhoto { width: 64px; height: 64px; border-radius: 16px; overflow: hidden; background: #0f172a; }
 .e013MiniPhoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.e028DeferredThumb { width: 100%; height: 100%; display: grid; place-items: center; padding: 6px; text-align: center; font-size: 10px; line-height: 1.15; color: #607d8b; background: linear-gradient(145deg, rgba(236,239,241,.95), rgba(250,250,250,.98)); }
+.e028PhotoLoading { min-height: 320px; width: 100%; display: grid; place-items: center; align-content: center; gap: 10px; padding: 24px; text-align: center; color: #455a64; background: linear-gradient(145deg, rgba(250,250,250,.98), rgba(236,239,241,.88)); }
+.e028PhotoLoading span { max-width: 420px; font-size: 12px; color: #78909c; }
+.e028LoadMoreBtn { width: calc(100% - 12px); margin: 8px 6px 14px; justify-content: center; border-style: dashed; }
 .e013QueueText { min-width: 0; display: grid; gap: 2px; }
 .e013QueueTitle { font-size: 13px; font-weight: 950; color: #0f172a; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .e013QueueMeta { font-size: 11px; color: #64748b; font-weight: 750; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
