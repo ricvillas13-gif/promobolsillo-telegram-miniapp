@@ -1,3 +1,4 @@
+// E028_FIX3_BUILD_FRONTEND: elimina declaración obsoleta que impedía compilar en Render.
 // E028_FIX2_REVISION_CONTINUA: avance inmediato, cola persistente, guardado por lotes, precarga y deshacer.
 // E028_SUPERVISOR_CARGA_PROGRESIVA: metadatos primero, miniaturas ligeras y foto completa al seleccionarla.
 // E027_FIX5_RETORNO_CAMARA_SEGURO: confirma guardado, refresca Mis fotos al volver y oculta errores técnicos de abort.
@@ -473,13 +474,6 @@ type ClientEnvelope<T> = {
 type SupervisorAlertCloseResponse = {
   ok: boolean;
   alerta_id: string;
-  status: string;
-};
-
-type SupervisorEvidenceReviewResponse = {
-  ok: boolean;
-  evidencia_id: string;
-  decision_supervisor: string;
   status: string;
 };
 
