@@ -1,3 +1,4 @@
+// E028_FIX2_REVISION_CONTINUA: avance inmediato, cola persistente, guardado por lotes, precarga y deshacer.
 // E028_SUPERVISOR_CARGA_PROGRESIVA: metadatos primero, miniaturas ligeras y foto completa al seleccionarla.
 // E027_FIX5_RETORNO_CAMARA_SEGURO: confirma guardado, refresca Mis fotos al volver y oculta errores técnicos de abort.
 // E027_FIX4_PREDEPLOY_FRONTEND: conserva timeout ampliado para fotos de revisión.
@@ -52,6 +53,7 @@ import {
   Check,
   ClipboardList,
   Store,
+  RotateCcw,
 } from "lucide-react";
 
 declare global {
@@ -142,6 +144,8 @@ type EvidenceItem = {
   reglas_disparadas?: string;
   resultado_ai?: string;
   score_confianza?: string;
+  requiere_revision_supervisor?: string;
+  local_review_pending?: boolean;
 };
 
 type UiEvidence = EvidenceItem & {
@@ -479,6 +483,49 @@ type SupervisorEvidenceReviewResponse = {
   status: string;
 };
 
+type SupervisorReviewSnapshot = {
+  evidencia_id: string;
+  decision_supervisor?: string;
+  motivo_revision?: string;
+  revisado_por?: string;
+  fecha_revision?: string;
+  requiere_revision_supervisor?: string;
+  status?: string;
+};
+
+type SupervisorReviewQueueItem = {
+  id: string;
+  evidencia_id: string;
+  decision_supervisor: SupervisorDecision | "";
+  motivo_revision: string;
+  restore?: boolean;
+  previous: SupervisorReviewSnapshot;
+  createdAt: string;
+  attempts: number;
+  lastError?: string;
+};
+
+type SupervisorReviewBatchResponse = {
+  ok: boolean;
+  accepted?: number;
+  rejected?: number;
+  results?: Array<{
+    ok: boolean;
+    client_review_id?: string;
+    evidencia_id: string;
+    decision_supervisor?: string;
+    status?: string;
+    restored?: boolean;
+    error?: string;
+  }>;
+};
+
+type SupervisorReviewUndoState = {
+  id: string;
+  items: SupervisorReviewSnapshot[];
+  expiresAt: number;
+};
+
 type SupervisorEvidencesResponse = {
   ok: boolean;
   evidences?: EvidenceItem[];
@@ -636,6 +683,10 @@ const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
 const EXTERNAL_CAMERA_LAST_SUCCESS_KEY = "promobolsillo_external_camera_last_success_v1";
 const EXTERNAL_CAMERA_LAST_FINISH_KEY = "promobolsillo_external_camera_last_finish_v1";
 const EXTERNAL_CAMERA_LAST_HANDLED_KEY = "promobolsillo_external_camera_last_handled_v1";
+const SUPERVISOR_REVIEW_QUEUE_KEY = "promobolsillo_supervisor_review_queue_v1";
+const SUPERVISOR_REVIEW_BATCH_SIZE = 60;
+const SUPERVISOR_REVIEW_FLUSH_DELAY_MS = 3500;
+const SUPERVISOR_REVIEW_UNDO_MS = 8000;
 
 function safeReadLocalStorage(key: string) {
   if (typeof window === "undefined") return "";
@@ -666,6 +717,29 @@ function readPendingQueueStorage(): PendingQueueOp[] {
 
 function writePendingQueueStorage(rows: PendingQueueOp[]) {
   safeWriteLocalStorage(PENDING_QUEUE_KEY, JSON.stringify(rows));
+}
+
+function readSupervisorReviewQueueStorage(): SupervisorReviewQueueItem[] {
+  const raw = safeReadLocalStorage(SUPERVISOR_REVIEW_QUEUE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSupervisorReviewQueueStorage(rows: SupervisorReviewQueueItem[]) {
+  safeWriteLocalStorage(SUPERVISOR_REVIEW_QUEUE_KEY, JSON.stringify(rows));
+}
+
+function sortSupervisorReviewQueue(rows: SupervisorReviewQueueItem[]) {
+  return [...rows].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function buildSupervisorReviewQueueId() {
+  return `SUPREV-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function readStoreBrandsCacheStorage(): Record<string, Array<{ marca_id: string; marca_nombre: string }>> {
@@ -1635,6 +1709,9 @@ export default function App() {
   const manualRefreshInFlightRef = useRef(false);
   const promotorResumeRefreshInFlightRef = useRef(false);
   const promotorWasHiddenRef = useRef(false);
+  const supervisorReviewSyncInFlightRef = useRef(false);
+  const supervisorReviewFlushTimerRef = useRef<number | null>(null);
+  const supervisorReviewUndoTimerRef = useRef<number | null>(null);
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -1705,6 +1782,10 @@ export default function App() {
   const [supervisorPhotoCache, setSupervisorPhotoCache] = useState<Record<string, { thumb?: string; full?: string }>>({});
   const [supervisorPhotoLoadingIds, setSupervisorPhotoLoadingIds] = useState<string[]>([]);
   const [supervisorQueueVisibleCount, setSupervisorQueueVisibleCount] = useState(24);
+  const [supervisorReviewQueue, setSupervisorReviewQueue] = useState<SupervisorReviewQueueItem[]>(() => sortSupervisorReviewQueue(readSupervisorReviewQueueStorage()));
+  const [supervisorReviewSyncing, setSupervisorReviewSyncing] = useState(false);
+  const [supervisorReviewLastError, setSupervisorReviewLastError] = useState("");
+  const [lastSupervisorReviewUndo, setLastSupervisorReviewUndo] = useState<SupervisorReviewUndoState | null>(null);
   const [supervisorEvidenceAudit, setSupervisorEvidenceAudit] = useState<EvidenceAuditRow[]>([]);
   const [supervisorOutOfServiceRows, setSupervisorOutOfServiceRows] = useState<SupervisorOutOfServiceItem[]>([]);
   const [supReviewContentFilter, setSupReviewContentFilter] = useState<"evidencias" | "fuera" | "todo">("evidencias");
@@ -1835,10 +1916,13 @@ export default function App() {
       if (role === "promotor") {
         void syncPendingQueue(false);
       }
+      if (role === "supervisor") {
+        void syncSupervisorReviewQueue(false);
+      }
     };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
-  }, [role, pendingQueue]);
+  }, [role, pendingQueue, supervisorReviewQueue]);
 
   useEffect(() => {
     const markPromotorHidden = () => {
@@ -1854,6 +1938,7 @@ export default function App() {
         window.setTimeout(() => { void refreshPromotorAfterCameraReturn(); }, 350);
       }
       if (role === "supervisor") {
+        void syncSupervisorReviewQueue(false);
         void loadSupervisorDashboard();
         void loadSupervisorTeam();
         void loadSupervisorAlerts();
@@ -2501,11 +2586,201 @@ export default function App() {
     }
   }
 
+  function snapshotSupervisorEvidence(item: EvidenceItem): SupervisorReviewSnapshot {
+    return {
+      evidencia_id: item.evidencia_id,
+      decision_supervisor: item.decision_supervisor || "",
+      motivo_revision: item.motivo_revision || "",
+      revisado_por: item.revisado_por || "",
+      fecha_revision: item.fecha_revision || "",
+      requiere_revision_supervisor: item.requiere_revision_supervisor || "",
+      status: item.status || "PENDIENTE_REVISION",
+    };
+  }
+
+  function applySupervisorReviewTarget(
+    item: EvidenceItem,
+    queueItem: SupervisorReviewQueueItem,
+  ): EvidenceItem {
+    if (queueItem.restore) {
+      return {
+        ...item,
+        decision_supervisor: queueItem.previous.decision_supervisor || "",
+        motivo_revision: queueItem.previous.motivo_revision || "",
+        revisado_por: queueItem.previous.revisado_por || "",
+        fecha_revision: queueItem.previous.fecha_revision || "",
+        requiere_revision_supervisor: queueItem.previous.requiere_revision_supervisor || "TRUE",
+        status: queueItem.previous.status || "PENDIENTE_REVISION",
+        local_review_pending: true,
+      };
+    }
+    return {
+      ...item,
+      decision_supervisor: queueItem.decision_supervisor,
+      motivo_revision: queueItem.motivo_revision,
+      revisado_por: "Pendiente de sincronizar",
+      fecha_revision: new Date().toISOString(),
+      requiere_revision_supervisor: queueItem.decision_supervisor === "APROBADA" ? "FALSE" : "TRUE",
+      status: queueItem.decision_supervisor,
+      local_review_pending: true,
+    };
+  }
+
+  function applyQueuedSupervisorReviewsToRows(rows: EvidenceItem[]) {
+    const queue = sortSupervisorReviewQueue(readSupervisorReviewQueueStorage());
+    if (!queue.length) return rows;
+    const latestByEvidence = new Map<string, SupervisorReviewQueueItem>();
+    for (const item of queue) latestByEvidence.set(item.evidencia_id, item);
+    return rows.map((row) => {
+      const queued = latestByEvidence.get(row.evidencia_id);
+      return queued ? applySupervisorReviewTarget(row, queued) : row;
+    });
+  }
+
+  function persistSupervisorReviewQueue(rows: SupervisorReviewQueueItem[]) {
+    const sorted = sortSupervisorReviewQueue(rows);
+    writeSupervisorReviewQueueStorage(sorted);
+    setSupervisorReviewQueue(sorted);
+  }
+
+  function scheduleSupervisorReviewSync(delayMs = SUPERVISOR_REVIEW_FLUSH_DELAY_MS) {
+    if (typeof window === "undefined") return;
+    if (supervisorReviewFlushTimerRef.current != null) {
+      window.clearTimeout(supervisorReviewFlushTimerRef.current);
+    }
+    supervisorReviewFlushTimerRef.current = window.setTimeout(() => {
+      supervisorReviewFlushTimerRef.current = null;
+      void syncSupervisorReviewQueue(false);
+    }, delayMs);
+  }
+
+  function enqueueSupervisorReviewItems(items: SupervisorReviewQueueItem[]) {
+    const current = readSupervisorReviewQueueStorage();
+    const next = [...current];
+    for (const item of items) {
+      const existingIndex = next.findIndex((row) => row.evidencia_id === item.evidencia_id);
+      if (existingIndex >= 0) next.splice(existingIndex, 1);
+      next.push(item);
+    }
+    persistSupervisorReviewQueue(next);
+    if (next.length >= 10) scheduleSupervisorReviewSync(250);
+    else scheduleSupervisorReviewSync();
+  }
+
+  async function syncSupervisorReviewQueue(showStatus = false) {
+    if (role !== "supervisor" || !getInitData()) return;
+    if (supervisorReviewSyncInFlightRef.current) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (showStatus) setStatusMsg("Las revisiones están protegidas y se enviarán al recuperar conexión.");
+      return;
+    }
+
+    const queue = sortSupervisorReviewQueue(readSupervisorReviewQueueStorage());
+    if (!queue.length) {
+      setSupervisorReviewQueue([]);
+      setSupervisorReviewLastError("");
+      return;
+    }
+
+    const batch = queue.slice(0, SUPERVISOR_REVIEW_BATCH_SIZE);
+    const sentIds = new Set(batch.map((item) => item.id));
+
+    try {
+      supervisorReviewSyncInFlightRef.current = true;
+      setSupervisorReviewSyncing(true);
+      setSupervisorReviewLastError("");
+
+      const response = await postJson<SupervisorReviewBatchResponse>(
+        "/miniapp/supervisor/evidence-review-batch",
+        {
+          reviews: batch.map((item) => ({
+            client_review_id: item.id,
+            evidencia_id: item.evidencia_id,
+            decision_supervisor: item.decision_supervisor,
+            motivo_revision: item.motivo_revision,
+            restore: !!item.restore,
+            previous_decision_supervisor: item.previous.decision_supervisor || "",
+            previous_motivo_revision: item.previous.motivo_revision || "",
+            previous_revisado_por: item.previous.revisado_por || "",
+            previous_fecha_revision: item.previous.fecha_revision || "",
+            previous_requiere_revision_supervisor: item.previous.requiere_revision_supervisor || "TRUE",
+            previous_status: item.previous.status || "PENDIENTE_REVISION",
+          })),
+        },
+        90000,
+      );
+
+      const resultById = new Map(
+        (response.results || [])
+          .filter((item) => item.client_review_id)
+          .map((item) => [String(item.client_review_id), item]),
+      );
+
+      const storedNow = readSupervisorReviewQueueStorage();
+      const next: SupervisorReviewQueueItem[] = [];
+
+      for (const item of storedNow) {
+        if (!sentIds.has(item.id)) {
+          next.push(item);
+          continue;
+        }
+        const result = resultById.get(item.id);
+        if (result?.ok) continue;
+        next.push({
+          ...item,
+          attempts: item.attempts + 1,
+          lastError: result?.error || "No se confirmó la revisión",
+        });
+      }
+
+      persistSupervisorReviewQueue(next);
+
+      setSupervisorEvidences((previous) => previous.map((item) => {
+        const stillQueued = next.some((queued) => queued.evidencia_id === item.evidencia_id);
+        return stillQueued ? item : { ...item, local_review_pending: false };
+      }));
+
+      if (!next.length) {
+        setSupervisorReviewLastError("");
+        if (showStatus) setStatusMsg("Todas las revisiones quedaron sincronizadas.");
+        void loadSupervisorDashboard().catch(() => undefined);
+      } else {
+        scheduleSupervisorReviewSync(1200);
+      }
+    } catch (err) {
+      const message = friendlyRequestError(
+        err,
+        "Las revisiones siguen protegidas y se enviarán automáticamente.",
+      );
+      setSupervisorReviewLastError(message);
+      const storedNow = readSupervisorReviewQueueStorage().map((item) => (
+        sentIds.has(item.id)
+          ? { ...item, attempts: item.attempts + 1, lastError: message }
+          : item
+      ));
+      persistSupervisorReviewQueue(storedNow);
+      scheduleSupervisorReviewSync(8000);
+      if (showStatus) setStatusMsg(message);
+    } finally {
+      supervisorReviewSyncInFlightRef.current = false;
+      setSupervisorReviewSyncing(false);
+    }
+  }
+
+  function preloadFollowingSupervisorPhotos(currentEvidenceId: string, count = 2) {
+    const currentIndex = filteredSupervisorEvidences.findIndex((item) => item.evidencia_id === currentEvidenceId);
+    if (currentIndex < 0) return;
+    for (let offset = 1; offset <= count; offset += 1) {
+      const next = filteredSupervisorEvidences[currentIndex + offset];
+      if (next) void ensureSupervisorEvidencePhoto(next, { silent: true });
+    }
+  }
+
   async function loadSupervisorEvidences() {
     const data = await postJson<SupervisorEvidencesResponse>("/miniapp/supervisor/evidences", {
       promotor_id: supEvidencePromotorFilter,
     }, 60000);
-    const rows = data.evidences || [];
+    const rows = applyQueuedSupervisorReviewsToRows(data.evidences || []);
     setSupervisorEvidences(rows);
     setSupervisorQueueVisibleCount(24);
     setSupervisorPhotoCache((previous) => {
@@ -2715,11 +2990,13 @@ export default function App() {
       void syncPendingQueue(false);
     }
     if (role === "supervisor") {
+      setSupervisorReviewQueue(sortSupervisorReviewQueue(readSupervisorReviewQueueStorage()));
       void loadSupervisorDashboard();
       void loadSupervisorTeam();
       void loadSupervisorAlerts();
       void loadSupervisorEvidences();
       void loadSupervisorOutOfService();
+      window.setTimeout(() => { void syncSupervisorReviewQueue(false); }, 500);
     }
     if (role === "cliente") {
       void loadClientBootstrap();
@@ -2750,6 +3027,7 @@ export default function App() {
   useEffect(() => {
     if (role !== "supervisor" || !selectedSupervisorEvidence) return;
     void ensureSupervisorEvidencePhoto(selectedSupervisorEvidence, { silent: true });
+    preloadFollowingSupervisorPhotos(selectedSupervisorEvidence.evidencia_id, 2);
   }, [role, selectedSupEvidenceId]);
 
 
@@ -3646,49 +3924,145 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     }
   }
 
-  async function applyEvidenceReviewBatch(evidenceIds: string[], decision: SupervisorDecision, note: string, options?: { clearSelection?: boolean; successMessage?: string; focusEvidenceId?: string; autoAdvance?: boolean }) {
-    try {
-      if (!evidenceIds.length) return setStatusMsg("Selecciona al menos una evidencia.");
-      const trimmedNote = note.trim();
-      if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !trimmedNote) {
-        return setStatusMsg(decision === "OBSERVADA" ? "Agrega un comentario para comentar la evidencia." : "Agrega un motivo para rechazar la evidencia.");
-      }
-      const visibleIds = filteredSupervisorEvidences.map((item) => item.evidencia_id);
-      const actionLabel = decision === "APROBADA" ? "Aprobando evidencia..." : decision === "OBSERVADA" ? "Comentando evidencia..." : "Rechazando evidencia...";
-      setReviewActionInProgress(decision);
-      setStatusMsgDuration(7000);
-      setStatusMsg(evidenceIds.length > 1 ? `${actionLabel} (${evidenceIds.length})` : actionLabel);
-      const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
-      const focusIndex = focusId ? visibleIds.indexOf(focusId) : -1;
-      const nextId = options?.autoAdvance && focusIndex >= 0 ? (visibleIds[focusIndex + 1] || visibleIds[focusIndex - 1] || "") : "";
-      setSyncing(true);
-      for (const evidenciaId of evidenceIds) {
-        await postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
-          evidencia_id: evidenciaId,
-          decision_supervisor: decision,
-          motivo_revision: trimmedNote,
-          requiere_revision_supervisor: decision !== "APROBADA",
-        });
-      }
-      if (options?.clearSelection) setSelectedSupEvidenceIds([]);
-      setReviewNote("");
-      await loadSupervisorDashboard();
-      await loadSupervisorEvidences();
-      if (nextId) {
-        setSelectedSupEvidenceId(nextId);
-        const nextItem = filteredSupervisorEvidences.find((item) => item.evidencia_id === nextId);
-        if (nextItem) void openSupervisorEvidenceViewer(nextItem);
-      } else if (options?.focusEvidenceId && imageViewerEvidenceId === options.focusEvidenceId) {
-        closeImageViewer();
-      }
-      const decisionLabel = decision === "OBSERVADA" ? "observadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
-      setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decisionLabel}.`);
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión.");
-    } finally {
-      setReviewActionInProgress(null);
-      setSyncing(false);
+  async function applyEvidenceReviewBatch(
+    evidenceIds: string[],
+    decision: SupervisorDecision,
+    note: string,
+    options?: {
+      clearSelection?: boolean;
+      successMessage?: string;
+      focusEvidenceId?: string;
+      autoAdvance?: boolean;
+    },
+  ) {
+    if (!evidenceIds.length) {
+      setStatusMsg("Selecciona al menos una evidencia.");
+      return;
     }
+
+    const trimmedNote = note.trim();
+    if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !trimmedNote) {
+      setStatusMsg(
+        decision === "OBSERVADA"
+          ? "Agrega un comentario para comentar la evidencia."
+          : "Agrega un motivo para rechazar la evidencia.",
+      );
+      return;
+    }
+
+    const visibleBefore = filteredSupervisorEvidences;
+    const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
+    const focusIndex = focusId
+      ? visibleBefore.findIndex((item) => item.evidencia_id === focusId)
+      : -1;
+    const reviewedSet = new Set(evidenceIds);
+    const nextCandidate = visibleBefore
+      .slice(Math.max(0, focusIndex + 1))
+      .find((item) => !reviewedSet.has(item.evidencia_id))
+      || [...visibleBefore]
+        .slice(0, Math.max(0, focusIndex))
+        .reverse()
+        .find((item) => !reviewedSet.has(item.evidencia_id))
+      || null;
+
+    const sourceItems = supervisorEvidences.filter((item) => reviewedSet.has(item.evidencia_id));
+    const snapshots = sourceItems.map(snapshotSupervisorEvidence);
+    const queuedItems: SupervisorReviewQueueItem[] = snapshots.map((previous) => ({
+      id: buildSupervisorReviewQueueId(),
+      evidencia_id: previous.evidencia_id,
+      decision_supervisor: decision,
+      motivo_revision: trimmedNote,
+      previous,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+      lastError: "",
+    }));
+
+    setReviewActionInProgress(decision);
+
+    setSupervisorEvidences((previous) => previous.map((item) => {
+      if (!reviewedSet.has(item.evidencia_id)) return item;
+      const queueItem = queuedItems.find((queued) => queued.evidencia_id === item.evidencia_id);
+      return queueItem ? applySupervisorReviewTarget(item, queueItem) : item;
+    }));
+
+    enqueueSupervisorReviewItems(queuedItems);
+
+    if (options?.clearSelection) setSelectedSupEvidenceIds([]);
+    setReviewNote("");
+
+    if (nextCandidate) {
+      setSelectedSupEvidenceId(nextCandidate.evidencia_id);
+      void ensureSupervisorEvidencePhoto(nextCandidate, { silent: true });
+      preloadFollowingSupervisorPhotos(nextCandidate.evidencia_id, 2);
+      if (imageViewerEvidenceId) {
+        void openSupervisorEvidenceViewer(nextCandidate);
+      }
+    } else if (imageViewerEvidenceId) {
+      closeImageViewer();
+    }
+
+    const undoState: SupervisorReviewUndoState = {
+      id: `UNDO-${Date.now()}`,
+      items: snapshots,
+      expiresAt: Date.now() + SUPERVISOR_REVIEW_UNDO_MS,
+    };
+    setLastSupervisorReviewUndo(undoState);
+    if (supervisorReviewUndoTimerRef.current != null) {
+      window.clearTimeout(supervisorReviewUndoTimerRef.current);
+    }
+    supervisorReviewUndoTimerRef.current = window.setTimeout(() => {
+      setLastSupervisorReviewUndo((current) => (
+        current?.id === undoState.id ? null : current
+      ));
+      supervisorReviewUndoTimerRef.current = null;
+    }, SUPERVISOR_REVIEW_UNDO_MS);
+
+    const decisionLabel = decision === "OBSERVADA"
+      ? "comentada"
+      : decision === "RECHAZADA"
+        ? "rechazada"
+        : "aprobada";
+    setStatusMsgDuration(5000);
+    setStatusMsg(
+      options?.successMessage
+      || `${evidenceIds.length} evidencia(s) ${decisionLabel}(s). Puedes continuar.`,
+    );
+
+    window.setTimeout(() => setReviewActionInProgress(null), 120);
+  }
+
+  function undoLastSupervisorReview() {
+    const undo = lastSupervisorReviewUndo;
+    if (!undo?.items.length) return;
+
+    const restoreItems: SupervisorReviewQueueItem[] = undo.items.map((previous) => ({
+      id: buildSupervisorReviewQueueId(),
+      evidencia_id: previous.evidencia_id,
+      decision_supervisor: "",
+      motivo_revision: "",
+      restore: true,
+      previous,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+      lastError: "",
+    }));
+
+    const restoreMap = new Map(restoreItems.map((item) => [item.evidencia_id, item]));
+    setSupervisorEvidences((previous) => previous.map((item) => {
+      const restore = restoreMap.get(item.evidencia_id);
+      return restore ? applySupervisorReviewTarget(item, restore) : item;
+    }));
+    enqueueSupervisorReviewItems(restoreItems);
+
+    const restoredFocus = undo.items[0]?.evidencia_id || "";
+    if (restoredFocus) setSelectedSupEvidenceId(restoredFocus);
+    setLastSupervisorReviewUndo(null);
+    if (supervisorReviewUndoTimerRef.current != null) {
+      window.clearTimeout(supervisorReviewUndoTimerRef.current);
+      supervisorReviewUndoTimerRef.current = null;
+    }
+    setStatusMsg("Última acción deshecha. El cambio se sincronizará automáticamente.");
   }
 
   async function reviewSelectedEvidence() {
@@ -5099,13 +5473,40 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="e013TopBar">
               <div>
                 <div className="sectionTitle e010PageTitle">Revisar evidencias</div>
-                <div className="contextHint e013Sub">Carga progresiva activa: primero datos y miniaturas; la foto completa se descarga solo al seleccionarla.</div>
+                <div className="contextHint e013Sub">Revisión continua: decide y avanza de inmediato; Promobolsillo guarda las revisiones en segundo plano.</div>
               </div>
               <div className="e013CounterStrip">
                 <span><strong>{filteredSupervisorEvidences.length}</strong><small>Evidencias</small></span>
                 <span><strong>{filteredSupervisorOutOfServiceRows.length}</strong><small>Sin servicio</small></span>
                 <span><strong>{supervisorEvidenceSummary.pendientes}</strong><small>Pendientes</small></span>
                 <span><strong>{supervisorEvidenceSummary.observadas + supervisorEvidenceSummary.rechazadas}</strong><small>Con acción</small></span>
+              </div>
+            </div>
+
+            <div className={`e028Fix2SyncBar ${supervisorReviewLastError ? "e028Fix2SyncError" : ""}`}>
+              <div className="e028Fix2SyncState">
+                {supervisorReviewSyncing ? (
+                  <><RefreshCw className="spin" size={15} /><strong>Guardando {supervisorReviewQueue.length} revisión(es)...</strong></>
+                ) : supervisorReviewQueue.length ? (
+                  <><RefreshCw size={15} /><strong>{supervisorReviewQueue.length} revisión(es) pendientes de sincronizar</strong></>
+                ) : (
+                  <><CheckCircle2 size={15} /><strong>Todo sincronizado</strong></>
+                )}
+                {supervisorReviewLastError ? <span>{supervisorReviewLastError}</span> : <span>Puedes continuar revisando sin esperar.</span>}
+              </div>
+              <div className="e028Fix2SyncActions">
+                {lastSupervisorReviewUndo && lastSupervisorReviewUndo.expiresAt > Date.now() ? (
+                  <button type="button" className="actionButton compactBtn" onClick={() => undoLastSupervisorReview()}>
+                    <RotateCcw size={14} />
+                    <span>Deshacer última acción</span>
+                  </button>
+                ) : null}
+                {supervisorReviewQueue.length && !supervisorReviewSyncing ? (
+                  <button type="button" className="actionButton compactBtn" onClick={() => void syncSupervisorReviewQueue(true)}>
+                    <RefreshCw size={14} />
+                    <span>Sincronizar ahora</span>
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -5145,7 +5546,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </div>
               ) : null}
               <div className="e020FilterActions">
-                <button type="button" className="primaryBtn compactBtn e020UpdateBtn" onClick={() => applySupervisorMainFilters()} disabled={syncing || !!reviewActionInProgress}>
+                <button type="button" className="primaryBtn compactBtn e020UpdateBtn" onClick={() => applySupervisorMainFilters()} disabled={syncing}>
                   <RefreshCw size={15} />
                   <span>{syncing ? "Sincronizando..." : "Actualizar resultados"}</span>
                 </button>
@@ -5176,12 +5577,12 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="e019BatchBar">
                 <div className="e019BatchInfo"><strong>{selectedSupEvidenceIds.length}</strong> seleccionada(s)</div>
                 <button type="button" className="actionButton compactBtn" onClick={() => selectedSupEvidenceIds.length === visibleSupervisorQueueItems.length ? setSelectedSupEvidenceIds([]) : selectAllVisibleSupervisorEvidences()}>{selectedSupEvidenceIds.length === visibleSupervisorQueueItems.length ? "Limpiar selección" : "Seleccionar cargadas"}</button>
-                <button type="button" className="actionButton compactBtn e013Approve" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar selección"}</span></button>
-                <button type="button" className="actionButton compactBtn e013Comment" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar selección"}</span></button>
-                <button type="button" className="actionButton compactBtn e013Reject" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={14} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar selección"}</span></button>
+                <button type="button" className="actionButton compactBtn e013Approve" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>"Aprobar selección"</span></button>
+                <button type="button" className="actionButton compactBtn e013Comment" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>"Comentar selección"</span></button>
+                <button type="button" className="actionButton compactBtn e013Reject" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={14} /><span>"Rechazar selección"</span></button>
               </div>
             ) : null}
-            {reviewActionInProgress ? <div className="e019ActionNotice"><RefreshCw className="spin" size={15} /> Aplicando revisión, espera un momento...</div> : null}
+            {reviewActionInProgress ? <div className="e019ActionNotice"><CheckCircle2 size={15} /> Decisión aplicada. Avanzando a la siguiente foto...</div> : null}
 
             {!supervisorReviewVisibleCount ? (
               <div className="emptyBox">No hay registros pendientes con los filtros actuales.</div>
@@ -5210,6 +5611,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         <div className="e013QueueMeta">{item.tipo_evidencia || item.tipo_evento || "Evidencia"}{item.fase ? ` · ${item.fase}` : ""}</div>
                         <div className="e013QueueBadges">
                           <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(item)}</span>
+                          {item.local_review_pending ? <span className="riskBadge e028Fix2PendingBadge">Guardando</span> : null}
                           <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
                         </div>
                       </div>
@@ -5302,9 +5704,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       <input className="inputLike e013CommentInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional para comentar o rechazar" />
 
                       <div className="e013DecisionDock">
-                        <button className="actionButton e013Approve" disabled={!!reviewActionInProgress} onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar"}</span></button>
-                        <button className="actionButton e013Comment" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar"}</span></button>
-                        <button className="actionButton e013Reject" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar"}</span></button>
+                        <button className="actionButton e013Approve" disabled={!!reviewActionInProgress} onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>"Aprobar"</span></button>
+                        <button className="actionButton e013Comment" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>"Comentar"</span></button>
+                        <button className="actionButton e013Reject" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>"Rechazar"</span></button>
                       </div>
                     </>
                   ) : (
@@ -6400,6 +6802,14 @@ body {
 .e028PhotoLoading { min-height: 320px; width: 100%; display: grid; place-items: center; align-content: center; gap: 10px; padding: 24px; text-align: center; color: #455a64; background: linear-gradient(145deg, rgba(250,250,250,.98), rgba(236,239,241,.88)); }
 .e028PhotoLoading span { max-width: 420px; font-size: 12px; color: #78909c; }
 .e028LoadMoreBtn { width: calc(100% - 12px); margin: 8px 6px 14px; justify-content: center; border-style: dashed; }
+.e028Fix2SyncBar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 10px 0 14px; padding: 10px 12px; border: 1px solid rgba(16,185,129,.22); border-radius: 14px; background: rgba(236,253,245,.72); }
+.e028Fix2SyncError { border-color: rgba(245,158,11,.35); background: rgba(255,251,235,.82); }
+.e028Fix2SyncState { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.e028Fix2SyncState strong { font-size: 13px; }
+.e028Fix2SyncState span { font-size: 12px; color: #64748b; }
+.e028Fix2SyncActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.e028Fix2PendingBadge { background: rgba(59,130,246,.1); color: #1d4ed8; border-color: rgba(59,130,246,.22); }
+
 .e013QueueText { min-width: 0; display: grid; gap: 2px; }
 .e013QueueTitle { font-size: 13px; font-weight: 950; color: #0f172a; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .e013QueueMeta { font-size: 11px; color: #64748b; font-weight: 750; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
