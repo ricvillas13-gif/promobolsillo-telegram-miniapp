@@ -1,3 +1,27 @@
+// E030_VISTA_CLIENTE_OPERATIVA: vista diaria por empresa, evidencia aprobada, acciones y seguimiento al supervisor.
+// E028_FIX3_BUILD_FRONTEND: elimina declaración obsoleta que impedía compilar en Render.
+// E028_FIX2_REVISION_CONTINUA: avance inmediato, cola persistente, guardado por lotes, precarga y deshacer.
+// E028_SUPERVISOR_CARGA_PROGRESIVA: metadatos primero, miniaturas ligeras y foto completa al seleccionarla.
+// E027_FIX5_RETORNO_CAMARA_SEGURO: confirma guardado, refresca Mis fotos al volver y oculta errores técnicos de abort.
+// E027_FIX4_PREDEPLOY_FRONTEND: conserva timeout ampliado para fotos de revisión.
+// E027_CALIDAD_FOTOGRAFICA_CLOUDINARY: captura de revisión hasta 1280 px/82%; mismo flujo visible del promotor; sin retroalimentación nueva.
+// E025_FECHAS_CDMX: toda fecha visible se fuerza a America/Mexico_City.
+// E024J_CAMERA_SESSION_3H_EXPIRED_SCREEN: sesión cámara 3h y pantalla expirada limpia.
+// E024I_MIS_FOTOS_LAYOUT_ROWS: Mis fotos organiza datos por renglón y detalle útil usa tarjeta compacta tipo resumen.
+// E024G_BUILD_FIX_UNUSED_RETURN: elimina código de retorno deep-link que ya no se usa y corrige TS6133.
+// E024F_UN_BOTON_VOLVER_REVISAR: elimina botón secundario y usa cierre seguro como única acción final.
+// E024E_FIX_BOT_USERNAME_RETURN: usa @promobolsillo_operacion_bot para regresar desde cámara a Mini App.
+// E024D_CLARIDAD_MIS_FOTOS_RETURN: Con foto/Sin servicio/Todo, regreso a Mis fotos, botón claro y sin texto redundante.
+// E024C_RETURN_TO_MINIAPP_CAPTURE: botón de regreso abre Mini App en Capturar/Evidencias y evita volver al chat.
+// E024B_FINALIZAR_SEGURO_Y_SIN_SERVICIO_CONTEXTUAL: evita Aw Snap al finalizar y mueve Sin servicio junto a Marca.
+// E024_EXTERNAL_CAMERA_UX_WORKSPACE: mini app simplificada y cámara externa con contexto integrado, galeria horizontal y anulación.
+// E023_EXTERNAL_CAMERA_WORKSPACE: cámara externa como espacio de captura; permite cambiar marca/tipo/estado y registrar múltiples fotos sin volver a Telegram.
+// E022_EXTERNAL_CAMERA_PHASE1_PWA: prototipo de captura externa desde Telegram con token temporal; no usa galeria salvo autorizacion.
+// E020F_BUILD_FIX_OPEN_CAMERA_FACING_USED: corrige TS6133 usando el parametro facing en openCamera; conserva E020C/E020D/E020E.
+// E020E_BUILD_FIX_UNUSED_FACING: corrige TS6133 variable facing no usada; conserva E020C/E020D.
+// E020D_BUILD_FIX_CSS_STYLE_TAG: corrige JSX style tag mal formado en E020C; conserva camara mejorada, filtros claros y fixes E020B.
+// E020C_PROMOTOR_CAMERA_MEJORADA_Y_FIXES_E020B: conserva selfie frontal, evidencia trasera sin galeria, visor amplio 16:9, zoom si el dispositivo lo soporta, mensajes claros y filtros Mis evidencias corregidos.
+// E020B_FIX_PROMOTOR_CAMERA_GUARDS_EVIDENCE_FILTERS: selfie vuelve a cámara frontal integrada; evidencia usa cámara trasera integrada, no galería; mensajes claros sin tienda; Mis evidencias liga Fotos/Sin servicio/Todo con detalle útil.
 // E020A_BUILD_FIX_TS2367_CAMERA_NATIVE: corrige comparación TS2367 en openCamera; conserva E020 filtros claros y cámara nativa.
 // E020_SUPERVISOR_FILTROS_CLAROS_PROMOTOR_CAPTURA_NATIVA: filtros desplegables, actualizar resultados unico, bloqueo captura sin tienda/visita, panel sin servicio compacto y cámara nativa.
 // E019_PROMOTOR_SUPERVISOR_FLUIDEZ_REVISION_Y_SIN_SERVICIO: entrada mas fluida, fuera de servicio bajo solicitud, mis evidencias con Sin servicio, aprobacion con estado visible, consulta de aprobadas y seleccion masiva visible.
@@ -31,6 +55,7 @@ import {
   Check,
   ClipboardList,
   Store,
+  RotateCcw,
 } from "lucide-react";
 
 declare global {
@@ -38,10 +63,14 @@ declare global {
     Telegram?: {
       WebApp?: {
         initData?: string;
+        initDataUnsafe?: { start_param?: string };
         ready?: () => void;
         expand?: () => void;
+        close?: () => void;
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
+        openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+        openTelegramLink?: (url: string) => void;
       };
     };
   }
@@ -51,7 +80,7 @@ type Role = "promotor" | "supervisor" | "cliente";
 type AppRole = Role | null;
 type PromotorModule = "asistencia" | "evidencias" | "mis_evidencias" | "resumen";
 type SupervisorModule = "equipo" | "alertas" | "evidencias" | "resumen";
-type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "entregables";
+type ClientModule = "resumen" | "tiendas" | "evidencias" | "incidencias" | "solicitudes" | "entregables";
 type EvidenceGroupMode = "marca" | "tienda" | "promotor" | "estatus";
 type EvidencePhase = "ESTADO_ACTUAL" | "ANTES" | "DESPUES";
 type CaptureKind = "entrada" | "salida";
@@ -96,6 +125,11 @@ type EvidenceItem = {
   fecha_hora_fmt: string;
   fecha_hora?: string;
   url_foto: string;
+  thumb_url?: string;
+  photo_available?: boolean;
+  photo_deferred?: boolean;
+  photo_storage?: string;
+  photo_bytes_estimate?: number;
   descripcion: string;
   tienda_nombre?: string;
   tienda_display?: string;
@@ -112,6 +146,8 @@ type EvidenceItem = {
   reglas_disparadas?: string;
   resultado_ai?: string;
   score_confianza?: string;
+  requiere_revision_supervisor?: string;
+  local_review_pending?: boolean;
 };
 
 type UiEvidence = EvidenceItem & {
@@ -167,6 +203,37 @@ type EvidenceRegisterResponse = {
   created: string[];
   count: number;
   warning?: string;
+};
+
+type ExternalCameraSessionResponse = {
+  ok: boolean;
+  capture_url: string;
+  expires_at?: string;
+};
+
+type ExternalCameraContextResponse = {
+  ok: boolean;
+  context?: {
+    visita_id?: string;
+    tienda_id?: string;
+    tienda_nombre?: string;
+    marca_id?: string;
+    marca_nombre?: string;
+    tipo_evidencia?: string;
+    fase?: string;
+    descripcion?: string;
+    expires_at?: string;
+    marcas?: Array<{ marca_id: string; marca_nombre: string }>;
+    tipos?: Array<{ tipo_evidencia: string; descripcion_corta?: string }>;
+  };
+};
+
+type ExternalCameraUploadResponse = {
+  ok: boolean;
+  evidencia_id?: string;
+  message?: string;
+  warning?: string;
+  uploaded_count?: number;
 };
 
 type ReplaceEvidenceResponse = {
@@ -369,6 +436,7 @@ type ClientDashboardData = {
     observadas: number;
     rechazadas: number;
     alertas: number;
+    solicitudes_abiertas?: number;
     geocerca_ok_pct: number;
   };
   top_alerts?: Array<{ tipo_alerta: string; total: number }>;
@@ -405,22 +473,101 @@ type ClientEnvelope<T> = {
   error?: string | null;
 };
 
+type ClientRequestAction = "ENTERADO" | "SOLICITAR_SEGUIMIENTO" | "PEDIR_EVIDENCIA_ADICIONAL";
+
+type ClientRequestRow = {
+  solicitud_id: string;
+  fecha_hora: string;
+  cliente_id: string;
+  tipo_accion: ClientRequestAction;
+  entidad_tipo: "EVIDENCIA" | "INCIDENCIA";
+  entidad_id: string;
+  visita_id?: string;
+  evidencia_id?: string;
+  alerta_origen_id?: string;
+  tienda_id?: string;
+  marca_id?: string;
+  titulo?: string;
+  comentario?: string;
+  estatus: string;
+  notificacion_status?: string;
+  respuesta?: string;
+  fecha_atencion?: string;
+};
+
+type ClientRequestTarget = {
+  entidad_tipo: "EVIDENCIA" | "INCIDENCIA";
+  entidad_id: string;
+  titulo: string;
+};
+
 type SupervisorAlertCloseResponse = {
   ok: boolean;
   alerta_id: string;
   status: string;
 };
 
-type SupervisorEvidenceReviewResponse = {
-  ok: boolean;
+type SupervisorReviewSnapshot = {
   evidencia_id: string;
-  decision_supervisor: string;
-  status: string;
+  decision_supervisor?: string;
+  motivo_revision?: string;
+  revisado_por?: string;
+  fecha_revision?: string;
+  requiere_revision_supervisor?: string;
+  status?: string;
+};
+
+type SupervisorReviewQueueItem = {
+  id: string;
+  evidencia_id: string;
+  decision_supervisor: SupervisorDecision | "";
+  motivo_revision: string;
+  restore?: boolean;
+  previous: SupervisorReviewSnapshot;
+  createdAt: string;
+  attempts: number;
+  lastError?: string;
+};
+
+type SupervisorReviewBatchResponse = {
+  ok: boolean;
+  accepted?: number;
+  rejected?: number;
+  results?: Array<{
+    ok: boolean;
+    client_review_id?: string;
+    evidencia_id: string;
+    decision_supervisor?: string;
+    status?: string;
+    restored?: boolean;
+    error?: string;
+  }>;
+};
+
+type SupervisorReviewUndoState = {
+  id: string;
+  items: SupervisorReviewSnapshot[];
+  expiresAt: number;
 };
 
 type SupervisorEvidencesResponse = {
   ok: boolean;
   evidences?: EvidenceItem[];
+  meta?: {
+    total?: number;
+    deferred_photos?: number;
+    remote_photos?: number;
+    payload_mode?: string;
+  };
+};
+
+type SupervisorEvidencePhotoResponse = {
+  ok: boolean;
+  evidencia_id: string;
+  url_foto?: string;
+  thumb_url?: string;
+  photo_deferred?: boolean;
+  photo_storage?: string;
 };
 
 type SupervisorOutOfServiceItem = {
@@ -549,12 +696,21 @@ type GalleryAuthorizationResponse = {
 };
 
 
+const APP_TIME_ZONE = "America/Mexico_City";
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://promobolsillo-telegram.onrender.com").replace(/\/+$/, "");
+const MINIAPP_RETURN_PARAM_PREFIX = "review_";
 const E011_GROUPS_PER_PAGE = 8;
 const E011_THUMBS_PER_GROUP = 18;
-const SHEETS_SAFE_PHOTO_CHARS = 32000;
+const SHEETS_SAFE_PHOTO_CHARS = 32000; const E027_REVIEW_MAX_SIDE = 1280; const E027_REVIEW_JPEG_QUALITY = 0.82;
 const PENDING_QUEUE_KEY = "promobolsillo_pending_queue_v1";
 const STORE_BRANDS_CACHE_KEY = "promobolsillo_store_brands_v1";
+const EXTERNAL_CAMERA_LAST_SUCCESS_KEY = "promobolsillo_external_camera_last_success_v1";
+const EXTERNAL_CAMERA_LAST_FINISH_KEY = "promobolsillo_external_camera_last_finish_v1";
+const EXTERNAL_CAMERA_LAST_HANDLED_KEY = "promobolsillo_external_camera_last_handled_v1";
+const SUPERVISOR_REVIEW_QUEUE_KEY = "promobolsillo_supervisor_review_queue_v1";
+const SUPERVISOR_REVIEW_BATCH_SIZE = 60;
+const SUPERVISOR_REVIEW_FLUSH_DELAY_MS = 3500;
+const SUPERVISOR_REVIEW_UNDO_MS = 8000;
 
 function safeReadLocalStorage(key: string) {
   if (typeof window === "undefined") return "";
@@ -587,6 +743,29 @@ function writePendingQueueStorage(rows: PendingQueueOp[]) {
   safeWriteLocalStorage(PENDING_QUEUE_KEY, JSON.stringify(rows));
 }
 
+function readSupervisorReviewQueueStorage(): SupervisorReviewQueueItem[] {
+  const raw = safeReadLocalStorage(SUPERVISOR_REVIEW_QUEUE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSupervisorReviewQueueStorage(rows: SupervisorReviewQueueItem[]) {
+  safeWriteLocalStorage(SUPERVISOR_REVIEW_QUEUE_KEY, JSON.stringify(rows));
+}
+
+function sortSupervisorReviewQueue(rows: SupervisorReviewQueueItem[]) {
+  return [...rows].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function buildSupervisorReviewQueueId() {
+  return `SUPREV-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function readStoreBrandsCacheStorage(): Record<string, Array<{ marca_id: string; marca_nombre: string }>> {
   const raw = safeReadLocalStorage(STORE_BRANDS_CACHE_KEY);
   if (!raw) return {};
@@ -608,6 +787,27 @@ function isLocalVisitId(value?: string) {
 
 function buildPendingQueueId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isAbortLikeError(err: unknown) {
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : String(err || "");
+  const normalized = `${name} ${message}`.toLowerCase();
+  return normalized.includes("abort")
+    || normalized.includes("signal is aborted")
+    || normalized.includes("timeout")
+    || normalized.includes("tiempo de espera");
+}
+
+function friendlyRequestError(err: unknown, fallback: string) {
+  if (isAbortLikeError(err)) {
+    return "La actualización tardó más de lo esperado. Lo ya guardado no se perdió; espera unos segundos y vuelve a intentar.";
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function waitMs(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 function shouldQueueSubmission(err: unknown) {
@@ -638,6 +838,40 @@ function getInitData() {
   return getTelegramWebApp()?.initData || "";
 }
 
+function getTelegramStartParam() {
+  if (typeof window === "undefined") return "";
+  const webApp = getTelegramWebApp();
+  const directParam = webApp?.initDataUnsafe?.start_param || "";
+  if (directParam) return String(directParam);
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("tgWebAppStartParam") || params.get("startapp") || params.get("start_param") || "";
+  } catch {
+    return "";
+  }
+}
+function decodeStartParamSegment(value: string) {
+  const raw = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  try {
+    const padded = raw.padEnd(Math.ceil(raw.length / 4) * 4, "=");
+    return decodeURIComponent(atob(padded));
+  } catch {
+    return String(value || "");
+  }
+}
+
+function parseMiniAppReturnStartParam(startParam: string) {
+  const raw = String(startParam || "");
+  if (!raw) return { wantsReview: false, visitaId: "" };
+  if (raw === "review" || raw === "mis_fotos" || raw === "capture" || raw === "capturar" || raw === "return_capture") return { wantsReview: true, visitaId: "" };
+  if (raw.startsWith(MINIAPP_RETURN_PARAM_PREFIX)) {
+    return { wantsReview: true, visitaId: decodeStartParamSegment(raw.slice(MINIAPP_RETURN_PARAM_PREFIX.length)) };
+  }
+  if (raw.startsWith("capture_")) {
+    return { wantsReview: true, visitaId: decodeStartParamSegment(raw.slice("capture_".length)) };
+  }
+  return { wantsReview: false, visitaId: "" };
+}
 async function postJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 20000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -656,11 +890,34 @@ async function postJson<T>(path: string, payload: Record<string, unknown>, timeo
   }
 }
 
+async function postExternalJson<T>(path: string, payload: Record<string, unknown>, timeoutMs = 45000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((json as { error?: string }).error || `Error ${res.status}`);
+    return json as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function formatHourFromIso(iso: string) {
   if (!iso) return "pendiente";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleTimeString("es-MX", {
+    timeZone: APP_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function formatDateTimeMaybe(iso?: string) {
@@ -668,6 +925,7 @@ function formatDateTimeMaybe(iso?: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("es-MX", {
+    timeZone: APP_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -679,37 +937,44 @@ function formatDateTimeMaybe(iso?: string) {
 
 // E016: utilidades de periodo para filtros del supervisor.
 function localYmd(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: APP_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date).map(({ type, value }) => [type, value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function startOfWeekMondayYmd(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
+  const base = new Date(`${localYmd(date)}T12:00:00Z`);
+  const day = base.getUTCDay();
   const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return localYmd(d);
+  base.setUTCDate(base.getUTCDate() + diff);
+  return base.toISOString().slice(0, 10);
 }
 
 function endOfWeekSundayYmd(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
+  const base = new Date(`${localYmd(date)}T12:00:00Z`);
+  const day = base.getUTCDay();
   const diff = day === 0 ? 0 : 7 - day;
-  d.setDate(d.getDate() + diff);
-  return localYmd(d);
+  base.setUTCDate(base.getUTCDate() + diff);
+  return base.toISOString().slice(0, 10);
 }
 
 function ymdFromAnyDateValue(value?: string) {
   const raw = String(value || "").trim();
   if (!raw) return "";
-  const direct = raw.match(/(20\d{2}-\d{2}-\d{2})/);
-  if (direct) return direct[1];
-  const mx = raw.match(/(\d{2})\/(\d{2})\/(20\d{2})/);
+  const mx = raw.match(/^(\d{2})\/(\d{2})\/(20\d{2})$/);
   if (mx) return `${mx[3]}-${mx[2]}-${mx[1]}`;
-  const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? "" : localYmd(d);
+  const dateOnly = raw.match(/^(20\d{2}-\d{2}-\d{2})$/);
+  if (dateOnly) return dateOnly[1];
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return localYmd(parsed);
+  const embedded = raw.match(/(20\d{2}-\d{2}-\d{2})/);
+  return embedded ? embedded[1] : "";
 }
 
 function getEvidenceYmd(item?: EvidenceItem | null) {
@@ -963,7 +1228,7 @@ function compressDataUrl(dataUrl: string, maxSide: number, quality: number) {
   });
 }
 
-async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
+async function compressDataUrlForReview(dataUrl: string) { return await compressDataUrl(dataUrl, E027_REVIEW_MAX_SIDE, E027_REVIEW_JPEG_QUALITY); } async function compressDataUrlToSheetsSafeSize(dataUrl: string, maxChars = SHEETS_SAFE_PHOTO_CHARS) {
   // E017: para piloto, priorizamos velocidad de envío y carga estable en Sheets.
   // Se arranca desde tamaños más ligeros para evitar payloads grandes en cada registro.
   const attempts = [
@@ -993,9 +1258,7 @@ async function fileToDataUrl(file: File) {
   });
 }
 
-async function readPhotoForSheets(file: File, prefix = "galeria") {
-  const raw = await fileToDataUrl(file);
-  const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
+async function readPhotoForSheets(file: File, prefix = "galeria", reviewQuality = true) { const raw = await fileToDataUrl(file); const dataUrl = reviewQuality ? await compressDataUrlForReview(raw) : await compressDataUrlToSheetsSafeSize(raw);
   const safePrefix = prefix || "galeria";
   return {
     name: `${safePrefix}-${Date.now()}-${file.name || "foto.jpg"}`,
@@ -1051,12 +1314,403 @@ const supervisorTabs: Array<{ key: SupervisorModule; label: string }> = [
 ];
 
 const clientTabs: Array<{ key: ClientModule; label: string }> = [
-  { key: "resumen", label: "Historial" },
+  { key: "resumen", label: "Hoy" },
   { key: "tiendas", label: "Tiendas" },
-  { key: "evidencias", label: "Evidencia validada" },
+  { key: "evidencias", label: "Evidencias" },
   { key: "incidencias", label: "Incidencias" },
-  { key: "entregables", label: "Entregables" },
+  { key: "solicitudes", label: "Seguimientos" },
+  { key: "entregables", label: "Reportes" },
 ];
+
+
+function ExternalCameraCapturePage({ token }: { token: string }) {
+  const nativeCameraRef = useRef<HTMLInputElement | null>(null);
+  const [context, setContext] = useState<ExternalCameraContextResponse["context"] | null>(null);
+  const [selectedMarcaId, setSelectedMarcaId] = useState("");
+  const [selectedTipo, setSelectedTipo] = useState("");
+  const [selectedFase, setSelectedFase] = useState<EvidencePhase>("ESTADO_ACTUAL");
+  const [descripcion, setDescripcion] = useState("");
+  const [preview, setPreview] = useState("");
+  const [status, setStatus] = useState("Preparando cámara de evidencias...");
+  const [uploading, setUploading] = useState(false);
+  const [uploadedCount, setUploadedCount] = useState(0);
+  const [annulledCount, setAnnulledCount] = useState(0);
+  const [outOfServiceCount, setOutOfServiceCount] = useState(0);
+  const [recentPhotos, setRecentPhotos] = useState<Array<{ evidencia_id?: string; name: string; dataUrl: string; marca: string; tipo: string; fase: string; status: "SUBIENDO" | "REGISTRADA" | "ANULADA" | "ERROR" }>>([]);
+  const [finished, setFinished] = useState(false);
+  const [outOfServiceMarcaIds, setOutOfServiceMarcaIds] = useState<Record<string, boolean>>({});
+  const [error, setError] = useState("");
+  const [showAllPhotos, setShowAllPhotos] = useState(false);
+  const [outOfServiceOpen, setOutOfServiceOpen] = useState(false);
+  const [outOfServiceReason, setOutOfServiceReason] = useState(marcaFueraServicioMotivos[0] || "Sin servicio vigente");
+  const [outOfServiceComment, setOutOfServiceComment] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    async function loadContext() {
+      try {
+        const data = await postExternalJson<ExternalCameraContextResponse>("/external-camera/context", { token });
+        if (!alive) return;
+        const ctx = data.context || null;
+        const marcas = ctx?.marcas || [];
+        const tipos = ctx?.tipos || [];
+        setContext(ctx);
+        setSelectedMarcaId(ctx?.marca_id || marcas[0]?.marca_id || "");
+        setSelectedTipo(ctx?.tipo_evidencia || tipos[0]?.tipo_evidencia || "");
+        const incomingPhase = String(ctx?.fase || "ESTADO_ACTUAL").toUpperCase();
+        setSelectedFase((incomingPhase === "ANTES" || incomingPhase === "DESPUES" ? incomingPhase : "ESTADO_ACTUAL") as EvidencePhase);
+        setDescripcion(ctx?.descripcion || "");
+        setStatus("Lista para capturar. Cambia marca, tipo o estado aquí mismo.");
+      } catch (err) {
+        if (!alive) return;
+        setError(err instanceof Error ? err.message : "No se pudo validar la sesión de cámara.");
+        setStatus("");
+      }
+    }
+    void loadContext();
+    return () => { alive = false; };
+  }, [token]);
+
+  const marcas = context?.marcas || [];
+  const tipos = context?.tipos || [];
+  const selectedMarca = marcas.find((item) => item.marca_id === selectedMarcaId);
+  const marcaNombre = selectedMarca?.marca_nombre || context?.marca_nombre || selectedMarcaId || "Marca";
+  const store = context?.tienda_nombre || context?.tienda_id || "Tienda";
+  const tipoLabel = selectedTipo || "Tipo";
+  const faseLabel = formatPhaseLabel(selectedFase);
+  const selectedBrandMarkedOutOfService = !!selectedMarcaId && !!outOfServiceMarcaIds[selectedMarcaId];
+  const isExpiredCameraSession = !!error && error.toLowerCase().includes("expir");
+  const canCapture = !!token && !error && !!selectedMarcaId && !!selectedTipo && !!context?.visita_id && !uploading && !selectedBrandMarkedOutOfService;
+  const registeredPhotos = recentPhotos.filter((item) => item.status === "REGISTRADA");
+  const activeRecentPhotos = recentPhotos.filter((item) => item.status !== "ANULADA");
+  const lastRegistered = registeredPhotos[0];
+  const registeredForCurrentBrandCount = registeredPhotos.filter((item) => item.marca === marcaNombre).length;
+
+  async function handleNativeEvidenceSelection(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    if (!selectedMarcaId || !selectedTipo || !context?.visita_id) {
+      setStatus("Selecciona marca y tipo antes de capturar.");
+      if (nativeCameraRef.current) nativeCameraRef.current.value = "";
+      return;
+    }
+    const tempId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      setError("");
+      setUploading(true);
+      setStatus("Procesando foto...");
+      const photo = await readPhotoForSheets(file);
+      setPreview(photo.dataUrl);
+      setRecentPhotos((prev) => [{ evidencia_id: tempId, name: photo.name, dataUrl: photo.dataUrl, marca: marcaNombre, tipo: selectedTipo, fase: selectedFase, status: "SUBIENDO" as const }, ...prev].slice(0, 24));
+      setStatus("Registrando evidencia...");
+      const result = await postExternalJson<ExternalCameraUploadResponse>("/external-camera/upload", {
+        token,
+        photo,
+        context: {
+          marca_id: selectedMarcaId,
+          marca_nombre: marcaNombre,
+          tipo_evidencia: selectedTipo,
+          fase: selectedFase,
+          descripcion: descripcion.trim(),
+        },
+      }, 120000);
+      const evidenceId = result.evidencia_id || tempId;
+      setUploadedCount((prev) => prev + 1);
+      setRecentPhotos((prev) => prev.map((item) => item.evidencia_id === tempId ? { ...item, evidencia_id: evidenceId, status: "REGISTRADA" as const } : item));
+      safeWriteLocalStorage(EXTERNAL_CAMERA_LAST_SUCCESS_KEY, JSON.stringify({
+        evidenciaId: evidenceId,
+        visitaId: context.visita_id || "",
+        registeredAt: new Date().toISOString(),
+      }));
+      setStatus(result.message || "Foto registrada. Puedes tomar otra, cambiar tipo o cambiar marca.");
+    } catch (err) {
+      setRecentPhotos((prev) => prev.map((item) => item.evidencia_id === tempId ? { ...item, status: "ERROR" as const } : item));
+      setError(err instanceof Error ? err.message : "No se pudo registrar la evidencia.");
+      setStatus("");
+    } finally {
+      setUploading(false);
+      if (nativeCameraRef.current) nativeCameraRef.current.value = "";
+    }
+  }
+
+  async function cancelExternalPhoto(item: { evidencia_id?: string; status: string }) {
+    if (!item.evidencia_id || item.status !== "REGISTRADA") return;
+    try {
+      setError("");
+      setStatus("Anulando foto...");
+      await postExternalJson<{ ok: boolean; evidencia_id?: string; status?: string }>("/external-camera/cancel", {
+        token,
+        evidencia_id: item.evidencia_id,
+        note: "ANULADA_POR_PROMOTOR_DESDE_CAMARA_EXTERNA",
+      }, 45000);
+      setRecentPhotos((prev) => prev.map((photo) => photo.evidencia_id === item.evidencia_id ? { ...photo, status: "ANULADA" as const } : photo));
+      setAnnulledCount((prev) => prev + 1);
+      setStatus("Foto anulada. No aparecerá como evidencia activa.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo anular la foto.");
+      setStatus("");
+    }
+  }
+
+  async function markOutOfServiceFromCamera() {
+    if (!context?.visita_id || !selectedMarcaId) {
+      setStatus("Selecciona marca antes de marcar fuera de servicio.");
+      return;
+    }
+    if (!outOfServiceReason) {
+      setStatus("Selecciona un motivo para marcar fuera de servicio.");
+      return;
+    }
+    if (registeredForCurrentBrandCount > 0) {
+      const ok = window.confirm(`${marcaNombre} ya tiene ${registeredForCurrentBrandCount} foto${registeredForCurrentBrandCount === 1 ? "" : "s"} registrada${registeredForCurrentBrandCount === 1 ? "" : "s"} en esta visita. ¿Confirmas marcar solo esta marca como fuera de servicio conservando esas fotos?`);
+      if (!ok) {
+        setStatus("Sin servicio cancelado. No se modificó la marca seleccionada.");
+        return;
+      }
+    }
+    try {
+      setError("");
+      setStatus("Registrando marca fuera de servicio...");
+      await postExternalJson<{ ok: boolean; message?: string }>("/external-camera/out-of-service", {
+        token,
+        marca_id: selectedMarcaId,
+        motivo: outOfServiceReason,
+        comentario: outOfServiceComment.trim(),
+      }, 45000);
+      setOutOfServiceMarcaIds((prev) => ({ ...prev, [selectedMarcaId]: true }));
+      setOutOfServiceCount((prev) => prev + 1);
+      setOutOfServiceOpen(false);
+      setOutOfServiceComment("");
+      setStatus(`${marcaNombre} marcada fuera de servicio para esta visita.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo marcar la marca fuera de servicio.");
+      setStatus("");
+    }
+  }
+
+  function finishCapture() {
+    const summary = `Captura finalizada: ${uploadedCount} foto${uploadedCount === 1 ? "" : "s"} registrada${uploadedCount === 1 ? "" : "s"}${annulledCount ? `, ${annulledCount} anulada${annulledCount === 1 ? "" : "s"}` : ""}${outOfServiceCount ? `, ${outOfServiceCount} marca${outOfServiceCount === 1 ? "" : "s"} fuera de servicio` : ""}.`;
+    setError("");
+    setStatus(summary);
+    setPreview("");
+    setRecentPhotos([]);
+    setShowAllPhotos(false);
+    setFinished(true);
+    const finishedPayload = {
+      uploadedCount,
+      annulledCount,
+      outOfServiceCount,
+      visitaId: context?.visita_id || "",
+      finishedAt: new Date().toISOString(),
+    };
+    safeWriteLocalStorage(EXTERNAL_CAMERA_LAST_FINISH_KEY, JSON.stringify(finishedPayload));
+    try {
+      sessionStorage.setItem("promobolsillo_external_camera_finished", JSON.stringify(finishedPayload));
+    } catch {}
+    window.setTimeout(() => {
+      try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
+    }, 50);
+  }
+  function closeExternalCameraSafely() {
+    setStatus("Volviendo a PromoBolsillo. Si no se cierra automáticamente, toca la X superior.");
+    try { window.close(); } catch {}
+  }
+
+  const shellStyle: React.CSSProperties = { minHeight: "100vh", background: "linear-gradient(180deg,#f6f8fb 0%,#e8eef5 100%)", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#17212b" };
+  const cardStyle: React.CSSProperties = { borderRadius: 24, background: "rgba(255,255,255,.97)", border: "1px solid rgba(15,23,42,.08)", boxShadow: "0 16px 42px rgba(15,23,42,.10)" };
+  const selectStyle: React.CSSProperties = { width: "100%", border: "1px solid rgba(15,23,42,.14)", borderRadius: 16, padding: "12px 12px", fontWeight: 850, color: "#17212b", background: "#fff", fontSize: 15, boxSizing: "border-box" };
+  const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 950, color: "#64748b", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 };
+  const smallButtonStyle: React.CSSProperties = { border: "1px solid rgba(15,23,42,.12)", borderRadius: 14, background: "#fff", color: "#334155", padding: "10px 12px", fontWeight: 950 };
+
+  if (isExpiredCameraSession) {
+    return (
+      <div style={shellStyle}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
+          <div style={{ ...cardStyle, padding: 18, display: "grid", gap: 13 }}>
+            <div style={{ fontSize: 11, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+            <h1 style={{ margin: 0, fontSize: 25, lineHeight: 1.08 }}>Sesión de cámara vencida</h1>
+            <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 13, fontWeight: 900, lineHeight: 1.35 }}>
+              Por seguridad, esta cámara ya no está activa.
+            </div>
+            <div style={{ borderRadius: 18, background: "#f8fafc", color: "#334155", padding: 13, fontWeight: 850, lineHeight: 1.4 }}>
+              Cierra esta pantalla y vuelve a abrir la cámara desde <strong>Capturar evidencias</strong>. Esto evita usar ligas viejas o sesiones restauradas por Telegram/Android.
+            </div>
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
+              Cerrar y volver a PromoBolsillo
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (finished) {
+    return (
+      <div style={shellStyle}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
+          <div style={{ ...cardStyle, padding: 18, display: "grid", gap: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+            <h1 style={{ margin: 0, fontSize: 27, lineHeight: 1.05 }}>Captura finalizada</h1>
+            <div style={{ color: "#64748b", fontWeight: 900 }}>{store}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              <div style={{ borderRadius: 18, background: "#f8fafc", padding: 12, textAlign: "center" }}><strong style={{ fontSize: 26 }}>{uploadedCount}</strong><br /><span style={{ fontSize: 12, fontWeight: 900, color: "#64748b" }}>fotos</span></div>
+              <div style={{ borderRadius: 18, background: "#f8fafc", padding: 12, textAlign: "center" }}><strong style={{ fontSize: 26 }}>{annulledCount}</strong><br /><span style={{ fontSize: 12, fontWeight: 900, color: "#64748b" }}>anuladas</span></div>
+              <div style={{ borderRadius: 18, background: "#f8fafc", padding: 12, textAlign: "center" }}><strong style={{ fontSize: 26 }}>{outOfServiceCount}</strong><br /><span style={{ fontSize: 12, fontWeight: 900, color: "#64748b" }}>sin servicio</span></div>
+            </div>
+            <div style={{ borderRadius: 18, background: "#dcfce7", color: "#166534", padding: 13, fontWeight: 900 }}>
+              Listo. Las fotos ya fueron enviadas al registro de evidencias.
+            </div>
+            <button type="button" onClick={closeExternalCameraSafely} style={{ border: 0, borderRadius: 20, background: "#16a34a", color: "#fff", padding: "16px 18px", fontWeight: 1000, fontSize: 17 }}>
+              Volver y revisar evidencias
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={shellStyle}>
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: 12, display: "grid", gap: 10 }}>
+        <div style={{ ...cardStyle, padding: 14, position: "sticky", top: 0, zIndex: 5 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 950, color: "#16a34a", letterSpacing: ".08em", textTransform: "uppercase" }}>PromoBolsillo Cámara</div>
+              <h1 style={{ margin: "5px 0 4px", fontSize: 23, lineHeight: 1.05 }}>Captura de evidencias</h1>
+              <div style={{ color: "#64748b", fontWeight: 900, lineHeight: 1.2 }}>{store}</div>
+            </div>
+            <div style={{ textAlign: "right", minWidth: 74 }}>
+              <div style={{ fontSize: 28, fontWeight: 1000, color: "#0f172a", lineHeight: 1 }}>{uploadedCount}</div>
+              <div style={{ fontSize: 11, fontWeight: 900, color: "#64748b" }}>fotos</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <label style={{ display: "grid", minWidth: 0 }}>
+              <span style={labelStyle}>Marca</span>
+              <select style={selectStyle} value={selectedMarcaId} onChange={(e) => setSelectedMarcaId(e.target.value)}>
+                <option value="">Selecciona marca</option>
+                {marcas.map((item) => <option key={item.marca_id} value={item.marca_id}>{item.marca_nombre}</option>)}
+              </select>
+            </label>
+            <label style={{ display: "grid", minWidth: 0 }}>
+              <span style={labelStyle}>Tipo</span>
+              <select style={selectStyle} value={selectedTipo} onChange={(e) => setSelectedTipo(e.target.value)}>
+                <option value="">Selecciona tipo</option>
+                {tipos.map((item) => <option key={item.tipo_evidencia} value={item.tipo_evidencia}>{item.tipo_evidencia}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+            <label style={{ display: "grid" }}>
+              <span style={labelStyle}>Estado</span>
+              <select style={selectStyle} value={selectedFase} onChange={(e) => setSelectedFase(e.target.value as EvidencePhase)}>
+                <option value="ESTADO_ACTUAL">Estado actual</option>
+                <option value="ANTES">Antes</option>
+                <option value="DESPUES">Después</option>
+              </select>
+            </label>
+            <input style={selectStyle} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Comentario opcional: precio visible, anaquel completo..." />
+          </div>
+          <div style={{ borderRadius: 16, background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)", padding: 10, fontWeight: 850, color: "#334155", lineHeight: 1.3, fontSize: 13 }}>
+            Capturando: <strong>{marcaNombre}</strong> · {tipoLabel} · {faseLabel}
+          </div>
+          <div style={{ borderTop: "1px solid rgba(15,23,42,.08)", paddingTop: 10, display: "grid", gap: 8 }}>
+            <button type="button" onClick={() => setOutOfServiceOpen((prev) => !prev)} style={{ ...smallButtonStyle, textAlign: "left", background: selectedBrandMarkedOutOfService ? "#ecfdf5" : "#fff" }}>
+              ¿Esta marca está fuera de servicio?
+            </button>
+            <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>
+              Aplica solo a la marca seleccionada: <strong>{marcaNombre}</strong>.
+            </div>
+            {selectedBrandMarkedOutOfService ? (
+              <div style={{ borderRadius: 14, background: "#dcfce7", color: "#166534", padding: 10, fontWeight: 900 }}>
+                Esta marca ya quedó marcada fuera de servicio en esta visita. Cambia de marca para seguir capturando evidencias.
+              </div>
+            ) : null}
+            {outOfServiceOpen ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 850, color: "#334155" }}>Marca: {marcaNombre}</div>
+                <select style={selectStyle} value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
+                  {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
+                </select>
+                <input style={selectStyle} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button type="button" onClick={() => void markOutOfServiceFromCamera()} style={{ border: 0, borderRadius: 16, background: "#0f172a", color: "#fff", padding: "12px 14px", fontWeight: 950 }}>
+                    Registrar sin servicio
+                  </button>
+                  <button type="button" onClick={() => setOutOfServiceOpen(false)} style={smallButtonStyle}>Cancelar</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {error ? <div style={{ borderRadius: 18, background: "#fee2e2", color: "#991b1b", padding: 13, fontWeight: 900 }}>{error}</div> : null}
+        {status ? <div style={{ borderRadius: 18, background: status.includes("registrada") || status.includes("finalizada") || status.includes("anulada") || status.includes("fuera de servicio") ? "#dcfce7" : "#e0f2fe", color: status.includes("registrada") || status.includes("finalizada") || status.includes("anulada") || status.includes("fuera de servicio") ? "#166534" : "#075985", padding: 13, fontWeight: 900 }}>{status}</div> : null}
+
+        <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+          {preview ? <img src={preview} alt="Última evidencia" style={{ width: "100%", maxHeight: "58vh", objectFit: "contain", borderRadius: 22, border: "1px solid rgba(15,23,42,.10)", background: "#0f172a" }} /> : (
+            <div style={{ minHeight: 260, borderRadius: 22, border: "1px dashed rgba(15,23,42,.18)", background: "linear-gradient(135deg,#f8fafc,#e2e8f0)", display: "grid", placeItems: "center", textAlign: "center", padding: 20, color: "#475569", fontWeight: 900 }}>
+              Selecciona marca/tipo y toca Capturar evidencia.
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={!canCapture}
+            onClick={() => nativeCameraRef.current?.click()}
+            style={{ border: 0, borderRadius: 22, background: !canCapture ? "#94a3b8" : "#22c55e", color: "#fff", padding: "18px 20px", fontWeight: 1000, fontSize: 20, boxShadow: "0 12px 24px rgba(34,197,94,.26)" }}
+          >
+            {uploading ? "Registrando..." : "Capturar evidencia"}
+          </button>
+          <input ref={nativeCameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(event) => void handleNativeEvidenceSelection(event.target.files)} />
+          {!canCapture && !uploading ? <div style={{ color: "#92400e", background: "#fffbeb", borderRadius: 14, padding: 12, fontWeight: 850 }}>{selectedBrandMarkedOutOfService ? "Esta marca está marcada fuera de servicio. Cambia de marca para seguir capturando." : "Selecciona marca y tipo para habilitar la cámara."}</div> : null}
+          {lastRegistered ? (
+            <button type="button" onClick={() => void cancelExternalPhoto(lastRegistered)} style={{ ...smallButtonStyle, color: "#991b1b", background: "#fff7f7" }}>
+              Deshacer última foto
+            </button>
+          ) : null}
+        </div>
+
+        {activeRecentPhotos.length ? (
+          <div style={{ ...cardStyle, padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ fontWeight: 950 }}>Últimas capturas</div>
+              <button type="button" onClick={() => setShowAllPhotos((prev) => !prev)} style={{ border: 0, background: "transparent", color: "#2563eb", fontWeight: 950 }}>
+                {showAllPhotos ? "Ver menos" : "Ver todas"}
+              </button>
+            </div>
+            <div style={showAllPhotos ? { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 } : { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+              {activeRecentPhotos.slice(0, showAllPhotos ? 24 : 8).map((item, index) => (
+                <div key={`${item.evidencia_id || item.name}-${index}`} style={{ minWidth: showAllPhotos ? undefined : 112, borderRadius: 16, overflow: "hidden", background: "#f8fafc", border: "1px solid rgba(15,23,42,.08)" }}>
+                  <img src={item.dataUrl} alt={item.name} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                  <div style={{ padding: 7, fontSize: 10, fontWeight: 850, color: item.status === "ERROR" ? "#991b1b" : "#475569", lineHeight: 1.2 }}>
+                    {item.marca}<br />{item.tipo}<br />{item.status === "SUBIENDO" ? "Subiendo..." : item.status === "ERROR" ? "Error" : "Registrada"}
+                  </div>
+                  {item.status === "REGISTRADA" ? (
+                    <button type="button" onClick={() => void cancelExternalPhoto(item)} style={{ width: "100%", border: 0, background: "#fee2e2", color: "#991b1b", padding: "7px 6px", fontWeight: 900, fontSize: 11 }}>
+                      Anular
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, paddingBottom: 16 }}>
+          <button type="button" onClick={() => nativeCameraRef.current?.click()} disabled={!canCapture} style={smallButtonStyle}>
+            Tomar otra
+          </button>
+          <button type="button" onClick={finishCapture} style={{ border: 0, borderRadius: 18, background: "#0f172a", color: "#fff", padding: "14px 16px", fontWeight: 950 }}>
+            Finalizar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // E014E_FIX3_EXPORT_AND_STYLE_FIX: corrige export default function App y estilos del header/boton.
 // E014E_REZGO_LOGO_HEADER: Logo oficial REZGO + frase Pasión por la movilidad.
@@ -1064,6 +1718,10 @@ const REZGO_HORIZONTAL_LOGO_E014E = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAA
 
 export default function App() {
   const tg = getTelegramWebApp();
+  const externalCameraParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const isExternalCameraMode = externalCameraParams?.get("external_camera") === "1";
+  const externalCameraToken = externalCameraParams?.get("token") || "";
+  const miniAppReturnTarget = parseMiniAppReturnStartParam(getTelegramStartParam());
 
   const [role, setRole] = useState<AppRole>(null);
   const [actorLabel, setActorLabel] = useState("Operador");
@@ -1073,6 +1731,12 @@ export default function App() {
   const [detectedExternalId, setDetectedExternalId] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
   const [statusMsgDuration, setStatusMsgDuration] = useState(6800);
+  const manualRefreshInFlightRef = useRef(false);
+  const promotorResumeRefreshInFlightRef = useRef(false);
+  const promotorWasHiddenRef = useRef(false);
+  const supervisorReviewSyncInFlightRef = useRef(false);
+  const supervisorReviewFlushTimerRef = useRef<number | null>(null);
+  const supervisorReviewUndoTimerRef = useRef<number | null>(null);
 
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
@@ -1107,6 +1771,7 @@ export default function App() {
   const [promotorEvidenceViewFilter, setPromotorEvidenceViewFilter] = useState<"fotos" | "fuera" | "todo">("fotos");
   const [promotorUsage, setPromotorUsage] = useState<PromotorUsageSummary>({});
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
+  const [selectedPromotorOutOfServiceId, setSelectedPromotorOutOfServiceId] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [promotorRecentAlerts, setPromotorRecentAlerts] = useState<PromotorRecentAlert[]>([]);
   const [pendingQueue, setPendingQueue] = useState<PendingQueueOp[]>([]);
@@ -1139,6 +1804,13 @@ export default function App() {
   const [supervisorEvidences, setSupervisorEvidences] = useState<EvidenceItem[]>([]);
   const [selectedSupEvidenceId, setSelectedSupEvidenceId] = useState("");
   const [selectedSupEvidenceIds, setSelectedSupEvidenceIds] = useState<string[]>([]);
+  const [supervisorPhotoCache, setSupervisorPhotoCache] = useState<Record<string, { thumb?: string; full?: string }>>({});
+  const [supervisorPhotoLoadingIds, setSupervisorPhotoLoadingIds] = useState<string[]>([]);
+  const [supervisorQueueVisibleCount, setSupervisorQueueVisibleCount] = useState(24);
+  const [supervisorReviewQueue, setSupervisorReviewQueue] = useState<SupervisorReviewQueueItem[]>(() => sortSupervisorReviewQueue(readSupervisorReviewQueueStorage()));
+  const [supervisorReviewSyncing, setSupervisorReviewSyncing] = useState(false);
+  const [supervisorReviewLastError, setSupervisorReviewLastError] = useState("");
+  const [lastSupervisorReviewUndo, setLastSupervisorReviewUndo] = useState<SupervisorReviewUndoState | null>(null);
   const [supervisorEvidenceAudit, setSupervisorEvidenceAudit] = useState<EvidenceAuditRow[]>([]);
   const [supervisorOutOfServiceRows, setSupervisorOutOfServiceRows] = useState<SupervisorOutOfServiceItem[]>([]);
   const [supReviewContentFilter, setSupReviewContentFilter] = useState<"evidencias" | "fuera" | "todo">("evidencias");
@@ -1182,8 +1854,8 @@ export default function App() {
     estatus_alerta: ClientFilterOption[];
   }>({ cadenas: [], regiones: [], tiendas: [], marcas: [], tipos_evidencia: [], riesgos: [], decisiones: [], severidades: [], estatus_alerta: [] });
   const [clientFilters, setClientFilters] = useState({
-    fecha_inicio: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`,
-    fecha_fin: new Date().toISOString().slice(0, 10),
+    fecha_inicio: localYmd(),
+    fecha_fin: localYmd(),
     cadena: "",
     region: "",
     tienda_id: "",
@@ -1205,6 +1877,12 @@ export default function App() {
   const [activeClientEvidenceGroupKey, setActiveClientEvidenceGroupKey] = useState("");
   const [clientEvidenceGroupPage, setClientEvidenceGroupPage] = useState(1);
   const [clientIncidents, setClientIncidents] = useState<SupervisorAlert[]>([]);
+  const [clientRequests, setClientRequests] = useState<ClientRequestRow[]>([]);
+  const [clientRequestTarget, setClientRequestTarget] = useState<ClientRequestTarget | null>(null);
+  const [clientRequestAction, setClientRequestAction] = useState<ClientRequestAction>("SOLICITAR_SEGUIMIENTO");
+  const [clientRequestComment, setClientRequestComment] = useState("");
+  const [clientRequestSubmitting, setClientRequestSubmitting] = useState(false);
+  const [selectedClientEvidenceId, setSelectedClientEvidenceId] = useState("");
   const [clientDeliverablesMessage, setClientDeliverablesMessage] = useState("");
   const [imageViewerSrc, setImageViewerSrc] = useState("");
   const [imageViewerEvidenceId, setImageViewerEvidenceId] = useState("");
@@ -1212,6 +1890,8 @@ export default function App() {
   const [imageViewerOffset, setImageViewerOffset] = useState({ x: 0, y: 0 });
   const [imageViewerDragging, setImageViewerDragging] = useState(false);
   const [cameraModal, setCameraModal] = useState<{ open: boolean; target: CameraTarget | null; facing: "user" | "environment" }>({ open: false, target: null, facing: "environment" });
+  const [cameraZoom, setCameraZoom] = useState<{ supported: boolean; min: number; max: number; step: number; value: number }>({ supported: false, min: 1, max: 1, step: 0.1, value: 1 });
+  const [captureGuardMsg, setCaptureGuardMsg] = useState("");
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const supervisorQueueTopRef = useRef<HTMLDivElement | null>(null);
@@ -1231,6 +1911,13 @@ export default function App() {
   const evidenceNativeCameraInputRef = useRef<HTMLInputElement | null>(null);
   const replaceNativeCameraInputRef = useRef<HTMLInputElement | null>(null);
 
+
+  // E024 mantiene helpers heredados usados por flujos anteriores, aunque la pantalla de captura quedó simplificada.
+  void showOutOfServicePanel;
+  void setOutOfServiceReason;
+  void evidenceGalleryAuth;
+  void evidenceGalleryInputRef;
+  void evidenceNativeCameraInputRef;
 
   useEffect(() => {
     if (tg) {
@@ -1260,15 +1947,29 @@ export default function App() {
       if (role === "promotor") {
         void syncPendingQueue(false);
       }
+      if (role === "supervisor") {
+        void syncSupervisorReviewQueue(false);
+      }
     };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
-  }, [role, pendingQueue]);
+  }, [role, pendingQueue, supervisorReviewQueue]);
 
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
+    const markPromotorHidden = () => {
+      if (role === "promotor") promotorWasHiddenRef.current = true;
+    };
+    const resumeVisibleRole = () => {
+      if (document.visibilityState !== "visible") {
+        markPromotorHidden();
+        return;
+      }
+      if (role === "promotor" && promotorWasHiddenRef.current) {
+        promotorWasHiddenRef.current = false;
+        window.setTimeout(() => { void refreshPromotorAfterCameraReturn(); }, 350);
+      }
       if (role === "supervisor") {
+        void syncSupervisorReviewQueue(false);
         void loadSupervisorDashboard();
         void loadSupervisorTeam();
         void loadSupervisorAlerts();
@@ -1276,8 +1977,16 @@ export default function App() {
         void loadSupervisorOutOfService();
       }
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    const onFocus = () => resumeVisibleRole();
+    const onBlur = () => markPromotorHidden();
+    document.addEventListener("visibilitychange", resumeVisibleRole);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("visibilitychange", resumeVisibleRole);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [role, alertStatusFilter, alertSeverityFilter, alertPromotorFilter, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidenceRiskFilter]);
 
   useEffect(() => () => { void stopCameraStream(); }, []);
@@ -1328,12 +2037,22 @@ export default function App() {
     });
   }, [promotorOutOfServiceRows, evidenceFilterStore, evidenceFilterBrand]);
 
+  const selectedPromotorOutOfService = useMemo(() => {
+    if (promotorEvidenceViewFilter === "fotos") return null;
+    if (promotorEvidenceViewFilter === "todo" && selectedEvidenceId) return null;
+    return promotorOutOfServiceVisibleRows.find((item) => item.registro_id === selectedPromotorOutOfServiceId) || (promotorEvidenceViewFilter === "fuera" ? promotorOutOfServiceVisibleRows[0] : null) || null;
+  }, [promotorEvidenceViewFilter, promotorOutOfServiceVisibleRows, selectedPromotorOutOfServiceId, selectedEvidenceId]);
+
   const evidenceTypeOptions = useMemo(() => {
     return brandRules
       .filter((item, index, arr) => !!item.tipo_evidencia && arr.findIndex((row) => row.tipo_evidencia === item.tipo_evidencia) === index)
       .sort((a, b) => Number(a.orden || 999) - Number(b.orden || 999) || String(a.tipo_evidencia).localeCompare(String(b.tipo_evidencia)));
   }, [brandRules]);
   const evidencePhaseOptions = useMemo(() => ["ESTADO_ACTUAL", "ANTES", "DESPUES"] as EvidencePhase[], []);
+
+  // E024 usa selección de marca/tipo dentro de cámara externa; estas opciones se conservan para lógica heredada.
+  void evidenceTypeOptions;
+  void evidencePhaseOptions;
 
   const pendingEvidenceRows = useMemo<UiEvidence[]>(() => {
     const rows: UiEvidence[] = [];
@@ -1389,6 +2108,10 @@ export default function App() {
   const attendanceGallery = useMemo(() => mergedEvidenceRows.filter((item) => !isOperationalEvidence(item)), [mergedEvidenceRows]);
   const operationalGallery = useMemo(() => mergedEvidenceRows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA"), [mergedEvidenceRows]);
 
+  const currentVisitEvidenceGallery = useMemo(() => {
+    return operationalGallery.filter((item) => !selectedVisitId || item.visita_id === selectedVisitId);
+  }, [operationalGallery, selectedVisitId]);
+
   const evidenceFilterOptions = useMemo(() => {
     const storeRows = operationalGallery;
     const brandRows = evidenceFilterStore ? storeRows.filter((item) => getStoreDisplayFromItem(item) === evidenceFilterStore) : storeRows;
@@ -1412,8 +2135,17 @@ export default function App() {
     });
   }, [operationalGallery, evidenceFilterStore, evidenceFilterBrand, evidenceFilterType, evidenceFilterPhase]);
 
-  const selectedEvidence = useMemo(() => filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || filteredOperationalGallery[0] || null, [filteredOperationalGallery, selectedEvidenceId]);
+  const selectedEvidence = useMemo(() => {
+    if (promotorEvidenceViewFilter === "fuera") return null;
+    if (promotorEvidenceViewFilter === "todo" && selectedPromotorOutOfServiceId) return null;
+    return filteredOperationalGallery.find((item) => item.evidencia_id === selectedEvidenceId) || (promotorEvidenceViewFilter === "fotos" ? filteredOperationalGallery[0] : null) || null;
+  }, [filteredOperationalGallery, selectedEvidenceId, promotorEvidenceViewFilter, selectedPromotorOutOfServiceId]);
 
+
+  useEffect(() => {
+    if (promotorEvidenceViewFilter === "fuera") setSelectedEvidenceId("");
+    if (promotorEvidenceViewFilter === "fotos") setSelectedPromotorOutOfServiceId("");
+  }, [promotorEvidenceViewFilter]);
   function isStoredPhotoUnavailable(value?: string) {
     const textValue = String(value || "").trim();
     return !textValue || textValue === "[DRIVE_UPLOAD_FAILED]" || textValue.startsWith("[") || textValue.startsWith("PHOTO_STORAGE:");
@@ -1515,6 +2247,11 @@ export default function App() {
     supEvidenceOnlyPending,
   ]);
 
+  const visibleSupervisorQueueItems = useMemo(
+    () => filteredSupervisorEvidences.slice(0, supervisorQueueVisibleCount),
+    [filteredSupervisorEvidences, supervisorQueueVisibleCount],
+  );
+
   const filteredSupervisorOutOfServiceRows = useMemo(() => supervisorOutOfServiceRows.filter((item) => {
     const itemYmd = getOutOfServiceYmd(item);
     const byDate = !itemYmd || (itemYmd >= supervisorDateBounds.start && itemYmd <= supervisorDateBounds.end);
@@ -1584,6 +2321,10 @@ export default function App() {
     return clientEvidenceGroups.slice(start, start + E011_GROUPS_PER_PAGE);
   }, [clientEvidenceGroups, clientEvidenceGroupSafePage]);
   const activeClientEvidenceGroup = useMemo(() => clientEvidenceGroups.find((item) => item.brandKey === activeClientEvidenceGroupKey) || clientEvidenceGroups[0] || null, [clientEvidenceGroups, activeClientEvidenceGroupKey]);
+  const selectedClientEvidence = useMemo(() => {
+    const groupItems = activeClientEvidenceGroup?.items || [];
+    return groupItems.find((item) => item.evidencia_id === selectedClientEvidenceId) || groupItems[0] || null;
+  }, [activeClientEvidenceGroup, selectedClientEvidenceId]);
 
   const activeViewerSupervisorEvidence = useMemo(() => imageViewerEvidenceId ? filteredSupervisorEvidences.find((item) => item.evidencia_id === imageViewerEvidenceId) || null : null, [filteredSupervisorEvidences, imageViewerEvidenceId]);
   const activeViewerSupervisorEvidenceSequence = useMemo(() => activeSupervisorEvidenceGroup?.items?.length ? activeSupervisorEvidenceGroup.items : filteredSupervisorEvidences, [activeSupervisorEvidenceGroup, filteredSupervisorEvidences]);
@@ -1739,11 +2480,22 @@ export default function App() {
       return;
     }
     const currentStillExists = nextOpenVisits.find((v) => v.visita_id === selectedVisitId);
-    setSelectedVisitId(currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
+    const returnVisit = miniAppReturnTarget.visitaId ? nextOpenVisits.find((v) => v.visita_id === miniAppReturnTarget.visitaId) : null;
+    const nextSelectedVisitId = returnVisit?.visita_id || (currentStillExists ? currentStillExists.visita_id : nextOpenVisits[0].visita_id);
+    setSelectedVisitId(nextSelectedVisitId);
+    if (miniAppReturnTarget.wantsReview) {
+      setPromotorModule("mis_evidencias");
+      setPromotorEvidenceViewFilter("todo");
+      setStatusMsgDuration(9000);
+      setStatusMsg("Regresaste de la cámara. Actualizando Mis fotos de la visita...");
+      void loadEvidencesToday();
+      void loadPromotorOutOfService();
+      if (nextSelectedVisitId) void loadEvidenceContext(nextSelectedVisitId);
+    }
   }
 
-  async function loadEvidencesToday() {
-    const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {});
+  async function loadEvidencesToday(timeoutMs = 45000) {
+    const data = await postJson<EvidencesTodayResponse>("/miniapp/promotor/evidences-today", {}, timeoutMs);
     const rows = withLocalEvidencePreviews((data.evidencias || []).map((item) => ({ ...item, status: item.status || ("ACTIVA" as const) })));
     const operationalRows = rows.filter((item) => isOperationalEvidence(item) && String(item.status || "ACTIVA").toUpperCase() !== "ANULADA");
     setAllEvidenceRows(rows);
@@ -1869,14 +2621,269 @@ export default function App() {
     }
   }
 
+  function snapshotSupervisorEvidence(item: EvidenceItem): SupervisorReviewSnapshot {
+    return {
+      evidencia_id: item.evidencia_id,
+      decision_supervisor: item.decision_supervisor || "",
+      motivo_revision: item.motivo_revision || "",
+      revisado_por: item.revisado_por || "",
+      fecha_revision: item.fecha_revision || "",
+      requiere_revision_supervisor: item.requiere_revision_supervisor || "",
+      status: item.status || "PENDIENTE_REVISION",
+    };
+  }
+
+  function applySupervisorReviewTarget(
+    item: EvidenceItem,
+    queueItem: SupervisorReviewQueueItem,
+  ): EvidenceItem {
+    if (queueItem.restore) {
+      return {
+        ...item,
+        decision_supervisor: queueItem.previous.decision_supervisor || "",
+        motivo_revision: queueItem.previous.motivo_revision || "",
+        revisado_por: queueItem.previous.revisado_por || "",
+        fecha_revision: queueItem.previous.fecha_revision || "",
+        requiere_revision_supervisor: queueItem.previous.requiere_revision_supervisor || "TRUE",
+        status: queueItem.previous.status || "PENDIENTE_REVISION",
+        local_review_pending: true,
+      };
+    }
+    return {
+      ...item,
+      decision_supervisor: queueItem.decision_supervisor,
+      motivo_revision: queueItem.motivo_revision,
+      revisado_por: "Pendiente de sincronizar",
+      fecha_revision: new Date().toISOString(),
+      requiere_revision_supervisor: queueItem.decision_supervisor === "APROBADA" ? "FALSE" : "TRUE",
+      status: queueItem.decision_supervisor,
+      local_review_pending: true,
+    };
+  }
+
+  function applyQueuedSupervisorReviewsToRows(rows: EvidenceItem[]) {
+    const queue = sortSupervisorReviewQueue(readSupervisorReviewQueueStorage());
+    if (!queue.length) return rows;
+    const latestByEvidence = new Map<string, SupervisorReviewQueueItem>();
+    for (const item of queue) latestByEvidence.set(item.evidencia_id, item);
+    return rows.map((row) => {
+      const queued = latestByEvidence.get(row.evidencia_id);
+      return queued ? applySupervisorReviewTarget(row, queued) : row;
+    });
+  }
+
+  function persistSupervisorReviewQueue(rows: SupervisorReviewQueueItem[]) {
+    const sorted = sortSupervisorReviewQueue(rows);
+    writeSupervisorReviewQueueStorage(sorted);
+    setSupervisorReviewQueue(sorted);
+  }
+
+  function scheduleSupervisorReviewSync(delayMs = SUPERVISOR_REVIEW_FLUSH_DELAY_MS) {
+    if (typeof window === "undefined") return;
+    if (supervisorReviewFlushTimerRef.current != null) {
+      window.clearTimeout(supervisorReviewFlushTimerRef.current);
+    }
+    supervisorReviewFlushTimerRef.current = window.setTimeout(() => {
+      supervisorReviewFlushTimerRef.current = null;
+      void syncSupervisorReviewQueue(false);
+    }, delayMs);
+  }
+
+  function enqueueSupervisorReviewItems(items: SupervisorReviewQueueItem[]) {
+    const current = readSupervisorReviewQueueStorage();
+    const next = [...current];
+    for (const item of items) {
+      const existingIndex = next.findIndex((row) => row.evidencia_id === item.evidencia_id);
+      if (existingIndex >= 0) next.splice(existingIndex, 1);
+      next.push(item);
+    }
+    persistSupervisorReviewQueue(next);
+    if (next.length >= 10) scheduleSupervisorReviewSync(250);
+    else scheduleSupervisorReviewSync();
+  }
+
+  async function syncSupervisorReviewQueue(showStatus = false) {
+    if (role !== "supervisor" || !getInitData()) return;
+    if (supervisorReviewSyncInFlightRef.current) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (showStatus) setStatusMsg("Las revisiones están protegidas y se enviarán al recuperar conexión.");
+      return;
+    }
+
+    const queue = sortSupervisorReviewQueue(readSupervisorReviewQueueStorage());
+    if (!queue.length) {
+      setSupervisorReviewQueue([]);
+      setSupervisorReviewLastError("");
+      return;
+    }
+
+    const batch = queue.slice(0, SUPERVISOR_REVIEW_BATCH_SIZE);
+    const sentIds = new Set(batch.map((item) => item.id));
+
+    try {
+      supervisorReviewSyncInFlightRef.current = true;
+      setSupervisorReviewSyncing(true);
+      setSupervisorReviewLastError("");
+
+      const response = await postJson<SupervisorReviewBatchResponse>(
+        "/miniapp/supervisor/evidence-review-batch",
+        {
+          reviews: batch.map((item) => ({
+            client_review_id: item.id,
+            evidencia_id: item.evidencia_id,
+            decision_supervisor: item.decision_supervisor,
+            motivo_revision: item.motivo_revision,
+            restore: !!item.restore,
+            previous_decision_supervisor: item.previous.decision_supervisor || "",
+            previous_motivo_revision: item.previous.motivo_revision || "",
+            previous_revisado_por: item.previous.revisado_por || "",
+            previous_fecha_revision: item.previous.fecha_revision || "",
+            previous_requiere_revision_supervisor: item.previous.requiere_revision_supervisor || "TRUE",
+            previous_status: item.previous.status || "PENDIENTE_REVISION",
+          })),
+        },
+        90000,
+      );
+
+      const resultById = new Map(
+        (response.results || [])
+          .filter((item) => item.client_review_id)
+          .map((item) => [String(item.client_review_id), item]),
+      );
+
+      const storedNow = readSupervisorReviewQueueStorage();
+      const next: SupervisorReviewQueueItem[] = [];
+
+      for (const item of storedNow) {
+        if (!sentIds.has(item.id)) {
+          next.push(item);
+          continue;
+        }
+        const result = resultById.get(item.id);
+        if (result?.ok) continue;
+        next.push({
+          ...item,
+          attempts: item.attempts + 1,
+          lastError: result?.error || "No se confirmó la revisión",
+        });
+      }
+
+      persistSupervisorReviewQueue(next);
+
+      setSupervisorEvidences((previous) => previous.map((item) => {
+        const stillQueued = next.some((queued) => queued.evidencia_id === item.evidencia_id);
+        return stillQueued ? item : { ...item, local_review_pending: false };
+      }));
+
+      if (!next.length) {
+        setSupervisorReviewLastError("");
+        if (showStatus) setStatusMsg("Todas las revisiones quedaron sincronizadas.");
+        void loadSupervisorDashboard().catch(() => undefined);
+      } else {
+        scheduleSupervisorReviewSync(1200);
+      }
+    } catch (err) {
+      const message = friendlyRequestError(
+        err,
+        "Las revisiones siguen protegidas y se enviarán automáticamente.",
+      );
+      setSupervisorReviewLastError(message);
+      const storedNow = readSupervisorReviewQueueStorage().map((item) => (
+        sentIds.has(item.id)
+          ? { ...item, attempts: item.attempts + 1, lastError: message }
+          : item
+      ));
+      persistSupervisorReviewQueue(storedNow);
+      scheduleSupervisorReviewSync(8000);
+      if (showStatus) setStatusMsg(message);
+    } finally {
+      supervisorReviewSyncInFlightRef.current = false;
+      setSupervisorReviewSyncing(false);
+    }
+  }
+
+  function preloadFollowingSupervisorPhotos(currentEvidenceId: string, count = 2) {
+    const currentIndex = filteredSupervisorEvidences.findIndex((item) => item.evidencia_id === currentEvidenceId);
+    if (currentIndex < 0) return;
+    for (let offset = 1; offset <= count; offset += 1) {
+      const next = filteredSupervisorEvidences[currentIndex + offset];
+      if (next) void ensureSupervisorEvidencePhoto(next, { silent: true });
+    }
+  }
+
   async function loadSupervisorEvidences() {
     const data = await postJson<SupervisorEvidencesResponse>("/miniapp/supervisor/evidences", {
       promotor_id: supEvidencePromotorFilter,
-    });
-    const rows = data.evidences || [];
+    }, 60000);
+    const rows = applyQueuedSupervisorReviewsToRows(data.evidences || []);
     setSupervisorEvidences(rows);
+    setSupervisorQueueVisibleCount(24);
+    setSupervisorPhotoCache((previous) => {
+      const next: Record<string, { thumb?: string; full?: string }> = {};
+      for (const row of rows) {
+        const cached = previous[row.evidencia_id] || {};
+        const thumb = row.thumb_url || cached.thumb || "";
+        const full = row.url_foto || cached.full || "";
+        if (thumb || full) next[row.evidencia_id] = { thumb, full };
+      }
+      return next;
+    });
     if (rows.length && !rows.find((row) => row.evidencia_id === selectedSupEvidenceId)) setSelectedSupEvidenceId(rows[0].evidencia_id);
     if (!rows.length) setSelectedSupEvidenceId("");
+  }
+
+  function getSupervisorThumbSrc(item: EvidenceItem | null | undefined) {
+    if (!item) return "";
+    const cached = supervisorPhotoCache[item.evidencia_id];
+    return cached?.thumb || item.thumb_url || cached?.full || item.url_foto || "";
+  }
+
+  function getSupervisorFullSrc(item: EvidenceItem | null | undefined) {
+    if (!item) return "";
+    const cached = supervisorPhotoCache[item.evidencia_id];
+    return cached?.full || item.url_foto || cached?.thumb || item.thumb_url || "";
+  }
+
+  function isSupervisorPhotoLoading(evidenceId: string) {
+    return supervisorPhotoLoadingIds.includes(evidenceId);
+  }
+
+  async function ensureSupervisorEvidencePhoto(item: EvidenceItem, options?: { silent?: boolean }) {
+    const existing = getSupervisorFullSrc(item);
+    if (existing && !item.photo_deferred) return existing;
+    const cached = supervisorPhotoCache[item.evidencia_id]?.full;
+    if (cached) return cached;
+    if (isSupervisorPhotoLoading(item.evidencia_id)) return "";
+
+    setSupervisorPhotoLoadingIds((previous) => previous.includes(item.evidencia_id) ? previous : [...previous, item.evidencia_id]);
+    try {
+      const data = await postJson<SupervisorEvidencePhotoResponse>(
+        "/miniapp/supervisor/evidence-photo",
+        { evidencia_id: item.evidencia_id },
+        60000,
+      );
+      const full = data.url_foto || "";
+      const thumb = data.thumb_url || full;
+      setSupervisorPhotoCache((previous) => ({
+        ...previous,
+        [item.evidencia_id]: {
+          thumb: thumb || previous[item.evidencia_id]?.thumb || "",
+          full: full || previous[item.evidencia_id]?.full || "",
+        },
+      }));
+      return full;
+    } catch (err) {
+      if (!options?.silent) setStatusMsg(friendlyRequestError(err, "No se pudo cargar esta fotografía."));
+      return "";
+    } finally {
+      setSupervisorPhotoLoadingIds((previous) => previous.filter((id) => id !== item.evidencia_id));
+    }
+  }
+
+  async function openSupervisorEvidenceViewer(item: EvidenceItem) {
+    const src = getSupervisorFullSrc(item) || await ensureSupervisorEvidencePhoto(item);
+    if (!src) return;
+    openImageViewer(src, item.evidencia_id);
   }
 
   async function loadSupervisorOutOfService() {
@@ -1980,12 +2987,55 @@ export default function App() {
     setClientIncidents(data.data?.rows || []);
   }
 
+  async function loadClientRequests() {
+    const data = await postJson<ClientEnvelope<{ rows: ClientRequestRow[] }>>("/miniapp/cliente/requests", { pagination: { page: 1, page_size: 100 } });
+    setClientRequests(data.data?.rows || []);
+  }
+
+  function openClientRequest(target: ClientRequestTarget, action: ClientRequestAction) {
+    setClientRequestTarget(target);
+    setClientRequestAction(action);
+    setClientRequestComment("");
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
+  }
+
+  async function submitClientRequest(actionOverride?: ClientRequestAction, targetOverride?: ClientRequestTarget) {
+    const action = actionOverride || clientRequestAction;
+    const target = targetOverride || clientRequestTarget;
+    if (!target || clientRequestSubmitting) return;
+    if (action !== "ENTERADO" && !clientRequestComment.trim()) {
+      setStatusMsg("Escribe un comentario breve para el supervisor.");
+      return;
+    }
+    try {
+      setClientRequestSubmitting(true);
+      const data = await postJson<ClientEnvelope<{ request: ClientRequestRow; deduplicated?: boolean }>>("/miniapp/cliente/request", {
+        tipo_accion: action,
+        entidad_tipo: target.entidad_tipo,
+        entidad_id: target.entidad_id,
+        comentario: action === "ENTERADO" ? "" : clientRequestComment.trim(),
+      });
+      setStatusMsg(data.data?.deduplicated ? "Esta acción ya estaba registrada." : action === "ENTERADO" ? "Marcado como enterado." : "Solicitud enviada al supervisor.");
+      setClientRequestTarget(null);
+      setClientRequestComment("");
+      await Promise.all([loadClientRequests(), loadClientDashboard()]);
+    } catch (err) {
+      setStatusMsg(friendlyRequestError(err, "No se pudo registrar la solicitud."));
+    } finally {
+      setClientRequestSubmitting(false);
+    }
+  }
+
   async function loadClientDeliverables() {
     const data = await postJson<ClientEnvelope<{ enabled: boolean; message: string }>>("/miniapp/cliente/deliverables", { filters: clientFilters });
     setClientDeliverablesMessage(data.data?.message || "Entregables no disponibles por ahora.");
   }
 
   async function initialize() {
+    if (isExternalCameraMode) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError("");
@@ -2014,11 +3064,13 @@ export default function App() {
       void syncPendingQueue(false);
     }
     if (role === "supervisor") {
+      setSupervisorReviewQueue(sortSupervisorReviewQueue(readSupervisorReviewQueueStorage()));
       void loadSupervisorDashboard();
       void loadSupervisorTeam();
       void loadSupervisorAlerts();
       void loadSupervisorEvidences();
       void loadSupervisorOutOfService();
+      window.setTimeout(() => { void syncSupervisorReviewQueue(false); }, 500);
     }
     if (role === "cliente") {
       void loadClientBootstrap();
@@ -2027,6 +3079,7 @@ export default function App() {
       void loadClientStores();
       void loadClientEvidences();
       void loadClientIncidents();
+      void loadClientRequests();
       void loadClientDeliverables();
     }
   }, [role]);
@@ -2045,6 +3098,13 @@ export default function App() {
     if (role !== "supervisor") return;
     void loadSupervisorEvidenceAudit(selectedSupEvidenceId);
   }, [selectedSupEvidenceId, role]);
+
+  useEffect(() => {
+    if (role !== "supervisor" || !selectedSupervisorEvidence) return;
+    void ensureSupervisorEvidencePhoto(selectedSupervisorEvidence, { silent: true });
+    preloadFollowingSupervisorPhotos(selectedSupervisorEvidence.evidencia_id, 2);
+  }, [role, selectedSupEvidenceId]);
+
 
   useEffect(() => {
     if (role !== "supervisor") return;
@@ -2081,14 +3141,23 @@ export default function App() {
   useEffect(() => {
     if (role !== "supervisor") return;
     setSupEvidenceGroupPage(1);
+    setSupervisorQueueVisibleCount(24);
     setActiveSupEvidenceGroupKey("");
-  }, [role, supEvidenceGroupMode, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter, supEvidenceOnlyPending]);
+  }, [role, supEvidenceGroupMode, supEvidencePromotorFilter, supEvidenceStoreFilter, supEvidenceBrandFilter, supEvidenceTypeFilter, supEvidencePhaseFilter, supEvidenceRiskFilter, supEvidenceStatusFilter, supEvidenceOnlyPending, supEvidenceDatePreset, supEvidenceDateStart, supEvidenceDateEnd]);
 
   useEffect(() => {
     if (role !== "cliente") return;
     setClientEvidenceGroupPage(1);
     setActiveClientEvidenceGroupKey("");
   }, [role, clientEvidenceGroupMode, clientFilters.fecha_inicio, clientFilters.fecha_fin, clientFilters.cadena, clientFilters.region, clientFilters.tienda_id, clientFilters.marca_id, clientFilters.tipo_evidencia, clientFilters.decision_supervisor, clientFilters.riesgo]);
+
+  useEffect(() => {
+    if (role !== "cliente") return;
+    const firstId = activeClientEvidenceGroup?.items?.[0]?.evidencia_id || "";
+    if (!selectedClientEvidenceId || !activeClientEvidenceGroup?.items?.some((item) => item.evidencia_id === selectedClientEvidenceId)) {
+      setSelectedClientEvidenceId(firstId);
+    }
+  }, [role, activeClientEvidenceGroup, selectedClientEvidenceId]);
 
   useEffect(() => {
     if (role !== "supervisor") return;
@@ -2132,8 +3201,7 @@ export default function App() {
     try {
       const files = Array.from(fileList || []).filter(Boolean);
       if (!files.length) return;
-      if (target === "attendance-entry") {
-        const photo = await readPhotoForSheets(files[0]);
+      if (target === "attendance-entry") { const photo = await readPhotoForSheets(files[0], "galeria", false);
         setEntryPhoto(photo);
         setStatusMsg("Foto desde galería lista.");
         return;
@@ -2162,9 +3230,7 @@ export default function App() {
       if (!files.length) return;
       if (target === "entrada") {
         if (!selectedStoreId) return setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
-        const photo = await readPhotoForSheets(files[0], "captura");
-        setEntryPhoto(photo);
-        setStatusMsg("Foto de entrada lista.");
+        const photo = await readPhotoForSheets(files[0], "captura", false); setEntryPhoto(photo); setStatusMsg("Foto de entrada lista.");
         return;
       }
       if (target === "reemplazo") {
@@ -2203,39 +3269,70 @@ export default function App() {
       cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     } finally {
       cameraStreamRef.current = null;
+      setCameraZoom({ supported: false, min: 1, max: 1, step: 0.1, value: 1 });
+    }
+  }
+
+  function showCaptureGuard(message: string) {
+    setCaptureGuardMsg(message);
+    setStatusMsg(message);
+    setStatusMsgDuration(8500);
+    window.setTimeout(() => {
+      setCaptureGuardMsg((current) => current === message ? "" : current);
+    }, 8500);
+  }
+
+  function setupCameraZoom(stream: MediaStream, facing: "user" | "environment") {
+    try {
+      const track = stream.getVideoTracks?.()[0];
+      const capabilities = (track?.getCapabilities?.() || {}) as any;
+      const settings = (track?.getSettings?.() || {}) as any;
+      const min = Number(capabilities?.zoom?.min ?? 1);
+      const max = Number(capabilities?.zoom?.max ?? min);
+      const step = Number(capabilities?.zoom?.step ?? 0.1);
+      const value = Number(settings?.zoom ?? min);
+      const supported = facing === "environment" && Number.isFinite(min) && Number.isFinite(max) && max > min;
+      setCameraZoom({ supported, min: supported ? min : 1, max: supported ? max : 1, step: supported && Number.isFinite(step) && step > 0 ? step : 0.1, value: supported && Number.isFinite(value) ? value : 1 });
+    } catch {
+      setCameraZoom({ supported: false, min: 1, max: 1, step: 0.1, value: 1 });
+    }
+  }
+
+  async function changeCameraZoom(nextValue: number) {
+    const value = Math.max(cameraZoom.min, Math.min(cameraZoom.max, nextValue));
+    setCameraZoom((prev) => ({ ...prev, value }));
+    try {
+      const track = cameraStreamRef.current?.getVideoTracks?.()[0];
+      await track?.applyConstraints?.({ advanced: [{ zoom: value }] } as any);
+    } catch {
+      setStatusMsg("El zoom no está disponible en este equipo o Telegram lo limitó.");
+      setStatusMsgDuration(5200);
     }
   }
 
   async function openCamera(target: CameraTarget, facing: "user" | "environment") {
-    // E020: usar cámara nativa del celular para conservar encuadre/zoom del dispositivo.
+    // E020C: cámara integrada mejorada. Selfie mantiene cámara frontal; evidencia/reemplazo usa trasera, sin abrir galería.
     if (target === "entrada" && !selectedStoreId) {
-      setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+      showCaptureGuard("Primero selecciona una tienda. Después podrás capturar ubicación y tomar selfie.");
       return;
     }
     if (target === "evidencia" && !selectedVisitId) {
-      setStatusMsg("Selecciona una tienda/visita antes de tomar foto.");
+      showCaptureGuard("Primero selecciona una visita/tienda activa. Después podrás tomar foto de evidencia.");
       return;
     }
-    if (target === "entrada") {
-      entryNativeCameraInputRef.current?.click();
-      return;
-    }
-    if (target === "evidencia") {
-      evidenceNativeCameraInputRef.current?.click();
-      return;
-    }
-    if (target === "reemplazo") {
-      replaceNativeCameraInputRef.current?.click();
-      return;
-    }
-
-    // Fallback técnico para salida u otros casos no migrados a cámara nativa.
     try {
       setCapturingPhoto(target);
+      setCaptureGuardMsg("");
       await stopCameraStream();
-      const attempts: MediaStreamConstraints[] = [
-        { video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
-        { video: { facingMode: facing }, audio: false },
+      const evidenceVideo = facing === "environment" || target === "evidencia" || target === "reemplazo";
+      const attempts: MediaStreamConstraints[] = evidenceVideo ? [
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, aspectRatio: { ideal: 1.7777778 } } as any, audio: false },
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.7777778 } } as any, audio: false },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ] : [
+        { video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } } as any, audio: false },
+        { video: { facingMode: "user" }, audio: false },
         { video: true, audio: false },
       ];
       let stream: MediaStream | null = null;
@@ -2250,7 +3347,8 @@ export default function App() {
       }
       if (!stream) throw lastError || new Error("No se pudo abrir la cámara.");
       cameraStreamRef.current = stream;
-      setCameraModal({ open: true, target, facing });
+      setupCameraZoom(stream, evidenceVideo ? "environment" : "user");
+      setCameraModal({ open: true, target, facing: evidenceVideo ? "environment" : "user" });
       window.setTimeout(() => {
         if (cameraVideoRef.current) {
           cameraVideoRef.current.srcObject = stream;
@@ -2269,6 +3367,7 @@ export default function App() {
     }
   }
 
+
   async function captureFromCameraModal() {
     const video = cameraVideoRef.current;
     if (!video || !cameraModal.target) return;
@@ -2280,9 +3379,7 @@ export default function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, width, height);
-    const raw = canvas.toDataURL("image/jpeg", 0.92);
-    const dataUrl = await compressDataUrlToSheetsSafeSize(raw);
-    const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
+    const raw = canvas.toDataURL("image/jpeg", 0.92); const dataUrl = (cameraModal.target === "entrada" || cameraModal.target === "salida") ? await compressDataUrlToSheetsSafeSize(raw) : await compressDataUrlForReview(raw); const payload: PhotoCapture = { name: `captura-${Date.now()}.jpg`, dataUrl, capturedAt: nowMxString() };
     if (cameraModal.target === "entrada") {
       setEntryPhoto(payload);
       setStatusMsg("Foto de entrada lista.");
@@ -2467,7 +3564,7 @@ export default function App() {
 
   async function captureLocation(kind: CaptureKind) {
     if (kind === "entrada" && !selectedStoreId) {
-      setStatusMsg("Selecciona una tienda antes de capturar ubicación o tomar foto.");
+      showCaptureGuard("Primero selecciona una tienda. Después podrás capturar ubicación y tomar selfie.");
       return;
     }
     if (kind === "salida" && !exitVisit) {
@@ -2659,6 +3756,39 @@ export default function App() {
     }
   }
 
+  async function startExternalCameraForEvidence() {
+    try {
+      if (!selectedVisitId) {
+        showCaptureGuard("Primero selecciona una visita/tienda activa. Después podrás tomar fotos de evidencia.");
+        return;
+      }
+      if (selectedVisitHasNoBrands) return setStatusMsg("Esta tienda no tiene marcas activas para capturar evidencia.");
+      if (!getInitData()) return setStatusMsg("Esta acción real solo funciona desde Telegram.");
+      setSyncing(true);
+      setStatusMsgDuration(9000);
+      setStatusMsg("Abriendo espacio de cámara de evidencias...");
+      const data = await postJson<ExternalCameraSessionResponse>("/miniapp/promotor/external-camera-session", {
+        visita_id: selectedVisitId,
+        marca_id: evidenceBrandId || "",
+        marca_nombre: evidenceBrandLabel || "",
+        tipo_evidencia: evidenceType || "",
+        fase: evidencePhase || "ESTADO_ACTUAL",
+        descripcion: evidenceDescription.trim(),
+      });
+      if (!data.capture_url) throw new Error("No se recibió URL de cámara externa.");
+      if (tg?.openLink) {
+        tg.openLink(data.capture_url, { try_instant_view: false });
+      } else {
+        window.open(data.capture_url, "_blank", "noopener,noreferrer");
+      }
+      setStatusMsg("Se abrió el espacio de cámara. Captura todas las fotos necesarias y finaliza para volver a PromoBolsillo.");
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "No se pudo abrir el módulo de cámara.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function saveEvidenceFlow() {
     let queuedPayload: Record<string, unknown> | null = null;
     try {
@@ -2690,7 +3820,15 @@ export default function App() {
         source: evidenceSource,
         fotos: localPhotosForPreview.map((photo) => ({ name: photo.name, dataUrl: photo.dataUrl, capturedAt: photo.capturedAt })),
       };
-      const result = await postJson<EvidenceRegisterResponse>("/miniapp/promotor/evidence-register", queuedPayload);
+      const e027UploadTimeoutMs = Math.min(
+        240000,
+        Math.max(60000, 45000 + localPhotosForPreview.length * 20000),
+      );
+      const result = await postJson<EvidenceRegisterResponse>(
+        "/miniapp/promotor/evidence-register",
+        queuedPayload,
+        e027UploadTimeoutMs,
+      );
       const createdIds = Array.isArray(result.created) ? result.created.filter(Boolean) : [];
       if (createdIds.length) {
         const previewEntries: Record<string, string> = {};
@@ -2773,12 +3911,27 @@ export default function App() {
       setSyncing(false);
     }
   }
+  // E024 conserva funciones de captura heredada para no romper rutas de galería/reemplazo.
+  void removeEvidencePhotoAt;
+  void clearEvidencePhotos;
+  void markSelectedBrandOutOfService;
+  void saveEvidenceFlow;
+
 
   async function replaceEvidencePhotoPayload(fileName: string, dataUrl: string, source = "CAMARA") {
     if (!selectedEvidence) return;
     setSyncing(true);
     try {
-      const result = await postJson<ReplaceEvidenceResponse>("/miniapp/promotor/replace-evidence", { evidencia_id: selectedEvidence.evidencia_id, foto_nombre: fileName, foto_data_url: dataUrl, source });
+      const result = await postJson<ReplaceEvidenceResponse>(
+        "/miniapp/promotor/replace-evidence",
+        {
+          evidencia_id: selectedEvidence.evidencia_id,
+          foto_nombre: fileName,
+          foto_data_url: dataUrl,
+          source,
+        },
+        60000,
+      );
       await loadEvidencesToday();
       setStatusMsg(result.warning === "evidence_photo_too_large_for_sheets" ? "La evidencia se reemplazó, pero la foto no cupo completa en Sheets." : "Evidencia reemplazada.");
       setStatusMsgDuration(6800);
@@ -2854,49 +4007,145 @@ ${evidenceToCancel.fecha_hora_fmt}`);
     }
   }
 
-  async function applyEvidenceReviewBatch(evidenceIds: string[], decision: SupervisorDecision, note: string, options?: { clearSelection?: boolean; successMessage?: string; focusEvidenceId?: string; autoAdvance?: boolean }) {
-    try {
-      if (!evidenceIds.length) return setStatusMsg("Selecciona al menos una evidencia.");
-      const trimmedNote = note.trim();
-      if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !trimmedNote) {
-        return setStatusMsg(decision === "OBSERVADA" ? "Agrega un comentario para comentar la evidencia." : "Agrega un motivo para rechazar la evidencia.");
-      }
-      const visibleIds = filteredSupervisorEvidences.map((item) => item.evidencia_id);
-      const actionLabel = decision === "APROBADA" ? "Aprobando evidencia..." : decision === "OBSERVADA" ? "Comentando evidencia..." : "Rechazando evidencia...";
-      setReviewActionInProgress(decision);
-      setStatusMsgDuration(7000);
-      setStatusMsg(evidenceIds.length > 1 ? `${actionLabel} (${evidenceIds.length})` : actionLabel);
-      const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
-      const focusIndex = focusId ? visibleIds.indexOf(focusId) : -1;
-      const nextId = options?.autoAdvance && focusIndex >= 0 ? (visibleIds[focusIndex + 1] || visibleIds[focusIndex - 1] || "") : "";
-      setSyncing(true);
-      for (const evidenciaId of evidenceIds) {
-        await postJson<SupervisorEvidenceReviewResponse>("/miniapp/supervisor/evidence-review", {
-          evidencia_id: evidenciaId,
-          decision_supervisor: decision,
-          motivo_revision: trimmedNote,
-          requiere_revision_supervisor: decision !== "APROBADA",
-        });
-      }
-      if (options?.clearSelection) setSelectedSupEvidenceIds([]);
-      setReviewNote("");
-      await loadSupervisorDashboard();
-      await loadSupervisorEvidences();
-      if (nextId) {
-        setSelectedSupEvidenceId(nextId);
-        const nextItem = filteredSupervisorEvidences.find((item) => item.evidencia_id === nextId);
-        if (nextItem) openImageViewer(nextItem.url_foto, nextItem.evidencia_id);
-      } else if (options?.focusEvidenceId && imageViewerEvidenceId === options.focusEvidenceId) {
-        closeImageViewer();
-      }
-      const decisionLabel = decision === "OBSERVADA" ? "observadas" : decision === "RECHAZADA" ? "rechazadas" : "aprobadas";
-      setStatusMsg(options?.successMessage || `${evidenceIds.length} evidencia(s) ${decisionLabel}.`);
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo aplicar la revisión.");
-    } finally {
-      setReviewActionInProgress(null);
-      setSyncing(false);
+  async function applyEvidenceReviewBatch(
+    evidenceIds: string[],
+    decision: SupervisorDecision,
+    note: string,
+    options?: {
+      clearSelection?: boolean;
+      successMessage?: string;
+      focusEvidenceId?: string;
+      autoAdvance?: boolean;
+    },
+  ) {
+    if (!evidenceIds.length) {
+      setStatusMsg("Selecciona al menos una evidencia.");
+      return;
     }
+
+    const trimmedNote = note.trim();
+    if ((decision === "OBSERVADA" || decision === "RECHAZADA") && !trimmedNote) {
+      setStatusMsg(
+        decision === "OBSERVADA"
+          ? "Agrega un comentario para comentar la evidencia."
+          : "Agrega un motivo para rechazar la evidencia.",
+      );
+      return;
+    }
+
+    const visibleBefore = filteredSupervisorEvidences;
+    const focusId = options?.focusEvidenceId || evidenceIds[0] || "";
+    const focusIndex = focusId
+      ? visibleBefore.findIndex((item) => item.evidencia_id === focusId)
+      : -1;
+    const reviewedSet = new Set(evidenceIds);
+    const nextCandidate = visibleBefore
+      .slice(Math.max(0, focusIndex + 1))
+      .find((item) => !reviewedSet.has(item.evidencia_id))
+      || [...visibleBefore]
+        .slice(0, Math.max(0, focusIndex))
+        .reverse()
+        .find((item) => !reviewedSet.has(item.evidencia_id))
+      || null;
+
+    const sourceItems = supervisorEvidences.filter((item) => reviewedSet.has(item.evidencia_id));
+    const snapshots = sourceItems.map(snapshotSupervisorEvidence);
+    const queuedItems: SupervisorReviewQueueItem[] = snapshots.map((previous) => ({
+      id: buildSupervisorReviewQueueId(),
+      evidencia_id: previous.evidencia_id,
+      decision_supervisor: decision,
+      motivo_revision: trimmedNote,
+      previous,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+      lastError: "",
+    }));
+
+    setReviewActionInProgress(decision);
+
+    setSupervisorEvidences((previous) => previous.map((item) => {
+      if (!reviewedSet.has(item.evidencia_id)) return item;
+      const queueItem = queuedItems.find((queued) => queued.evidencia_id === item.evidencia_id);
+      return queueItem ? applySupervisorReviewTarget(item, queueItem) : item;
+    }));
+
+    enqueueSupervisorReviewItems(queuedItems);
+
+    if (options?.clearSelection) setSelectedSupEvidenceIds([]);
+    setReviewNote("");
+
+    if (nextCandidate) {
+      setSelectedSupEvidenceId(nextCandidate.evidencia_id);
+      void ensureSupervisorEvidencePhoto(nextCandidate, { silent: true });
+      preloadFollowingSupervisorPhotos(nextCandidate.evidencia_id, 2);
+      if (imageViewerEvidenceId) {
+        void openSupervisorEvidenceViewer(nextCandidate);
+      }
+    } else if (imageViewerEvidenceId) {
+      closeImageViewer();
+    }
+
+    const undoState: SupervisorReviewUndoState = {
+      id: `UNDO-${Date.now()}`,
+      items: snapshots,
+      expiresAt: Date.now() + SUPERVISOR_REVIEW_UNDO_MS,
+    };
+    setLastSupervisorReviewUndo(undoState);
+    if (supervisorReviewUndoTimerRef.current != null) {
+      window.clearTimeout(supervisorReviewUndoTimerRef.current);
+    }
+    supervisorReviewUndoTimerRef.current = window.setTimeout(() => {
+      setLastSupervisorReviewUndo((current) => (
+        current?.id === undoState.id ? null : current
+      ));
+      supervisorReviewUndoTimerRef.current = null;
+    }, SUPERVISOR_REVIEW_UNDO_MS);
+
+    const decisionLabel = decision === "OBSERVADA"
+      ? "comentada"
+      : decision === "RECHAZADA"
+        ? "rechazada"
+        : "aprobada";
+    setStatusMsgDuration(5000);
+    setStatusMsg(
+      options?.successMessage
+      || `${evidenceIds.length} evidencia(s) ${decisionLabel}(s). Puedes continuar.`,
+    );
+
+    window.setTimeout(() => setReviewActionInProgress(null), 120);
+  }
+
+  function undoLastSupervisorReview() {
+    const undo = lastSupervisorReviewUndo;
+    if (!undo?.items.length) return;
+
+    const restoreItems: SupervisorReviewQueueItem[] = undo.items.map((previous) => ({
+      id: buildSupervisorReviewQueueId(),
+      evidencia_id: previous.evidencia_id,
+      decision_supervisor: "",
+      motivo_revision: "",
+      restore: true,
+      previous,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+      lastError: "",
+    }));
+
+    const restoreMap = new Map(restoreItems.map((item) => [item.evidencia_id, item]));
+    setSupervisorEvidences((previous) => previous.map((item) => {
+      const restore = restoreMap.get(item.evidencia_id);
+      return restore ? applySupervisorReviewTarget(item, restore) : item;
+    }));
+    enqueueSupervisorReviewItems(restoreItems);
+
+    const restoredFocus = undo.items[0]?.evidencia_id || "";
+    if (restoredFocus) setSelectedSupEvidenceId(restoredFocus);
+    setLastSupervisorReviewUndo(null);
+    if (supervisorReviewUndoTimerRef.current != null) {
+      window.clearTimeout(supervisorReviewUndoTimerRef.current);
+      supervisorReviewUndoTimerRef.current = null;
+    }
+    setStatusMsg("Última acción deshecha. El cambio se sincronizará automáticamente.");
   }
 
   async function reviewSelectedEvidence() {
@@ -2926,7 +4175,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
   }
 
   function selectAllVisibleSupervisorEvidences() {
-    const ids = filteredSupervisorEvidences.map((item) => item.evidencia_id);
+    const ids = visibleSupervisorQueueItems.map((item) => item.evidencia_id);
     setSelectedSupEvidenceIds(ids);
     if (ids[0]) setSelectedSupEvidenceId(ids[0]);
   }
@@ -3008,22 +4257,100 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
   function focusSupervisorEvidence(item: EvidenceItem) {
     setSelectedSupEvidenceId(item.evidencia_id);
+    void ensureSupervisorEvidencePhoto(item, { silent: true });
     window.setTimeout(() => scrollElementIntoView(supervisorReviewDetailRef, "start"), 40);
   }
 
   function focusPromotorEvidence(item: EvidenceItem) {
+    setSelectedPromotorOutOfServiceId("");
     setSelectedEvidenceId(item.evidencia_id);
     if (promotorModule !== "mis_evidencias") setPromotorModule("mis_evidencias");
     window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
   }
 
+  function focusPromotorOutOfService(item: SupervisorOutOfServiceItem) {
+    setSelectedEvidenceId("");
+    setSelectedPromotorOutOfServiceId(item.registro_id);
+    if (promotorModule !== "mis_evidencias") setPromotorModule("mis_evidencias");
+    window.setTimeout(() => scrollElementIntoView(promotorDetailRef, "start"), 60);
+  }
+
+  function getFreshExternalCameraMarker() {
+    const marker = safeReadLocalStorage(EXTERNAL_CAMERA_LAST_SUCCESS_KEY);
+    if (!marker) return { raw: "", isFresh: false };
+    const handled = safeReadLocalStorage(EXTERNAL_CAMERA_LAST_HANDLED_KEY);
+    if (marker === handled) return { raw: marker, isFresh: false };
+    try {
+      const parsed = JSON.parse(marker) as { registeredAt?: string };
+      const registeredAt = parsed?.registeredAt ? new Date(parsed.registeredAt).getTime() : 0;
+      const isRecent = registeredAt > 0 && Date.now() - registeredAt < 20 * 60 * 1000;
+      return { raw: marker, isFresh: isRecent };
+    } catch {
+      return { raw: marker, isFresh: true };
+    }
+  }
+
+  async function refreshPromotorAfterCameraReturn() {
+    if (role !== "promotor" || promotorResumeRefreshInFlightRef.current) return;
+    promotorResumeRefreshInFlightRef.current = true;
+    const marker = getFreshExternalCameraMarker();
+    try {
+      setPromotorModule("mis_evidencias");
+      setPromotorEvidenceViewFilter("fotos");
+      setStatusMsgDuration(12000);
+      setStatusMsg(marker.isFresh
+        ? "Foto registrada correctamente. Actualizando Mis fotos..."
+        : "Actualizando Mis fotos...");
+
+      let loaded = false;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await loadEvidencesToday(60000);
+          loaded = true;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt === 0) await waitMs(1600);
+        }
+      }
+
+      void loadPromotorDashboard().catch(() => undefined);
+      void loadPromotorOutOfService().catch(() => undefined);
+
+      if (loaded) {
+        setStatusMsg(marker.isFresh
+          ? "Foto registrada correctamente. Ya está disponible en Mis fotos."
+          : "Mis fotos se actualizaron correctamente.");
+      } else {
+        setStatusMsg(marker.isFresh
+          ? "La foto quedó registrada. Mis fotos está tardando en actualizarse; puedes continuar y revisarla en unos segundos."
+          : friendlyRequestError(lastError, "Mis fotos está tardando en actualizarse."));
+      }
+      if (marker.raw) safeWriteLocalStorage(EXTERNAL_CAMERA_LAST_HANDLED_KEY, marker.raw);
+    } finally {
+      promotorResumeRefreshInFlightRef.current = false;
+    }
+  }
+
   async function refreshCurrentRoleData() {
+    if (manualRefreshInFlightRef.current) return;
+    manualRefreshInFlightRef.current = true;
     try {
       setSyncing(true);
       if (role === "promotor") {
-        await loadPromotorDashboard();
-        await loadEvidencesToday();
-        await loadPromotorOutOfService();
+        const errors: unknown[] = [];
+        try { await loadPromotorDashboard(); } catch (err) { errors.push(err); }
+        try { await loadEvidencesToday(60000); } catch (err) { errors.push(err); }
+        try { await loadPromotorOutOfService(); } catch (err) { errors.push(err); }
+        if (errors.length >= 3) {
+          setStatusMsg(friendlyRequestError(errors[0], "No se pudo actualizar en este momento."));
+        } else if (errors.length) {
+          setStatusMsg("La información principal se actualizó; una sección tardó más de lo esperado.");
+        } else {
+          setStatusMsg("Información actualizada.");
+        }
+        return;
       }
       if (role === "supervisor") {
         await loadSupervisorDashboard();
@@ -3039,23 +4366,25 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         await loadClientStores();
         await loadClientEvidences();
         await loadClientIncidents();
+        await loadClientRequests();
         await loadClientDeliverables();
         if (selectedClientStoreId) await loadClientStoreDetail(selectedClientStoreId);
       }
       setStatusMsg("Información actualizada.");
     } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : "No se pudo recargar.");
+      setStatusMsg(friendlyRequestError(err, "No se pudo recargar."));
     } finally {
+      manualRefreshInFlightRef.current = false;
       setSyncing(false);
     }
   }
 
-  function moveSupervisorEvidenceViewer(step: number) {
+  async function moveSupervisorEvidenceViewer(step: number) {
     if (activeViewerSupervisorEvidenceIndex < 0) return;
     const next = activeViewerSupervisorEvidenceSequence[activeViewerSupervisorEvidenceIndex + step];
     if (!next) return;
     setSelectedSupEvidenceId(next.evidencia_id);
-    openImageViewer(next.url_foto, next.evidencia_id);
+    await openSupervisorEvidenceViewer(next);
   }
 
   // E013 keeps legacy supervisor helpers referenced so TypeScript noUnusedLocals stays clean while the main UX is simplified.
@@ -3069,6 +4398,10 @@ ${evidenceToCancel.fecha_hora_fmt}`);
   void selectBrandSupervisorEvidences;
   void runBatchEvidenceReview;
   void runBrandEvidenceReview;
+
+  if (isExternalCameraMode) {
+    return <ExternalCameraCapturePage token={externalCameraToken} />;
+  }
 
   if (loading) {
     return (
@@ -3088,7 +4421,282 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
   return (
     <div style={styles.page}>
-      <style>{globalCss}</style>
+      <style>{globalCss + `
+.e020CaptureGuard { margin: 10px 0 8px; border: 1px solid rgba(245,158,11,.45); background: rgba(255,247,237,.95); color: #7c2d12; border-radius: 14px; padding: 10px 12px; font-weight: 850; line-height: 1.35; }
+.outOfServiceBox { max-width: 430px; justify-self: start; }
+.outOfServiceDetailCard { border: 1px solid rgba(245, 158, 11, .35); background: rgba(255, 247, 237, .72); border-radius: 16px; padding: 12px; display: grid; gap: 7px; }
+
+/* E024_EXTERNAL_CAMERA_UX_WORKSPACE */
+.e024EvidenceLaunchPanel {
+  display: grid;
+  gap: 12px;
+}
+.e024StoreHero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, .12), rgba(14, 165, 233, .10));
+  border: 1px solid rgba(15, 23, 42, .08);
+}
+.e024StoreLabel {
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: .06em;
+}
+.e024StoreName {
+  font-size: 18px;
+  font-weight: 1000;
+  color: #0f172a;
+}
+.e024OpenCameraBtn {
+  justify-content: center !important;
+  text-align: center !important;
+  min-height: 62px;
+  border-radius: 22px;
+}
+.e024EvidenceSummary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.e024EvidenceSummary > div {
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid rgba(15,23,42,.08);
+  padding: 10px;
+  text-align: center;
+}
+.e024EvidenceSummary strong {
+  display: block;
+  font-size: 22px;
+  font-weight: 1000;
+  color: #0f172a;
+}
+.e024EvidenceSummary span {
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  color: #64748b;
+}
+.e024ResultGalleryPanel {
+  margin-top: 12px;
+}
+.e024VisitGalleryRail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  scroll-snap-type: x proximity;
+}
+.e024VisitGalleryCard {
+  min-width: 122px;
+  max-width: 122px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #f8fafc;
+  border: 1px solid rgba(15,23,42,.08);
+  box-shadow: 0 10px 24px rgba(15,23,42,.06);
+  cursor: pointer;
+  scroll-snap-align: start;
+}
+.e024VisitGalleryCard img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+.e024VisitGalleryMeta {
+  padding: 8px;
+  line-height: 1.15;
+}
+.e024VisitGalleryMeta strong {
+  display: block;
+  font-size: 11px;
+  color: #334155;
+}
+.e024VisitGalleryMeta span {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 800;
+}
+
+
+/* E024I_MIS_FOTOS_LAYOUT_ROWS */
+.e024iEvidenceListBtn {
+  padding: 11px 12px;
+}
+.e024iDataRows {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.e024iDataRows > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  line-height: 1.25;
+  min-width: 0;
+}
+.e024iDataRows span {
+  color: #78909c;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.e024iDataRows strong {
+  color: #263238;
+  font-size: 12.5px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+.e024iCommentLine {
+  margin-top: 8px;
+  color: #607d8b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.e024iDetailEvidenceCard {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  border-radius: 18px;
+  border: 1px solid rgba(38,50,56,0.10);
+  background: rgba(255,255,255,0.96);
+  padding: 10px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.e024iDetailImageFrame {
+  width: 108px;
+  height: 108px;
+  aspect-ratio: auto;
+  border-radius: 16px;
+}
+.e024iDetailBody {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.e024iGalleryEvidenceCard {
+  min-width: 328px;
+  max-width: 328px;
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+.e024iGalleryImageFrame {
+  width: 76px;
+  height: 76px;
+}
+.e024iGalleryRows > div {
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 6px;
+}
+.e024iGalleryRows span {
+  font-size: 10px;
+}
+.e024iGalleryRows strong {
+  font-size: 11.5px;
+}
+
+  .clientControlHead, .clientRequestComposerHead, .clientRequestHistoryHead {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .clientPeriodButtons, .clientRequestChoiceRow, .clientActionButtons, .clientIncidentActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .clientReadOnlyFilter {
+    display: flex;
+    align-items: center;
+    color: var(--muted);
+    background: rgba(255,255,255,.64);
+  }
+  .clientRequestComposer {
+    border: 1px solid rgba(132, 94, 44, .25);
+    background: linear-gradient(145deg, rgba(255,250,241,.98), rgba(250,244,231,.95));
+  }
+  .clientRequestChoice {
+    border: 1px solid rgba(46, 45, 40, .18);
+    background: rgba(255,255,255,.84);
+    border-radius: 999px;
+    padding: 9px 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .clientRequestChoiceActive {
+    border-color: rgba(132, 94, 44, .72);
+    background: rgba(236, 221, 194, .92);
+  }
+  .clientRequestTextarea {
+    min-height: 96px;
+    resize: vertical;
+    margin: 12px 0;
+  }
+  .clientEvidenceSelected {
+    outline: 3px solid rgba(132, 94, 44, .42);
+    outline-offset: 2px;
+  }
+  .clientActionPanel {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border-radius: 16px;
+    background: rgba(255,255,255,.78);
+    border: 1px solid rgba(46,45,40,.12);
+  }
+  .clientActionCopy { display: grid; gap: 4px; }
+  .clientActionCopy span { color: var(--muted); font-size: 12px; }
+  .clientIncidentActions { margin-top: 10px; }
+  .clientRequestHistoryItem {
+    border: 1px solid rgba(46,45,40,.12);
+    border-radius: 16px;
+    padding: 12px;
+    background: rgba(255,255,255,.76);
+  }
+  .clientResponseBox {
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(217,235,218,.72);
+  }
+
+@media (max-width: 760px) {
+  .clientControlHead, .clientRequestComposerHead, .clientActionPanel { grid-template-columns: 1fr; display: grid; }
+  .clientPeriodButtons, .clientActionButtons { width: 100%; }
+  .clientActionButtons .actionButton { flex: 1 1 140px; }
+  .e024iDetailEvidenceCard {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .e024iDetailImageFrame {
+    width: 92px;
+    height: 92px;
+  }
+  .e024iDataRows > div {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+  .e024iGalleryEvidenceCard {
+    min-width: 306px;
+    max-width: 306px;
+  }
+}
+
+`}</style>
       <div className="shell">
         <div className="stickyTop">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="hero heroSplit">
@@ -3097,7 +4705,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="rezgoTaglineE014E" data-tagline="Pasion por la movilidad" aria-label="Pasión por la movilidad">Pasión por la movilidad</div>
             </div>
             <div className="heroTitleBlock heroTitleBlockWide">
-              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : role === "cliente" ? <>Consulta<br />cliente</> : role === "promotor" ? <>Operación<br />del promotor</> : <>Acceso<br />no configurado</>}</div>
+              <div className="heroTitle heroTitleTight">{role === "supervisor" ? <>Operación<br />supervisor</> : role === "cliente" ? <>Portal<br />cliente</> : role === "promotor" ? <>Operación<br />del promotor</> : <>Acceso<br />no configurado</>}</div>
               <div className="heroMetaSingle heroMetaSingleWide">{actorLabel}</div>
             </div>
           </motion.div>
@@ -3154,8 +4762,17 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         ) : null}
 
         {role === "cliente" ? (
-          <div className="card">
-            <div className="sectionTitle">Filtros del cliente</div>
+          <div className="card clientControlCard">
+            <div className="clientControlHead">
+              <div>
+                <div className="sectionTitle">Operación visible</div>
+                <div className="contextHint">Solo información de tus marcas y evidencias aprobadas por supervisión.</div>
+              </div>
+              <div className="clientPeriodButtons">
+                <button className="actionButton compactBtn" onClick={() => setClientFilters((prev) => ({ ...prev, fecha_inicio: localYmd(), fecha_fin: localYmd() }))}>Hoy</button>
+                <button className="actionButton compactBtn" onClick={() => setClientFilters((prev) => ({ ...prev, fecha_inicio: startOfWeekMondayYmd(), fecha_fin: localYmd() }))}>Semana</button>
+              </div>
+            </div>
             <div className="filtersRow twoColsFilters">
               <input className="inputLike" type="date" value={clientFilters.fecha_inicio} onChange={(e) => setClientFilters((prev) => ({ ...prev, fecha_inicio: e.target.value }))} />
               <input className="inputLike" type="date" value={clientFilters.fecha_fin} onChange={(e) => setClientFilters((prev) => ({ ...prev, fecha_fin: e.target.value }))} />
@@ -3179,9 +4796,29 @@ ${evidenceToCancel.fecha_hora_fmt}`);
           </div>
         ) : null}
 
+        {role === "cliente" && clientRequestTarget ? (
+          <div className="card clientRequestComposer">
+            <div className="clientRequestComposerHead">
+              <div>
+                <div className="sectionTitle">Enviar al supervisor</div>
+                <div className="contextHint">{clientRequestTarget.titulo}</div>
+              </div>
+              <button className="actionButton compactBtn" onClick={() => setClientRequestTarget(null)}>Cancelar</button>
+            </div>
+            <div className="clientRequestChoiceRow">
+              <button className={`clientRequestChoice ${clientRequestAction === "SOLICITAR_SEGUIMIENTO" ? "clientRequestChoiceActive" : ""}`} onClick={() => setClientRequestAction("SOLICITAR_SEGUIMIENTO")}>Solicitar seguimiento</button>
+              <button className={`clientRequestChoice ${clientRequestAction === "PEDIR_EVIDENCIA_ADICIONAL" ? "clientRequestChoiceActive" : ""}`} onClick={() => setClientRequestAction("PEDIR_EVIDENCIA_ADICIONAL")}>Pedir evidencia adicional</button>
+            </div>
+            <textarea className="inputLike clientRequestTextarea" value={clientRequestComment} onChange={(e) => setClientRequestComment(e.target.value)} placeholder="Explica brevemente qué necesitas que se revise o complete." maxLength={1200} />
+            <button className="primaryBtn" disabled={clientRequestSubmitting || !clientRequestComment.trim()} onClick={() => void submitClientRequest()}>
+              {clientRequestSubmitting ? "Enviando..." : "Enviar solicitud"}
+            </button>
+          </div>
+        ) : null}
+
         {role === "cliente" && clientModule === "resumen" ? (
           <div className="card">
-            <div className="sectionTitle">Resumen cliente</div>
+            <div className="sectionTitle">Resumen de hoy</div>
             <div className="summaryLine">Periodo: <strong>{clientDashboard.period?.label || `${clientFilters.fecha_inicio} a ${clientFilters.fecha_fin}`}</strong></div>
             <div className="summaryGrid">
               <div className="summaryBlock kpiBlock"><Store size={16} /><div className="kpiValue">{clientDashboard.kpis?.tiendas_visibles || 0}</div><div className="kpiLabel">Tiendas visibles</div></div>
@@ -3190,14 +4827,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="summaryBlock kpiBlock"><ImageIcon size={16} /><div className="kpiValue">{clientDashboard.kpis?.evidencias || 0}</div><div className="kpiLabel">Evidencias</div></div>
               <div className="summaryBlock kpiBlock"><Check size={16} /><div className="kpiValue">{clientDashboard.kpis?.aprobadas || 0}</div><div className="kpiLabel">Aprobadas</div></div>
               <div className="summaryBlock kpiBlock"><AlertTriangle size={16} /><div className="kpiValue">{clientDashboard.kpis?.alertas || 0}</div><div className="kpiLabel">Alertas</div></div>
+              <div className="summaryBlock kpiBlock"><ClipboardList size={16} /><div className="kpiValue">{clientDashboard.kpis?.solicitudes_abiertas || 0}</div><div className="kpiLabel">Seguimientos</div></div>
             </div>
             <div className="twoCol">
               <div className="panel">
                 <div className="miniTitle">Marcas / cuenta</div>
                 <div className="summaryLine"><strong>{clientBranding.cliente_nombre || actorLabel}</strong></div>
                 <div className="summaryLine">Geocerca OK: <strong>{clientDashboard.kpis?.geocerca_ok_pct || 0}%</strong></div>
-                <div className="summaryLine">Observadas: <strong>{clientDashboard.kpis?.observadas || 0}</strong></div>
-                <div className="summaryLine">Rechazadas: <strong>{clientDashboard.kpis?.rechazadas || 0}</strong></div>
+                <div className="summaryLine">Evidencia publicada: <strong>{clientDashboard.kpis?.aprobadas || 0}</strong></div>
+                <div className="summaryLine">Seguimientos abiertos: <strong>{clientDashboard.kpis?.solicitudes_abiertas || 0}</strong></div>
               </div>
               <div className="panel">
                 <div className="miniTitle">Top incidencias</div>
@@ -3265,10 +4903,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <option value="">Todos los tipos</option>
                 {clientFilterOptions.tipos_evidencia.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
               </select>
-              <select className="inputLike" value={clientFilters.decision_supervisor} onChange={(e) => setClientFilters((prev) => ({ ...prev, decision_supervisor: e.target.value }))}>
-                <option value="">Aprobadas + observadas</option>
-                {clientFilterOptions.decisiones.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-              </select>
+              <div className="inputLike clientReadOnlyFilter">Solo aprobadas por supervisión</div>
               <select className="inputLike" value={clientFilters.riesgo} onChange={(e) => setClientFilters((prev) => ({ ...prev, riesgo: e.target.value }))}>
                 <option value="">Todos los riesgos</option>
                 {clientFilterOptions.riesgos.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
@@ -3329,7 +4964,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     </div>
                     <div className="e011ThumbStrip">
                       {activeClientEvidenceGroup.items.slice(0, E011_THUMBS_PER_GROUP).map((item) => (
-                        <button key={item.evidencia_id} type="button" className="e011ThumbCard" onClick={() => handleImageTap(item.url_foto)} onDoubleClick={() => openImageViewer(item.url_foto)}>
+                        <button key={item.evidencia_id} type="button" className={`e011ThumbCard ${selectedClientEvidence?.evidencia_id === item.evidencia_id ? "clientEvidenceSelected" : ""}`} onClick={() => { setSelectedClientEvidenceId(item.evidencia_id); handleImageTap(item.url_foto); }} onDoubleClick={() => openImageViewer(item.url_foto)}>
                           <img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento} />
                           <div className="e011ThumbInfo">
                             <strong>{item.tipo_evidencia || item.tipo_evento}</strong>
@@ -3339,6 +4974,19 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         </button>
                       ))}
                     </div>
+                    {selectedClientEvidence ? (
+                      <div className="clientActionPanel">
+                        <div className="clientActionCopy">
+                          <strong>{selectedClientEvidence.tipo_evidencia || selectedClientEvidence.tipo_evento}</strong>
+                          <span>{getStoreDisplayFromItem(selectedClientEvidence) || selectedClientEvidence.tienda_nombre || "Tienda"} · {selectedClientEvidence.fecha_hora_fmt}</span>
+                        </div>
+                        <div className="clientActionButtons">
+                          <button className="actionButton" onClick={() => void submitClientRequest("ENTERADO", { entidad_tipo: "EVIDENCIA", entidad_id: selectedClientEvidence.evidencia_id, titulo: `${normalizeBrandLabel(selectedClientEvidence.marca_nombre, "Marca")} · ${getStoreDisplayFromItem(selectedClientEvidence) || selectedClientEvidence.tienda_nombre || "Tienda"}` })}><Check size={16} /> Enterado</button>
+                          <button className="actionButton" onClick={() => openClientRequest({ entidad_tipo: "EVIDENCIA", entidad_id: selectedClientEvidence.evidencia_id, titulo: `${normalizeBrandLabel(selectedClientEvidence.marca_nombre, "Marca")} · ${getStoreDisplayFromItem(selectedClientEvidence) || selectedClientEvidence.tienda_nombre || "Tienda"}` }, "SOLICITAR_SEGUIMIENTO")}><ClipboardList size={16} /> Seguimiento</button>
+                          <button className="actionButton" onClick={() => openClientRequest({ entidad_tipo: "EVIDENCIA", entidad_id: selectedClientEvidence.evidencia_id, titulo: `${normalizeBrandLabel(selectedClientEvidence.marca_nombre, "Marca")} · ${getStoreDisplayFromItem(selectedClientEvidence) || selectedClientEvidence.tienda_nombre || "Tienda"}` }, "PEDIR_EVIDENCIA_ADICIONAL")}><Camera size={16} /> Evidencia adicional</button>
+                        </div>
+                      </div>
+                    ) : null}
                     {activeClientEvidenceGroup.items.length > E011_THUMBS_PER_GROUP ? <div className="contextHint">Hay {activeClientEvidenceGroup.items.length - E011_THUMBS_PER_GROUP} evidencia(s) más en este grupo; filtra por tienda, tipo o riesgo para acotar el análisis.</div> : null}
                   </div>
                 ) : null}
@@ -3370,9 +5018,35 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <span className={`riskBadge ${severityClass(item.severidad)}`}>{item.severidad}</span>
                     <span className={`riskBadge ${statusClass(item.status)}`}>{item.status}</span>
                   </div>
+                  <div className="clientIncidentActions">
+                    <button className="actionButton compactBtn" onClick={() => void submitClientRequest("ENTERADO", { entidad_tipo: "INCIDENCIA", entidad_id: item.alerta_id, titulo: `${item.tipo_alerta} · ${item.tienda_nombre || item.tienda_id || "Tienda"}` })}>Enterado</button>
+                    <button className="actionButton compactBtn" onClick={() => openClientRequest({ entidad_tipo: "INCIDENCIA", entidad_id: item.alerta_id, titulo: `${item.tipo_alerta} · ${item.tienda_nombre || item.tienda_id || "Tienda"}` }, "SOLICITAR_SEGUIMIENTO")}>Solicitar seguimiento</button>
+                  </div>
                 </div>
               ))}
               {!clientIncidents.length ? <div className="emptyBox">Sin incidencias para los filtros seleccionados.</div> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {role === "cliente" && clientModule === "solicitudes" ? (
+          <div className="card">
+            <div className="sectionTitle">Seguimientos solicitados</div>
+            <div className="contextHint">Aquí se conserva lo que el cliente marcó como enterado o solicitó atender.</div>
+            <div className="stack compactStack" style={{ marginTop: 12 }}>
+              {clientRequests.map((item) => (
+                <div className="clientRequestHistoryItem" key={item.solicitud_id}>
+                  <div className="clientRequestHistoryHead">
+                    <strong>{item.tipo_accion === "ENTERADO" ? "Enterado" : item.tipo_accion === "PEDIR_EVIDENCIA_ADICIONAL" ? "Evidencia adicional" : "Seguimiento"}</strong>
+                    <span className={`riskBadge ${statusClass(item.estatus)}`}>{item.estatus}</span>
+                  </div>
+                  <div className="listTitle">{item.titulo || item.entidad_id}</div>
+                  <div className="listSub">{formatDateTimeMaybe(item.fecha_hora)} · {item.notificacion_status || "REGISTRADA"}</div>
+                  {item.comentario ? <div className="summaryLine">{item.comentario}</div> : null}
+                  {item.respuesta ? <div className="clientResponseBox"><strong>Respuesta:</strong> {item.respuesta}</div> : null}
+                </div>
+              ))}
+              {!clientRequests.length ? <div className="emptyBox">Todavía no hay seguimientos registrados.</div> : null}
             </div>
           </div>
         ) : null}
@@ -3398,16 +5072,17 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <option key={store.tienda_id} value={store.tienda_id}>{formatStoreDisplay(store.tienda_id, store.nombre_tienda)}</option>
                   ))}
                 </select>
-                {!selectedStoreId ? <div className="contextHint e020CaptureGuard">Selecciona una tienda antes de capturar ubicación o tomar foto.</div> : null}
+                {!selectedStoreId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una tienda. Después podrás capturar ubicación y tomar selfie.</div> : null}
+                {captureGuardMsg && promotorModule === "asistencia" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
 
                 <div className="captureBlock">
                   <div className="captureTitle">Entrada</div>
                   <div className="captureStack">
-                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={!selectedStoreId || capturingLocation === "entrada"}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void captureLocation("entrada")} disabled={capturingLocation === "entrada"}>
                       <MapPin size={16} />
                       {capturingLocation === "entrada" ? "Ubicando..." : entryLocation ? "Ubicación lista" : "Capturar ubicación"}
                     </button>
-                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")} disabled={!selectedStoreId}>
+                    <button className="secondaryBtn compactBtn assistQuickBtn" onClick={() => void openCamera("entrada", "user")} disabled={false}>
                       <Camera size={16} />
                       {entryPhoto ? "Selfie lista" : "Tomar selfie"}
                     </button>
@@ -3484,132 +5159,61 @@ ${evidenceToCancel.fecha_hora_fmt}`);
         {role === "promotor" && promotorModule === "evidencias" ? (
           <div className="card">
             <div className="sectionTitle">Evidencias</div>
-            <div className="twoCol">
-              <div className="panel">
-                <label className="fieldLabel">Visita activa</label>
-                <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
-                  <option value="">Selecciona una visita</option>
-                  {openVisits.map((visit) => (
-                    <option key={visit.visita_id} value={visit.visita_id}>{getVisitDisplayName(visit, stores)}</option>
-                  ))}
-                </select>
-                {selectedVisitStoreName ? <div className="contextHint">Tienda vinculada: {selectedVisitStoreName}</div> : null}
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Marca</label>
-                <select className="inputLike" value={evidenceBrandId} disabled={selectedVisitHasNoBrands} onChange={(e) => {
-                  const brand = availableBrands.find((item) => item.marca_id === e.target.value);
-                  setEvidenceBrandId(e.target.value);
-                  setEvidenceBrandLabel(normalizeBrandLabel(brand?.marca_nombre || "", brand?.marca_id || ""));
-                  setEvidenceType("");
-                  setEvidencePhase("ESTADO_ACTUAL");
-                  setShowOutOfServicePanel(false);
-                }}>
-                  <option value="">{selectedVisitHasNoBrands ? "Tienda sin marcas activas" : "Selecciona una marca"}</option>
-                  {availableBrands.map((brand) => (
-                    <option key={brand.marca_id} value={brand.marca_id}>{normalizeBrandLabel(brand.marca_nombre, brand.marca_id)}{brandsOutOfService[brand.marca_id] ? " · Fuera de servicio" : ""}</option>
-                  ))}
-                </select>
-                {selectedVisitHasNoBrands ? (
-                  <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
-                ) : null}
-
-                {evidenceBrandId ? (
-                  <div className="outOfServiceBox">
-                    {selectedBrandOutOfService ? (
-                      <>
-                        <div className="outOfServiceTitle">Marca fuera de servicio en esta visita</div>
-                        <div className="outOfServiceText">Motivo: {selectedBrandOutOfService.motivo || "Sin motivo"}</div>
-                        {selectedBrandOutOfService.comentario ? <div className="outOfServiceText">Comentario: {selectedBrandOutOfService.comentario}</div> : null}
-                      </>
-                    ) : (
-                      <>
-                        {!showOutOfServicePanel ? (
-                          <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(true)}>
-                            <ShieldAlert size={16} />
-                            ¿Marca fuera de servicio?
-                          </button>
-                        ) : (
-                          <>
-                            <div className="outOfServiceTitle">¿Marca fuera de servicio?</div>
-                            <div className="outOfServiceText">Usa esta opción solo cuando la marca no deba atenderse en esta visita.</div>
-                            <select className="inputLike" value={outOfServiceReason} onChange={(e) => setOutOfServiceReason(e.target.value)}>
-                              {marcaFueraServicioMotivos.map((motivo) => <option key={motivo} value={motivo}>{motivo}</option>)}
-                            </select>
-                            <input className="inputLike" style={{ marginTop: 8 }} value={outOfServiceComment} onChange={(e) => setOutOfServiceComment(e.target.value)} placeholder="Comentario opcional" />
-                            <div className="e019OutServiceActions">
-                              <button className="secondaryBtn compactBtn outOfServiceBtn" disabled={syncing} onClick={() => void markSelectedBrandOutOfService()}>
-                                <ShieldAlert size={16} />
-                                Confirmar sin servicio
-                              </button>
-                              <button className="actionButton compactBtn" disabled={syncing} onClick={() => setShowOutOfServicePanel(false)}>Cancelar</button>
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ) : null}
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Tipo</label>
-                <select className="inputLike" value={evidenceType} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceBrandId || !evidenceTypeOptions.length} onChange={(e) => {
-                  const nextType = e.target.value;
-                  setEvidenceType(nextType);
-                  const nextRule = evidenceTypeOptions.find((item) => item.tipo_evidencia === nextType);
-                  if (nextRule) {
-                    setEvidenceQty(nextRule.fotos_requeridas || 1);
-                  }
-                }}>
-                  <option value="">{selectedVisitHasNoBrands ? "Sin marcas para capturar" : (evidenceTypeOptions.length ? "Selecciona un tipo" : "Selecciona primero tienda y marca")}</option>
-                  {evidenceTypeOptions.map((rule) => (
-                    <option key={rule.tipo_evidencia} value={rule.tipo_evidencia}>{rule.tipo_evidencia}</option>
-                  ))}
-                </select>
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Fase</label>
-                <select className="inputLike" value={evidencePhase} onChange={(e) => setEvidencePhase(e.target.value as EvidencePhase)} disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
-                  {evidencePhaseOptions.map((value) => <option key={value} value={value}>{formatPhaseLabel(value)}</option>)}
-                </select>
-
-                <label className="fieldLabel" style={{ marginTop: 10 }}>Cantidad requerida</label>
-                <input className="inputLike" type="number" min={1} max={24} value={evidenceQty} readOnly disabled />
-              </div>
-
-              <div className="panel">
-                <label className="fieldLabel">Comentario</label>
-                <input className="inputLike" value={evidenceDescription} onChange={(e) => setEvidenceDescription(e.target.value)} placeholder="Ej. Cabecera completa, competencia lateral..." />
-                <div className="captureGrid" style={{ marginTop: 12 }}>
-                  <button className="secondaryBtn compactBtn" disabled={!selectedVisitId || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => void openCamera("evidencia", "environment") }>
-                    <Camera size={16} />
-                    Tomar foto
-                  </button>
-                  {evidenceGalleryAuth.allowed ? (
-                    <button className="secondaryBtn compactBtn" disabled={selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType} onClick={() => evidenceGalleryInputRef.current?.click()}>
-                      <ImageIcon size={16} />
-                      Galería autorizada
-                    </button>
-                  ) : null}
+            <div className="panel e024EvidenceLaunchPanel">
+              <label className="fieldLabel">Visita / tienda</label>
+              <select className="inputLike" value={selectedVisitId} onChange={(e) => setSelectedVisitId(e.target.value)}>
+                <option value="">Selecciona una visita</option>
+                {openVisits.map((visit) => (
+                  <option key={visit.visita_id} value={visit.visita_id}>{getVisitDisplayName(visit, stores)}</option>
+                ))}
+              </select>
+              {selectedVisitStoreName ? <div className="e024StoreHero">
+                <Store size={18} />
+                <div>
+                  <div className="e024StoreLabel">Tienda activa</div>
+                  <div className="e024StoreName">{selectedVisitStoreName}</div>
                 </div>
-                <input ref={evidenceNativeCameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => void handleNativeCameraSelection("evidencia", e.target.files)} />
-                <input ref={evidenceGalleryInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleGallerySelection("evidence", e.target.files)} />
-                <div className="contextHint">La cámara usa el modo nativo del celular para permitir encuadre y zoom propios del dispositivo. Máximo 24 fotos en la selección actual.</div>
-                <div className="authTraceBox">Galería evidencia: <strong>{galleryReasonLabel(evidenceGalleryAuth)}</strong></div>
-                {evidencePhotos.length ? (
-                  <>
-                    <div className="thumbGrid">{evidencePhotos.map((photo, index) => (
-                      <div key={`${photo.name}-${photo.capturedAt}`} style={{ position: "relative" }}>
-                        <img src={photo.dataUrl} className="thumb" alt={photo.name} />
-                        <button className="removeThumbBtn" onClick={() => removeEvidencePhotoAt(index)} aria-label="Quitar foto">×</button>
-                      </div>
-                    ))}</div>
-                    <div className="actionGrid actionGridButtons">
-                      <button className="actionButton" onClick={() => clearEvidencePhotos()}><Trash2 size={16} /><span>Limpiar selección</span></button>
-                    </div>
-                  </>
-                ) : null}
-                <button className="primaryBtn mainActionBtn e014dEvidenceActionBtn" onClick={() => void saveEvidenceFlow()} disabled={syncing || selectedVisitHasNoBrands || !!selectedBrandOutOfService || !evidenceType}>
-                  <span className="mainActionTop e014fEvidenceActionTop"><Camera size={16} /><span>{syncing ? "Guardando..." : "Registrar evidencia"}</span></span>
+              </div> : null}
+              {!selectedVisitId ? <div className="contextHint e020CaptureGuard e020cCaptureGuardStrong">⚠️ Primero selecciona una visita/tienda activa. Después podrás abrir la cámara de evidencias.</div> : null}
+              {selectedVisitHasNoBrands ? (
+                <div className="emptyBox e014NoBrandBox">Esta tienda está en rutero, pero no tiene marcas activas para capturar. Puedes registrar asistencia y cerrar visita sin evidencias obligatorias.</div>
+              ) : null}
+              {captureGuardMsg && promotorModule === "evidencias" ? <div className="e020cGuardToast">{captureGuardMsg}</div> : null}
+              <button className="primaryBtn mainActionBtn e024OpenCameraBtn" disabled={syncing || !selectedVisitId || selectedVisitHasNoBrands} onClick={() => void startExternalCameraForEvidence()}>
+                <span className="mainActionTop e014fEvidenceActionTop"><Camera size={18} /><span>{syncing ? "Abriendo..." : "Abrir cámara de evidencias"}</span></span>
+              </button>
+              <div className="e024EvidenceSummary">
+                <div><strong>{currentVisitEvidenceGallery.length}</strong><span>fotos activas</span></div>
+                <div><strong>{Array.from(new Set(currentVisitEvidenceGallery.map((item) => normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca")).filter(Boolean))).length}</strong><span>marcas</span></div>
+                <div><strong>{Array.from(new Set(currentVisitEvidenceGallery.map((item) => item.tipo_evidencia || "").filter(Boolean))).length}</strong><span>tipos</span></div>
+              </div>
+            </div>
+
+            <div className="panel e024ResultGalleryPanel">
+              <div className="e018SectionHeader">
+                <div>
+                  <div className="sectionTitle" style={{ margin: 0 }}>Galería de la visita</div>
+                  <div className="contextHint">Las fotos capturadas desde el módulo de cámara aparecen aquí al regresar.</div>
+                </div>
+                <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}>
+                  <RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Actualizar"}</span>
                 </button>
               </div>
+              {currentVisitEvidenceGallery.length ? (
+                <div className="e024VisitGalleryRail">
+                  {currentVisitEvidenceGallery.slice(0, 18).map((item) => (
+                    <div className="e024VisitGalleryCard" key={item.evidencia_id} onClick={() => { setPromotorModule("mis_evidencias"); setPromotorEvidenceViewFilter("fotos"); setSelectedEvidenceId(item.evidencia_id); }}>
+                      <img src={item.url_foto} alt={item.tipo_evidencia || "Evidencia"} />
+                      <div className="e024VisitGalleryMeta">
+                        <strong>{normalizeBrandLabel(item.marca_nombre || "", item.marca_id || "Marca")}</strong>
+                        <span>{item.tipo_evidencia || "Evidencia"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="emptyBox">Aún no hay fotos registradas para esta visita.</div>
+              )}
             </div>
           </div>
         ) : null}
@@ -3621,9 +5225,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <button type="button" className="secondaryBtn compactBtn e018TopRefreshBtn" onClick={() => void refreshCurrentRoleData()} disabled={syncing || !!error}><RefreshCw size={15} /><span>{syncing ? "Sincronizando..." : "Recargar"}</span></button>
             </div>
             <div className="e018ReviewModeBar e019PromotorModeBar">
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("fotos")}>Fotos</button>
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("fuera")}>Sin servicio</button>
-              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => setPromotorEvidenceViewFilter("todo")}>Todo</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fotos" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fotos"); setSelectedPromotorOutOfServiceId(""); }}>Con foto</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "fuera" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("fuera"); setSelectedEvidenceId(""); }}>Sin servicio</button>
+              <button type="button" className={`e016DateChip ${promotorEvidenceViewFilter === "todo" ? "e016DateChipActive" : ""}`} onClick={() => { setPromotorEvidenceViewFilter("todo"); setSelectedEvidenceId(""); setSelectedPromotorOutOfServiceId(""); }}>Todo</button>
             </div>
             <div className="filtersRow">
               <select className="inputLike" value={evidenceFilterStore} onChange={(e) => { setEvidenceFilterStore(e.target.value); setEvidenceFilterBrand(""); setEvidenceFilterType(""); setEvidenceFilterPhase(""); }}>
@@ -3649,18 +5253,27 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="stack compactStack">
                   <div ref={promotorListTopRef} className="e018ScrollAnchor" />
                   {promotorEvidenceViewFilter !== "fuera" ? filteredOperationalGallery.map((item) => (
-                    <button key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)} className={`listBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
-                      <div className="listTitle">{getStoreDisplayFromItem(item) || "Visita activa"}</div>
-                      <div className="listSub">{item.tipo_evidencia} · {normalizeBrandLabel(item.marca_nombre, "Marca")}</div>
+                    <button key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)} className={`listBtn e024iEvidenceListBtn ${selectedEvidenceId === item.evidencia_id ? "listBtnGreen" : ""}`}>
+                      <div className="e024iDataRows">
+                        <div><span>Tienda</span><strong>{getStoreDisplayFromItem(item) || "Visita activa"}</strong></div>
+                        <div><span>Marca</span><strong>{normalizeBrandLabel(item.marca_nombre, "Marca")}</strong></div>
+                        <div><span>Tipo</span><strong>{item.tipo_evidencia || item.tipo_evento || "Evidencia"}</strong></div>
+                        <div><span>Fase</span><strong>{formatPhaseLabel(item.fase || "ESTADO_ACTUAL")}</strong></div>
+                        <div><span>Fecha</span><strong>{item.fecha_hora_fmt || formatDateTimeMaybe(item.fecha_hora || "")}</strong></div>
+                      </div>
                     </button>
                   )) : null}
                   {promotorEvidenceViewFilter !== "fotos" ? promotorOutOfServiceVisibleRows.map((item) => (
-                    <div key={item.registro_id} className="listBtn e019OutServiceListItem">
-                      <div className="listTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"}</div>
-                      <div className="listSub">Sin servicio · {item.marca_nombre || item.marca_id || "Marca"}</div>
-                      <div className="summaryLine">Motivo: <strong>{item.motivo || "Sin motivo"}</strong></div>
-                      {item.comentario ? <div className="summaryLine">Comentario: {item.comentario}</div> : null}
-                    </div>
+                    <button key={item.registro_id} type="button" onClick={() => focusPromotorOutOfService(item)} className={`listBtn e019OutServiceListItem e024iEvidenceListBtn ${selectedPromotorOutOfServiceId === item.registro_id ? "listBtnGreen" : ""}`}>
+                      <div className="e024iDataRows">
+                        <div><span>Tienda</span><strong>{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"}</strong></div>
+                        <div><span>Marca</span><strong>{item.marca_nombre || item.marca_id || "Marca"}</strong></div>
+                        <div><span>Registro</span><strong>Sin servicio</strong></div>
+                        <div><span>Motivo</span><strong>{item.motivo || "Sin motivo"}</strong></div>
+                        <div><span>Fecha</span><strong>{item.fecha_hora_fmt || item.fecha_hora || "Sin fecha"}</strong></div>
+                      </div>
+                      {item.comentario ? <div className="e024iCommentLine">Comentario: {item.comentario}</div> : null}
+                    </button>
                   )) : null}
                   {promotorEvidenceViewFilter !== "fuera" && !filteredOperationalGallery.length ? <div className="emptyBox">No hay evidencias con esos filtros.</div> : null}
                   {promotorEvidenceViewFilter !== "fotos" && !promotorOutOfServiceVisibleRows.length ? <div className="emptyBox">No hay marcas sin servicio registradas con esos filtros.</div> : null}
@@ -3677,11 +5290,19 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 <div className="miniTitle">Detalle útil</div>
                 {selectedEvidence ? (
                   <>
-                    <div className="previewFrame" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
-                    {getStoreDisplayFromItem(selectedEvidence) ? <div className="summaryLine">{getStoreDisplayFromItem(selectedEvidence)}</div> : null}
-                    <div className="summaryLine">{selectedEvidence.tipo_evidencia} · <strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
-                    <div className="summaryLine">{selectedEvidence.fecha_hora_fmt}</div>
-                    <div className="summaryLine">Riesgo: <strong>{selectedEvidence.riesgo}</strong></div>
+                    <div className="e024iDetailEvidenceCard" onDoubleClick={() => openImageViewer(selectedEvidence.url_foto)} onClick={() => handleImageTap(selectedEvidence.url_foto)}>
+                      <div className="imageFrame e024iDetailImageFrame"><img src={selectedEvidence.url_foto} alt={selectedEvidence.tipo_evidencia} className="img" /></div>
+                      <div className="e024iDetailBody">
+                        <div className="e024iDataRows">
+                          <div><span>Tienda</span><strong>{getStoreDisplayFromItem(selectedEvidence) || "Visita activa"}</strong></div>
+                          <div><span>Marca</span><strong>{normalizeBrandLabel(selectedEvidence.marca_nombre, "Marca")}</strong></div>
+                          <div><span>Tipo</span><strong>{selectedEvidence.tipo_evidencia || selectedEvidence.tipo_evento || "Evidencia"}</strong></div>
+                          <div><span>Fase</span><strong>{formatPhaseLabel(selectedEvidence.fase || "ESTADO_ACTUAL")}</strong></div>
+                          <div><span>Fecha</span><strong>{selectedEvidence.fecha_hora_fmt || formatDateTimeMaybe(selectedEvidence.fecha_hora || "")}</strong></div>
+                          <div><span>Riesgo</span><strong>{selectedEvidence.riesgo || "BAJO"}</strong></div>
+                        </div>
+                      </div>
+                    </div>
                     <div className="actionGrid actionGridButtons">
                       <button className="actionButton" onClick={() => openImageViewer(selectedEvidence.url_foto)}><Eye size={16} /><span>Ver foto</span></button>
                       <button className="actionButton" onClick={() => void markEvidenceAsCancelled()}><Trash2 size={16} /><span>Anular</span></button>
@@ -3695,8 +5316,18 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                     <label className="fieldLabel" style={{ marginTop: 10 }}>Nota</label>
                     <input className="inputLike" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Escribe un comentario" />
                   </>
+                ) : selectedPromotorOutOfService ? (
+                  <div className="outOfServiceDetailCard">
+                    <div className="outOfServiceTitle">¿Marca fuera de servicio?</div>
+                    <div className="summaryLine">Tienda: <strong>{selectedPromotorOutOfService.tienda_display || selectedPromotorOutOfService.tienda_nombre || selectedPromotorOutOfService.tienda_id || "Tienda"}</strong></div>
+                    <div className="summaryLine">Marca: <strong>{selectedPromotorOutOfService.marca_nombre || selectedPromotorOutOfService.marca_id || "Marca"}</strong></div>
+                    <div className="summaryLine">Motivo: <strong>{selectedPromotorOutOfService.motivo || "Sin motivo"}</strong></div>
+                    {selectedPromotorOutOfService.comentario ? <div className="summaryLine">Comentario: {selectedPromotorOutOfService.comentario}</div> : null}
+                    <div className="summaryLine">Fecha: {selectedPromotorOutOfService.fecha_hora_fmt || selectedPromotorOutOfService.fecha_hora || "Sin fecha"}</div>
+                    <div className="authTraceBox">Este registro no es una foto; es una justificación operativa de marca sin servicio.</div>
+                  </div>
                 ) : (
-                  <div className="emptyBox">Selecciona una evidencia.</div>
+                  <div className="emptyBox">Selecciona una evidencia o un registro sin servicio.</div>
                 )}
               </div>
             </div>
@@ -4065,13 +5696,40 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="e013TopBar">
               <div>
                 <div className="sectionTitle e010PageTitle">Revisar evidencias</div>
-                <div className="contextHint e013Sub">Cola rápida: toca una tarjeta para ir directo al detalle útil, revisar la foto y aplicar acción.</div>
+                <div className="contextHint e013Sub">Revisión continua: decide y avanza de inmediato; Promobolsillo guarda las revisiones en segundo plano.</div>
               </div>
               <div className="e013CounterStrip">
                 <span><strong>{filteredSupervisorEvidences.length}</strong><small>Evidencias</small></span>
                 <span><strong>{filteredSupervisorOutOfServiceRows.length}</strong><small>Sin servicio</small></span>
                 <span><strong>{supervisorEvidenceSummary.pendientes}</strong><small>Pendientes</small></span>
                 <span><strong>{supervisorEvidenceSummary.observadas + supervisorEvidenceSummary.rechazadas}</strong><small>Con acción</small></span>
+              </div>
+            </div>
+
+            <div className={`e028Fix2SyncBar ${supervisorReviewLastError ? "e028Fix2SyncError" : ""}`}>
+              <div className="e028Fix2SyncState">
+                {supervisorReviewSyncing ? (
+                  <><RefreshCw className="spin" size={15} /><strong>Guardando {supervisorReviewQueue.length} revisión(es)...</strong></>
+                ) : supervisorReviewQueue.length ? (
+                  <><RefreshCw size={15} /><strong>{supervisorReviewQueue.length} revisión(es) pendientes de sincronizar</strong></>
+                ) : (
+                  <><CheckCircle2 size={15} /><strong>Todo sincronizado</strong></>
+                )}
+                {supervisorReviewLastError ? <span>{supervisorReviewLastError}</span> : <span>Puedes continuar revisando sin esperar.</span>}
+              </div>
+              <div className="e028Fix2SyncActions">
+                {lastSupervisorReviewUndo && lastSupervisorReviewUndo.expiresAt > Date.now() ? (
+                  <button type="button" className="actionButton compactBtn" onClick={() => undoLastSupervisorReview()}>
+                    <RotateCcw size={14} />
+                    <span>Deshacer última acción</span>
+                  </button>
+                ) : null}
+                {supervisorReviewQueue.length && !supervisorReviewSyncing ? (
+                  <button type="button" className="actionButton compactBtn" onClick={() => void syncSupervisorReviewQueue(true)}>
+                    <RefreshCw size={14} />
+                    <span>Sincronizar ahora</span>
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -4111,7 +5769,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </div>
               ) : null}
               <div className="e020FilterActions">
-                <button type="button" className="primaryBtn compactBtn e020UpdateBtn" onClick={() => applySupervisorMainFilters()} disabled={syncing || !!reviewActionInProgress}>
+                <button type="button" className="primaryBtn compactBtn e020UpdateBtn" onClick={() => applySupervisorMainFilters()} disabled={syncing}>
                   <RefreshCw size={15} />
                   <span>{syncing ? "Sincronizando..." : "Actualizar resultados"}</span>
                 </button>
@@ -4141,13 +5799,13 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             {supReviewContentFilter !== "fuera" && filteredSupervisorEvidences.length ? (
               <div className="e019BatchBar">
                 <div className="e019BatchInfo"><strong>{selectedSupEvidenceIds.length}</strong> seleccionada(s)</div>
-                <button type="button" className="actionButton compactBtn" onClick={() => selectedSupEvidenceIds.length === filteredSupervisorEvidences.length ? setSelectedSupEvidenceIds([]) : selectAllVisibleSupervisorEvidences()}>{selectedSupEvidenceIds.length === filteredSupervisorEvidences.length ? "Limpiar selección" : "Seleccionar visibles"}</button>
-                <button type="button" className="actionButton compactBtn e013Approve" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar selección"}</span></button>
-                <button type="button" className="actionButton compactBtn e013Comment" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar selección"}</span></button>
-                <button type="button" className="actionButton compactBtn e013Reject" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={14} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar selección"}</span></button>
+                <button type="button" className="actionButton compactBtn" onClick={() => selectedSupEvidenceIds.length === visibleSupervisorQueueItems.length ? setSelectedSupEvidenceIds([]) : selectAllVisibleSupervisorEvidences()}>{selectedSupEvidenceIds.length === visibleSupervisorQueueItems.length ? "Limpiar selección" : "Seleccionar cargadas"}</button>
+                <button type="button" className="actionButton compactBtn e013Approve" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("APROBADA")}><Check size={14} /><span>"Aprobar selección"</span></button>
+                <button type="button" className="actionButton compactBtn e013Comment" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("OBSERVADA")}><Pencil size={14} /><span>"Comentar selección"</span></button>
+                <button type="button" className="actionButton compactBtn e013Reject" disabled={!selectedSupEvidenceIds.length || !!reviewActionInProgress} onClick={() => void runBatchEvidenceReview("RECHAZADA")}><Trash2 size={14} /><span>"Rechazar selección"</span></button>
               </div>
             ) : null}
-            {reviewActionInProgress ? <div className="e019ActionNotice"><RefreshCw className="spin" size={15} /> Aplicando revisión, espera un momento...</div> : null}
+            {reviewActionInProgress ? <div className="e019ActionNotice"><CheckCircle2 size={15} /> Decisión aplicada. Avanzando a la siguiente foto...</div> : null}
 
             {!supervisorReviewVisibleCount ? (
               <div className="emptyBox">No hay registros pendientes con los filtros actuales.</div>
@@ -4155,9 +5813,20 @@ ${evidenceToCancel.fecha_hora_fmt}`);
               <div className="e013QueueLayout">
                 <aside className="e013QueueList" aria-label="Cola de evidencias por revisar">
                   <div ref={supervisorQueueTopRef} className="e018ScrollAnchor" />
-                  {supReviewContentFilter !== "fuera" ? filteredSupervisorEvidences.map((item) => (
+                  {supReviewContentFilter !== "fuera" ? visibleSupervisorQueueItems.map((item) => (
                     <button key={item.evidencia_id} type="button" className={`e013QueueItem ${selectedSupEvidenceId === item.evidencia_id ? "e013QueueItemActive" : ""}`} onClick={() => focusSupervisorEvidence(item)}>
-                      <div className="e013MiniPhoto"><img src={item.url_foto} alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"} /></div>
+                      <div className="e013MiniPhoto">
+                        {getSupervisorThumbSrc(item) ? (
+                          <img
+                            src={getSupervisorThumbSrc(item)}
+                            alt={item.tipo_evidencia || item.tipo_evento || "Evidencia"}
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <span className="e028DeferredThumb">{isSupervisorPhotoLoading(item.evidencia_id) ? "Cargando..." : "Foto histórica"}</span>
+                        )}
+                      </div>
                       <div className="e013QueueText">
                         <div className="e013QueueTitle">{item.tienda_display || item.tienda_nombre || item.tienda_id || "Tienda"} · {normalizeBrandLabel(String(item.marca_nombre || item.marca_id || ""), "Marca")}</div>
                         <div className="e013QueueMeta e018QueueMetaName">{item.promotor_nombre || item.promotor_id || "Promotor"}</div>
@@ -4165,6 +5834,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         <div className="e013QueueMeta">{item.tipo_evidencia || item.tipo_evento || "Evidencia"}{item.fase ? ` · ${item.fase}` : ""}</div>
                         <div className="e013QueueBadges">
                           <span className={`riskBadge ${getSupervisorReviewClass(item)}`}>{getSupervisorReviewLabel(item)}</span>
+                          {item.local_review_pending ? <span className="riskBadge e028Fix2PendingBadge">Guardando</span> : null}
                           <span className={`riskBadge ${severityClass(item.riesgo || "BAJO")}`}>{item.riesgo || "Sin riesgo"}</span>
                         </div>
                       </div>
@@ -4185,6 +5855,15 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       {item.visita_id ? <button type="button" className="actionButton compactBtn" onClick={() => void openVisitExpedient(item.visita_id || "")}><Eye size={14} /><span>Ver visita</span></button> : null}
                     </div>
                   )) : null}
+                  {supReviewContentFilter !== "fuera" && supervisorQueueVisibleCount < filteredSupervisorEvidences.length ? (
+                    <button
+                      type="button"
+                      className="actionButton e028LoadMoreBtn"
+                      onClick={() => setSupervisorQueueVisibleCount((current) => Math.min(filteredSupervisorEvidences.length, current + 24))}
+                    >
+                      Mostrar 24 más · {filteredSupervisorEvidences.length - supervisorQueueVisibleCount} pendientes por cargar
+                    </button>
+                  ) : null}
                   <div ref={supervisorQueueBottomRef} className="e018ScrollAnchor" />
                 </aside>
 
@@ -4205,9 +5884,27 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                         }} disabled={filteredSupervisorEvidences.findIndex((item) => item.evidencia_id === selectedSupervisorEvidence.evidencia_id) >= filteredSupervisorEvidences.length - 1}>Siguiente ›</button>
                       </div>
 
-                      <div className="e013PhotoStage" onDoubleClick={() => openImageViewer(selectedSupervisorEvidence.url_foto || "", selectedSupervisorEvidence.evidencia_id)}>
-                        <img src={selectedSupervisorEvidence.url_foto} alt={selectedSupervisorEvidence.tipo_evidencia || "Evidencia"} onClick={() => handleImageTap(selectedSupervisorEvidence.url_foto || "")} />
-                        <button type="button" className="e013ZoomBtn" onClick={(e) => { e.stopPropagation(); openImageViewer(selectedSupervisorEvidence.url_foto || "", selectedSupervisorEvidence.evidencia_id); }}><Eye size={15} /> Zoom</button>
+                      <div className="e013PhotoStage" onDoubleClick={() => void openSupervisorEvidenceViewer(selectedSupervisorEvidence)}>
+                        {getSupervisorFullSrc(selectedSupervisorEvidence) ? (
+                          <img
+                            src={getSupervisorFullSrc(selectedSupervisorEvidence)}
+                            alt={selectedSupervisorEvidence.tipo_evidencia || "Evidencia"}
+                            decoding="async"
+                            onClick={() => handleImageTap(getSupervisorFullSrc(selectedSupervisorEvidence))}
+                          />
+                        ) : (
+                          <div className="e028PhotoLoading">
+                            <RefreshCw className={isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id) ? "spin" : ""} size={22} />
+                            <strong>{isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id) ? "Cargando fotografía..." : "Fotografía disponible bajo demanda"}</strong>
+                            <span>La cola ya cargó; ahora se descarga únicamente esta evidencia.</span>
+                            {!isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id) ? (
+                              <button type="button" className="actionButton compactBtn" onClick={() => void ensureSupervisorEvidencePhoto(selectedSupervisorEvidence)}>
+                                Cargar fotografía
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+                        <button type="button" className="e013ZoomBtn" disabled={!getSupervisorFullSrc(selectedSupervisorEvidence) && isSupervisorPhotoLoading(selectedSupervisorEvidence.evidencia_id)} onClick={(e) => { e.stopPropagation(); void openSupervisorEvidenceViewer(selectedSupervisorEvidence); }}><Eye size={15} /> Zoom</button>
                       </div>
 
                       <div className="e013ContextLine">
@@ -4230,9 +5927,9 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                       <input className="inputLike e013CommentInput" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Comentario opcional para comentar o rechazar" />
 
                       <div className="e013DecisionDock">
-                        <button className="actionButton e013Approve" disabled={!!reviewActionInProgress} onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>{reviewActionInProgress === "APROBADA" ? "Aprobando..." : "Aprobar"}</span></button>
-                        <button className="actionButton e013Comment" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>{reviewActionInProgress === "OBSERVADA" ? "Comentando..." : "Comentar"}</span></button>
-                        <button className="actionButton e013Reject" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>{reviewActionInProgress === "RECHAZADA" ? "Rechazando..." : "Rechazar"}</span></button>
+                        <button className="actionButton e013Approve" disabled={!!reviewActionInProgress} onClick={() => void quickReviewEvidence(selectedSupervisorEvidence, "APROBADA")}><Check size={16} /><span>"Aprobar"</span></button>
+                        <button className="actionButton e013Comment" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("OBSERVADA"); void quickReviewEvidence(selectedSupervisorEvidence, "OBSERVADA"); }}><Pencil size={16} /><span>"Comentar"</span></button>
+                        <button className="actionButton e013Reject" disabled={!!reviewActionInProgress} onClick={() => { setReviewDecision("RECHAZADA"); void quickReviewEvidence(selectedSupervisorEvidence, "RECHAZADA"); }}><Trash2 size={16} /><span>"Rechazar"</span></button>
                       </div>
                     </>
                   ) : (
@@ -4249,7 +5946,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             ) : null}
           </div>
         ) : null}
-        {role === "promotor" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
+        {role === "promotor" && promotorEvidenceViewFilter !== "fuera" && (promotorModule === "evidencias" || promotorModule === "mis_evidencias") && filteredOperationalGallery.length > 0 ? (
           <div className="card">
             <div className="e018SectionHeader">
               <div className="sectionTitle">Galería de evidencias</div>
@@ -4261,16 +5958,16 @@ ${evidenceToCancel.fecha_hora_fmt}`);
             <div className="galleryScroll" ref={promotorGalleryScrollRef}>
               <div className="galleryGrid">
                 {filteredOperationalGallery.slice(0, 30).map((item) => (
-                  <button type="button" className="galleryCard galleryCardCompact e018GalleryCardBtn" key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)}>
-                    <div className="imageFrame imageFrameCompact"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto); }} /></div>
-                    <div className="galleryBodyCompact">
-                      <div className="galleryTop compactTop">
-                        <div className="galleryTitle">{item.tipo_evidencia || item.tipo_evento}</div>
-                        <span className={`riskBadge ${severityClass(item.riesgo)}`}>{item.riesgo}</span>
+                  <button type="button" className="galleryCard galleryCardCompact e018GalleryCardBtn e024iGalleryEvidenceCard" key={item.evidencia_id} onClick={() => focusPromotorEvidence(item)}>
+                    <div className="imageFrame imageFrameCompact e024iGalleryImageFrame"><img src={item.url_foto} alt={item.tipo_evidencia} className="img" onDoubleClick={(e) => { e.stopPropagation(); openImageViewer(item.url_foto); }} /></div>
+                    <div className="galleryBodyCompact e024iGalleryBody">
+                      <div className="e024iDataRows e024iGalleryRows">
+                        <div><span>Tienda</span><strong>{getStoreDisplayFromItem(item) || "Visita activa"}</strong></div>
+                        <div><span>Marca</span><strong>{normalizeBrandLabel(item.marca_nombre, "Marca")}</strong></div>
+                        <div><span>Tipo</span><strong>{item.tipo_evidencia || item.tipo_evento || "Evidencia"}</strong></div>
+                        <div><span>Fase</span><strong>{formatPhaseLabel(item.fase || "ESTADO_ACTUAL")}</strong></div>
+                        <div><span>Fecha</span><strong>{item.fecha_hora_fmt || formatDateTimeMaybe(item.fecha_hora || "")}</strong></div>
                       </div>
-                      <div className="gallerySub compactMeta">{compactMetaLine({ ...item, marca_nombre: normalizeBrandLabel(item.marca_nombre, "Marca") })}</div>
-                      <div className="galleryDate">{item.fecha_hora_fmt}</div>
-                      <div className="galleryDesc compactDesc">{cleanEvidenceDescription(item.descripcion)}</div>
                     </div>
                   </button>
                 ))}
@@ -4380,12 +6077,25 @@ ${evidenceToCancel.fecha_hora_fmt}`);
 
         {cameraModal.open ? (
           <div className="overlayBackdrop cameraBackdrop" onClick={() => void closeCameraModal()}>
-            <div className="cameraModal cameraModalTight" onClick={(e) => e.stopPropagation()}>
-              <div className="miniTitle cameraTitle">Captura de foto</div>
-              <div className="cameraViewport cameraViewportTight">
-                <video ref={cameraVideoRef} className="cameraVideo cameraVideoTight" playsInline muted autoPlay />
+            <div className={`cameraModal cameraModalTight ${cameraModal.facing === "environment" ? "cameraModalEvidence" : ""}`} onClick={(e) => e.stopPropagation()}>
+              <div className="miniTitle cameraTitle">{cameraModal.target === "entrada" ? "Selfie de entrada" : cameraModal.target === "salida" ? "Foto de salida" : cameraModal.target === "reemplazo" ? "Reemplazar evidencia" : "Foto de evidencia"}</div>
+              <div className={`cameraViewport cameraViewportTight ${cameraModal.facing === "environment" ? "cameraViewportEvidence" : ""}`}>
+                <video ref={cameraVideoRef} className={`cameraVideo cameraVideoTight ${cameraModal.facing === "environment" ? "cameraVideoEvidence" : ""}`} playsInline muted autoPlay />
               </div>
-              <div className="cameraHint">Ajusta la foto antes de capturar.</div>
+              {cameraModal.facing === "environment" ? (
+                <div className="cameraHint e020cCameraHint">Usa el celular en horizontal si necesitas una toma más panorámica. Si tu equipo lo permite, ajusta el zoom antes de capturar.</div>
+              ) : (
+                <div className="cameraHint e020cCameraHint">Cámara frontal para selfie de asistencia.</div>
+              )}
+              {cameraZoom.supported ? (
+                <div className="e020cZoomBox">
+                  <div className="e020cZoomLabel">Zoom</div>
+                  <input className="e020cZoomRange" type="range" min={cameraZoom.min} max={cameraZoom.max} step={cameraZoom.step} value={cameraZoom.value} onChange={(e) => void changeCameraZoom(Number(e.target.value))} />
+                  <div className="e020cZoomValue">{cameraZoom.value.toFixed(1)}x</div>
+                </div>
+              ) : cameraModal.facing === "environment" ? (
+                <div className="cameraHint e020cZoomUnavailable">Zoom no disponible en este equipo o dentro de Telegram.</div>
+              ) : null}
               <div className="cameraActionRow cameraActionRowTight">
                 <button className="cameraCaptureBtn cameraCaptureBtnTight" onClick={() => void captureFromCameraModal()}><Camera size={18} />Capturar</button>
                 <button className="cameraCancelBtn cameraCancelBtnTight" onClick={() => void closeCameraModal()}><Trash2 size={16} />Cancelar</button>
@@ -4452,7 +6162,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(-1); }}
+                  onClick={(e) => { e.stopPropagation(); void moveSupervisorEvidenceViewer(-1); }}
                   disabled={activeViewerSupervisorEvidenceIndex <= 0}
                   style={{ position: "fixed", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex <= 0 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex <= 0 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
                 >
@@ -4460,7 +6170,7 @@ ${evidenceToCancel.fecha_hora_fmt}`);
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); moveSupervisorEvidenceViewer(1); }}
+                  onClick={(e) => { e.stopPropagation(); void moveSupervisorEvidenceViewer(1); }}
                   disabled={activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1}
                   style={{ position: "fixed", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 92, borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1 ? "rgba(15,23,42,0.28)" : "rgba(15,23,42,0.62)", color: "#fff", padding: "12px 14px", cursor: activeViewerSupervisorEvidenceIndex < 0 || activeViewerSupervisorEvidenceIndex >= activeViewerSupervisorEvidenceSequence.length - 1 ? "not-allowed" : "pointer", backdropFilter: "blur(8px)", fontWeight: 700 }}
                 >
@@ -4749,6 +6459,59 @@ input[type=file] { display: none; }
 .cameraCaptureBtnTight, .cameraCancelBtnTight { min-height: 52px; }
 .cameraCaptureBtn { background: #4caf50; color: white; }
 .cameraCancelBtn { background: #eceff1; color: #37474f; }
+
+/* E020C_CAMERA_MEJORADA_PROMOTOR */
+.e020cCaptureGuardStrong {
+  border-width: 2px;
+  background: #fff7ed;
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.18);
+}
+.e020cGuardToast {
+  margin: 10px 0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  border: 2px solid rgba(245, 158, 11, .55);
+  background: #fff7ed;
+  color: #7c2d12;
+  font-weight: 900;
+  line-height: 1.35;
+}
+.cameraModalEvidence {
+  width: min(calc(100vw - 12px), 760px);
+  max-height: calc(100vh - 28px);
+}
+.cameraViewportEvidence {
+  aspect-ratio: 16 / 9;
+  max-height: min(62vh, 520px);
+}
+.cameraVideoEvidence {
+  object-fit: contain;
+  background: #000;
+  max-height: min(62vh, 520px);
+}
+.e020cCameraHint {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.e020cZoomBox {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+.e020cZoomLabel, .e020cZoomValue { font-weight: 900; font-size: 12px; }
+.e020cZoomRange { width: 100%; }
+.e020cZoomUnavailable { color: rgba(255,255,255,0.64); }
+@media (max-width: 760px) {
+  .cameraModalEvidence { width: calc(100vw - 8px); padding: 8px; }
+  .cameraViewportEvidence { max-height: min(58vh, 460px); }
+  .cameraVideoEvidence { max-height: min(58vh, 460px); }
+}
+
 
 	/* E016_SUPERVISOR_FILTROS_COMENTAR_REDESIGN */
 	.e016SupervisorSummaryCard { padding: 16px; }
@@ -5258,6 +7021,18 @@ body {
 .e013QueueItemActive { border-color: rgba(16,185,129,.55); outline: 3px solid rgba(16,185,129,.14); background: #fff; }
 .e013MiniPhoto { width: 64px; height: 64px; border-radius: 16px; overflow: hidden; background: #0f172a; }
 .e013MiniPhoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.e028DeferredThumb { width: 100%; height: 100%; display: grid; place-items: center; padding: 6px; text-align: center; font-size: 10px; line-height: 1.15; color: #607d8b; background: linear-gradient(145deg, rgba(236,239,241,.95), rgba(250,250,250,.98)); }
+.e028PhotoLoading { min-height: 320px; width: 100%; display: grid; place-items: center; align-content: center; gap: 10px; padding: 24px; text-align: center; color: #455a64; background: linear-gradient(145deg, rgba(250,250,250,.98), rgba(236,239,241,.88)); }
+.e028PhotoLoading span { max-width: 420px; font-size: 12px; color: #78909c; }
+.e028LoadMoreBtn { width: calc(100% - 12px); margin: 8px 6px 14px; justify-content: center; border-style: dashed; }
+.e028Fix2SyncBar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 10px 0 14px; padding: 10px 12px; border: 1px solid rgba(16,185,129,.22); border-radius: 14px; background: rgba(236,253,245,.72); }
+.e028Fix2SyncError { border-color: rgba(245,158,11,.35); background: rgba(255,251,235,.82); }
+.e028Fix2SyncState { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.e028Fix2SyncState strong { font-size: 13px; }
+.e028Fix2SyncState span { font-size: 12px; color: #64748b; }
+.e028Fix2SyncActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.e028Fix2PendingBadge { background: rgba(59,130,246,.1); color: #1d4ed8; border-color: rgba(59,130,246,.22); }
+
 .e013QueueText { min-width: 0; display: grid; gap: 2px; }
 .e013QueueTitle { font-size: 13px; font-weight: 950; color: #0f172a; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .e013QueueMeta { font-size: 11px; color: #64748b; font-weight: 750; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
